@@ -99,9 +99,10 @@ NEVER_IN_TASK = re.compile(
 
 
 def never_named(program: str) -> tuple[str, str] | None:
-    """(zh, en) why a program named so is never operated, or None."""
+    """(zh, en) why a program named so is never operated, or None. A full path is judged by its file's name, not
+    by the folders it sits in."""
     from .names import SEVERAL
-    name = " ".join(program.lower().split())
+    name = " ".join((Path(program).name if os.path.isabs(program) else program).lower().split())
     for pattern, zh, en in NEVER:
         if re.search(pattern, name, re.I):
             return zh, en

@@ -47,6 +47,14 @@ def test_a_shortcut_outside_their_folders_opens_only_by_what_start_lists(desktop
                         program=unlisted).kind == "none"
 
 
+def test_a_shortcut_found_by_its_path_is_judged_for_the_never_list_by_its_own_name(tmp_path):
+    from mibo.desk.panel import never_named
+    folder = tmp_path / "mibo-home" / "Desktop"
+    assert never_named(str(folder / "grok bot.lnk")) is None
+    assert never_named(str(folder / "Claude.lnk")) is not None
+    assert never_named("mibo") is not None
+
+
 def test_the_launcher_takes_the_shortcut_resolve_found_by_its_path(desktop, tmp_path, monkeypatch):
     if sys.platform != "win32":
         pytest.skip("the app starts other programs on Windows only")
