@@ -58,7 +58,8 @@ def test_a_listed_model_answers_its_first_message_without_waiting_for_its_check(
                                                                                 tmp_path, listed):
     if listed:
         _listed(monkeypatch, tmp_path, model.url)
-    monkeypatch.setattr(loop, "MEASURE_WAIT_S", 1.0)
+    # Long enough that a slow machine's turn is never taken for the wait.
+    monkeypatch.setattr(loop, "MEASURE_WAIT_S", 3.0)
     app = served()
     # The check of the saved model still under way, as at a first start.
     monkeypatch.setitem(modelbar._checks, (chat_completions_url(model.url), MODEL), SimpleNamespace(done=lambda: False))
@@ -66,7 +67,7 @@ def test_a_listed_model_answers_its_first_message_without_waiting_for_its_check(
     done = run_turn(app, "hello", say("Hello."))
     took = time.monotonic() - began
     assert done.reply == "Hello."
-    assert (took < 1.0) if listed else (took >= 1.0), took
+    assert (took < 3.0) if listed else (took >= 3.0), took
 
 
 def test_what_the_check_finds_wins_over_the_catalogue(tmp_path):

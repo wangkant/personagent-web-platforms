@@ -4,6 +4,7 @@ leaves nothing behind."""
 from __future__ import annotations
 
 import json
+import time
 
 import pytest
 
@@ -47,6 +48,10 @@ def test_stop_ends_the_turn_and_gives_the_words_back_to_the_box(app, model, brow
     stop.click()
     page.page.locator(".chat-send:not(.stopping)").wait_for()
     assert box.input_value() == "Plan a week of dinners"
+    # The request to the service is closed just after the page has its box back.
+    waited = time.monotonic() + 5
+    while app.get("/api/chat/doing").json()["busy"] and time.monotonic() < waited:
+        time.sleep(0.05)
     assert app.get("/api/chat/doing").json()["busy"] is False
     (last,) = [m for m in app.get("/api/chat/history").json()["messages"] if m["role"] == "user"]
     assert last["text"] == "Plan a week of dinners" and last.get("failed") == "stopped"

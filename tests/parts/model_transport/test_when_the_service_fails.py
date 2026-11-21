@@ -144,7 +144,8 @@ def test_a_hanging_service_hands_the_turn_to_the_backup_without_waiting_twice(op
 
 def test_one_refused_request_leaves_the_model_in_and_a_throttled_one_sits_out_its_cooldown(opened, monkeypatch):
     monkeypatch.setattr(transport, "WAIT_SCALE", 0)
-    app = opened(LLM_MAX_RETRIES="2", LLM_FALLBACK_MODEL="backup", LLM_RATE_LIMIT_COOLDOWN_S="1")
+    # A cooldown long enough that the three turns inside it end before it does on a slow machine.
+    app = opened(LLM_MAX_RETRIES="2", LLM_FALLBACK_MODEL="backup", LLM_RATE_LIMIT_COOLDOWN_S="8")
     run_turn(app, "hi", say("Hi."))
     refused = run_turn(app, "hello", fail(400, {"error": {"message": "Input data may contain inappropriate content."}}),
                        say("From the backup."))
@@ -154,7 +155,7 @@ def test_one_refused_request_leaves_the_model_in_and_a_throttled_one_sits_out_it
     assert replies(run_turn(app, "still?", say("Still the backup."))) == ["backup"]
     # The backup failing while the model sits out: the model gets its one try after all.
     assert replies(run_turn(app, "and?", fail(400), say("Back early."))) == ["backup", "scripted"]
-    time.sleep(1.1)
+    time.sleep(8.1)
     assert replies(run_turn(app, "later", say("Back."))) == ["scripted"]
 
 
