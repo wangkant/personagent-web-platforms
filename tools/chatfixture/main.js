@@ -34,10 +34,16 @@ app.whenReady().then(() => {
   });
   win.on('page-title-updated', (event) => event.preventDefault());
   win.loadFile(path.join(__dirname, 'index.html'), { query: { variant, chat } });
-  win.once('ready-to-show', () => {
+  // Shown once the page's first paint is done (ready-to-show) and its pictures are decoded (index.html sends
+  // 'painted'), whichever comes last: ready-to-show alone can come before an image is drawn.
+  let waiting = 2;
+  const shown = () => {
+    if (--waiting) return;
     if (corner) win.showInactive(); else win.show();
     process.stdout.write(JSON.stringify({ ready: true, pid: process.pid }) + '\n');
-  });
+  };
+  win.once('ready-to-show', shown);
+  ipcMain.once('painted', shown);
   ipcMain.on('sent', (_event, chat, text) => fs.appendFileSync(log, JSON.stringify({ chat, text }) + '\n'));
 });
 app.on('window-all-closed', () => app.quit());

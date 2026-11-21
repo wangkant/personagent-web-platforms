@@ -993,8 +993,8 @@ class Bench:
         if any(not p.lower().startswith(ours) and len(p.rstrip("\\")) > 2 for p in paths):
             return False
         # Any .exe named counts as a program, except on a card that only deletes files (E21's installers); the
-        # command card's own label (要运行的命令) says nothing of what the command does.
-        said = re.sub(r"要运行的命令|The command", "", flat)
+        # command card's own label (要运行的命令) says nothing of what the command does, nor do the paths it names.
+        said = re.sub(r"要运行的命令|The command|[A-Za-z]:\\[^\s'\"]*", "", flat)
         deletes = re.search(r"回收站|删除|recycle|delete", said, re.I) and not re.search(
             r"运行|启动|打开|run|launch|open", said, re.I)
         programs = [] if deletes else re.findall(r"[\w.-]+\.exe\b", said, re.I)
@@ -1115,6 +1115,14 @@ class Bench:
         fixture = self.places / "marks" / "lumen.jsonl"
         log = [(float(line.split(" ", 1)[0]), line.split(" ", 1)[1]) for line in lines if " " in line]
         pane = self.pane()
+        # A page the reply just opened is given the seconds a person waits for it, and every address seen is kept.
+        self.addresses = [pane.address() if pane is not None else ""]
+        for _ in range(10):
+            if pane is None or self.addresses[-1] not in ("", "about:blank"):
+                break
+            time.sleep(1)
+            self.addresses.append(pane.address())
+        self.d.log(f"   pane addresses after the reply: {self.addresses[:2] + self.addresses[-1:]}")
         state = self.site_get("/api/state")
         tiny = self.places / "marks" / "tiny.jsonl"
         outcome = SimpleNamespace(
@@ -1261,9 +1269,12 @@ def stand_ins(places: Path, bench_box: dict, windows: bool = True) -> None:
     notepad, chat = str(places / "bin" / "notepad.exe"), str(places / "bin" / "chat.exe")
 
     def apps(fresh: bool = False):
-        # Start's list is this run's programs and Calculator alone: no program of the person's can be started.
-        calculator = [a for a in listed(fresh) if a.family.startswith("microsoft.windowscalculator")]
-        return calculator + [names.App("记事本", notepad, notepad), names.App("聊天", chat, chat)]
+        # Start's list is this run's programs, the stand-in Desktop's shortcuts and Calculator alone: no program of
+        # the person's can be started.
+        real = listed(fresh)
+        calculator = [a for a in real if a.family.startswith("microsoft.windowscalculator")]
+        desktop = [a for a in real if a.file and a.file.lower().startswith(str(places).lower())]
+        return calculator + desktop + [names.App("记事本", notepad, notepad), names.App("聊天", chat, chat)]
 
     def open_app(aumid: str) -> bool:
         if aumid == notepad:

@@ -93,6 +93,10 @@
     }
   });
   pick(query.get('chat') || current);
+  // The window shows once its pictures are decoded (main.js waits for this and for the first paint), so a read
+  // never meets a window whose avatar is not drawn yet.
+  Promise.all([...document.images].map((image) => image.decode().catch(() => {})))
+    .then(() => ipcRenderer.send('painted'));
 </script>
 </body>
 </html>

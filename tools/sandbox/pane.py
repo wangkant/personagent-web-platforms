@@ -6,7 +6,10 @@ private tab (panetabs.py), and the sign-in wait card with its 前往登录 and t
 profile above an endless feed read for its numbers in one call with nothing scrolled (panereading.py). Their
 pictures and results.json are kept under <out>/<script>.
 
-    python tools/sandbox/pane.py --out <folder>
+    python tools/sandbox/pane.py --out <folder> [--ports 59400] [--only panecard,panereading]
+
+The scripts that run take ports one after another from --ports on (fifteen for all six), so a run keeps to the
+range it is given; --only runs some of them. The app's own page takes PAGE_PORT from the environment.
 
 Windows only: the built-in browser is WebView2 inside the app window (README: "Program control and the built-in
 browser are Windows-only"); on Linux and macOS the suite says so.
@@ -18,15 +21,18 @@ import sys
 
 from _suite import Suite, run_tool, scratch_home, scrub_env
 
-# feature, script, its arguments after the home, and the stand-in model's port the home's settings name.
-SCRIPTS = [
-    ("open and operate a page", "panedock.py", ["--site-port", "59409", "--model-port", "59408"], 59408),
-    ("compact bar", "panebar.py", ["--site-port", "59751", "--model-port", "59752"], 59752),
-    ("tabs", "panetabs.py", ["--site-port", "59647", "--model-port", "59649"], 59649),
-    ("sign-in wait card", "signincheck.py", ["--ports", "59740"], 59744),
-    ("a card pressed over the page", "panecard.py", ["--site-port", "59411", "--model-port", "59410"], 59410),
-    ("a page read in one call", "panereading.py", ["--site-port", "59413", "--model-port", "59412"], 59412),
-]
+# feature, script, and how many ports it takes from the run's range: a site and a stand-in model for most, five for
+# the sign-in check (its page, service, site, provider and model).
+SCRIPTS = [("open and operate a page", "panedock.py", 2), ("compact bar", "panebar.py", 2), ("tabs", "panetabs.py", 2),
+           ("sign-in wait card", "signincheck.py", 5), ("a card pressed over the page", "panecard.py", 2),
+           ("a page read in one call", "panereading.py", 2)]
+
+
+def ports(script: str, base: int) -> tuple[list[str], int]:
+    """A script's port arguments from `base` on, and the stand-in model's port the home's settings name."""
+    if script == "signincheck.py":
+        return ["--ports", str(base)], base + 4
+    return ["--site-port", str(base), "--model-port", str(base + 1)], base + 1
 
 
 def judge(suite: Suite, feature: str, script: str, r: dict) -> None:
@@ -85,16 +91,26 @@ def judge(suite: Suite, feature: str, script: str, r: dict) -> None:
 
 
 def main() -> int:
-    suite = Suite("pane", __doc__.split("\n\n")[0])
+    def extra(parser) -> None:
+        parser.add_argument("--ports", type=int, default=59400, help="the first of the fifteen ports the run takes")
+        parser.add_argument("--only", default="", help="the scripts to run, by name (panecard,panereading)")
+    suite = Suite("pane", __doc__.split("\n\n")[0], extra=extra)
     if sys.platform != "win32":
         for feature, *_ in SCRIPTS:
             suite.not_built(feature, "the built-in browser is Windows-only (WebView2 in the app window)")
         return suite.finish()
     scrub_env()
-    for feature, script, extra, model_port in SCRIPTS:
+    wanted = {f"{name}.py" for name in suite.args.only.split(",") if name}
+    base = suite.args.ports
+    for feature, script, taken in SCRIPTS:
+        if wanted and script not in wanted:
+            continue
+        extra_args, model_port = ports(script, base)
+        base += taken
         home = scratch_home(f"http://127.0.0.1:{model_port}/v1", lang="zh")
         out = suite.out / script.removesuffix(".py")
-        run_tool(suite, feature, [f"tools/{script}", str(home), "--out", str(out), *extra], script.removesuffix(".py"))
+        run_tool(suite, feature, [f"tools/{script}", str(home), "--out", str(out), *extra_args],
+                 script.removesuffix(".py"))
         numbers = out / "results.json"
         judge(suite, feature, script, json.loads(numbers.read_text(encoding="utf-8")) if numbers.is_file() else {})
     return suite.finish()

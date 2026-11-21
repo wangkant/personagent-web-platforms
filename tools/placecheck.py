@@ -89,7 +89,8 @@ def walk(d, results: dict) -> None:
     tabs = pane.tabs()
     now_front = next((t for t in tabs if t["front"]), {})
     reading = (pane._reading or {}).get("url", "")
-    results["aside"] = {"tabs": tabs, "front": now_front.get("id"), "address": pane.address(), "reading": reading}
+    results["aside"] = {"tabs": tabs, "front": now_front.get("id"), "address": pane.address(), "reading": reading,
+                        "addresses": [pane.address() for _ in range(3)]}
     d.check("the tab in front is the same tab", front and now_front.get("id") == front["id"], results["aside"])
     d.check("the page in front and its reading did not move", pane.address().endswith("/front.html")
             and reading.endswith("/front.html"), results["aside"])
@@ -109,7 +110,12 @@ def walk(d, results: dict) -> None:
     spread = max(ImageStat.Stat(image.convert("L")).stddev)
     results["look"] = {"rows": len(rows), "first": rows[:2], "picture": list(image.size), "spread": round(spread, 1)}
     d.check("the drawn list is read with refs", len(rows) == 20 and rows[0].lstrip("*").startswith("["), results["look"])
-    d.check("the picture shows the page", image.size[0] >= 1200 and image.size[1] >= 700 and spread > 10, results["look"])
+    # The picture is in the page's own (CSS) pixels: on a scaled display the 1280x800 view is 1280/ratio wide.
+    ratio = float((pane.cdp("Runtime.evaluate", {"expression": "devicePixelRatio", "returnByValue": True},
+                            tab=aside).get("result") or {}).get("value") or 1)
+    results["look"]["ratio"] = ratio
+    d.check("the picture shows the page", image.size[0] * ratio >= 1200 and image.size[1] * ratio >= 700
+            and spread > 10, results["look"])
     d.check("the front tab is still in front after the look", next(t for t in pane.tabs() if t["front"])["id"]
             == front["id"])
 
