@@ -9,11 +9,10 @@ from pathlib import Path
 
 import httpx
 import pytest
-from dotenv import dotenv_values
 from fastapi.testclient import TestClient
 
 from harness.app import TOKEN
-from mibo import welcome
+from mibo import settingsfile, welcome
 
 # A setting, form field or variable that holds a key by its name.
 KEY_NAME = re.compile(r"(?i)(api_?key|token|secret|password)$")
@@ -47,7 +46,7 @@ def _keys_in(value, name: str = "") -> set[str]:
 @pytest.fixture(autouse=True)
 def _no_answer_carries_a_key(monkeypatch, tmp_path):
     """Every answer the page gives is kept, and at the end of the test none may hold a key the test put in
-    reach: one posted in a form, one saved in a .env under the test's folders, or one in the environment."""
+    reach: one posted in a form, one saved in a home under the test's folders, or one in the environment."""
     answers: list[tuple[httpx.Request, httpx.Response]] = []
     real = httpx.Client.send
 
@@ -64,9 +63,9 @@ def _no_answer_carries_a_key(monkeypatch, tmp_path):
     for request, _ in answers:
         if request.headers.get("content-type", "").startswith("application/json") and request.content:
             keys |= _keys_in(json.loads(request.content))
-    for folder in {tmp_path, Path(os.environ["AGENT_HOME"])}:
-        for env in folder.rglob(".env"):
-            keys |= {value for name, value in dotenv_values(env).items() if value and KEY_NAME.search(name)}
+    homes = {Path(os.environ["AGENT_HOME"])} | {found.parent for found in tmp_path.rglob(settingsfile.FILE)}
+    for home in homes:
+        keys |= {value for name, value in settingsfile.values(home).items() if KEY_NAME.search(name)}
     keys = {key.strip() for key in keys if len(key.strip()) >= SHORTEST_KEY}
     leaked = sorted({f"{request.method} {request.url.path}" for request, response in answers
                      for key in keys if key.encode() in response.read()})

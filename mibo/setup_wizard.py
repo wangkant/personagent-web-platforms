@@ -1,4 +1,4 @@
-"""A home's setup: model providers, the .env file, the character's persona and
+"""A home's setup: model providers, the home folder, the character's persona and
 picture, a key probe, and how this install spells its own command."""
 from __future__ import annotations
 
@@ -21,12 +21,11 @@ from mibo.endpoints import chat_completions_url as completions_url
 from mibo import home as homes
 from mibo import langs
 from mibo.prompts import render_persona_template
-from mibo.storage import PRIVATE_FILE_MODE, atomic_write_text, dated_copy
+from mibo.storage import atomic_write_text, dated_copy
+from mibo.storage import replace as _replace
 
 LANGS = langs.CODES
 DEFAULT_NAMES = langs.DEFAULT_NAMES
-
-SECRET_FILE_MODE = PRIVATE_FILE_MODE
 
 
 # ---------------------------------------------------------------------------
@@ -178,101 +177,8 @@ def mask_secret(value: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# .env
+# The home
 # ---------------------------------------------------------------------------
-
-def env_literal(value) -> str:
-    """`value` as one .env right-hand side that dotenv reads back unchanged.
-
-    Single quotes keep it whole: a '#' after any whitespace would start a
-    comment, and a line break of any kind (U+2028 included) must not let a
-    value write a line of its own. dotenv expands ${VAR} even inside quotes,
-    so callers taking values from outside refuse it."""
-    text = str(value)
-    if (text != text.strip() or text.startswith("#")
-            or re.search(r"\s#", text)
-            or any(ch in "\"'" or (ch.isspace() and ch != " ") or not ch.isprintable() and ch != " "
-                   for ch in text)):
-        return "'" + text.replace("\\", "\\\\").replace("'", "\\'") + "'"
-    return text
-
-
-def set_env_values(env_text: str, values: dict) -> str:
-    """`env_text` with every uncommented KEY= line of a key in `values`
-    rewritten (dotenv reads the last one, so all of them); keys not present
-    are appended. Comments and order are kept."""
-    # Lines as dotenv splits them; str.splitlines also breaks at U+2028 and
-    # friends, which would turn part of a quoted value into a line of its own.
-    lines = re.split(r"\r\n|\n|\r", env_text) if env_text else []
-    if lines and lines[-1] == "":
-        lines.pop()
-    found = set()
-    for i, line in enumerate(lines):
-        m = re.match(r"^([A-Z][A-Z0-9_]*)=", line)
-        if m and m.group(1) in values:
-            key = m.group(1)
-            lines[i] = f"{key}={env_literal(values[key])}"
-            found.add(key)
-    for key, value in values.items():
-        if key not in found:
-            lines.append(f"{key}={env_literal(value)}")
-    out = "\n".join(lines)
-    if env_text.endswith("\n") and not out.endswith("\n"):
-        out += "\n"
-    return out
-
-
-def _replace(source, target) -> None:
-    # Imported here: this module is read before any home is chosen.
-    from mibo.storage import replace
-    replace(source, target)
-
-
-def write_env(env_path: Path, values: dict) -> None:
-    """Merge `values` into .env through a 0600 temp file and an atomic replace,
-    so an interrupted run never leaves a truncated or world-readable .env.
-    One writer at a time, across processes (the page, the terminal, the
-    service), each with a temporary file of its own, so no write is lost."""
-    import tempfile
-
-    from mibo.storage import FileLock
-
-    if not env_path.exists():
-        # The first .env makes its folder a home, as in copy_env_template.
-        secure_home(env_path.parent)
-    with FileLock(env_path.with_name("." + env_path.name + ".lock"), timeout=10):
-        text = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
-        updated = set_env_values(text, values)
-        # An earlier release's fixed temporary name, left by an interrupted run.
-        env_path.with_name(env_path.name + ".tmp").unlink(missing_ok=True)
-        fd, name = tempfile.mkstemp(dir=env_path.parent, prefix="." + env_path.name + ".", suffix=".tmp")
-        tmp = Path(name)
-        try:
-            os.chmod(tmp, SECRET_FILE_MODE)
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                handle.write(updated)
-            # Keep a stricter mode the operator chose, never a wider one.
-            if env_path.exists():
-                os.chmod(tmp, env_path.stat().st_mode & SECRET_FILE_MODE)
-            _replace(tmp, env_path)
-        except BaseException:
-            tmp.unlink(missing_ok=True)
-            raise
-
-
-def secure_env_file(env_path: Path) -> None:
-    """Narrow .env to its user (0600); a copy of the template starts at 0644."""
-    os.chmod(env_path, SECRET_FILE_MODE)
-
-
-def env_get(env_path: Path, key: str) -> str:
-    """The value of `key` in .env exactly as the agent loads it ('' if blank or missing)."""
-    if not env_path.exists():
-        return ""
-    from dotenv import dotenv_values
-
-    return str(dotenv_values(env_path).get(key) or "").strip()
-
 
 def secure_home(home: Path) -> None:
     """Make `home` if missing and open it, and all it holds, to its user alone.
@@ -312,21 +218,6 @@ def _acl_protected(path: Path) -> bool:
     advapi.GetSecurityDescriptorControl(descriptor, ctypes.byref(control), ctypes.byref(revision))
     ctypes.WinDLL("kernel32").LocalFree(descriptor)
     return bool(control.value & 0x1000)  # SE_DACL_PROTECTED
-
-
-def copy_env_template(home: Path) -> Path:
-    """<home>/.env, copied from the shipped template when missing, narrowed to 0600.
-    The first .env makes the folder a home, so the home is narrowed then too."""
-    env_path = home / ".env"
-    if not env_path.exists():
-        secure_home(home)
-        template = homes.resource(".env.example")
-        if template.is_file():
-            shutil.copyfile(template, env_path)
-        else:
-            env_path.write_text("", encoding="utf-8")
-    secure_env_file(env_path)
-    return env_path
 
 
 def _read_json(path: Path) -> dict:
@@ -454,9 +345,9 @@ def write_own_avatar(home: Path, data: bytes) -> Path:
     return target
 
 
-def kept_avatar(env_path: Path, key: str) -> str:
+def kept_avatar(home: Path, values: dict, key: str) -> str:
     """PERSONA_AVATAR after writing character `key`: a picture the person chose stays."""
-    if env_get(env_path, "PERSONA_AVATAR") == OWN_AVATAR and own_avatar(env_path.parent):
+    if values.get("PERSONA_AVATAR", "").strip() == OWN_AVATAR and own_avatar(home):
         return OWN_AVATAR
     return avatar_for(key)
 

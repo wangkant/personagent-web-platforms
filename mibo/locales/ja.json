@@ -985,6 +985,20 @@
     "check": "更新を確認",
     "checking": "確認中…",
     "dataTitle": "バックアップと復元",
+    "keptTitle": "設定とキー",
+    "keptFile": "設定は {path} に保存されており、テキストエディターで編集できます。",
+    "keptStore": "モデル、検索、ツールのキーは{store}に保存され、ファイルには書き込まれません。",
+    "keptPlain": "このシステムには資格情報ストアがないため、キーは {path} に保存されます。読み取れるのは現在のユーザーのみです。",
+    "keptUnknown": "設定ファイルの次の名前は設定項目ではないため、効果はありません：{names}",
+    "keptInvalid": "次の設定は値の型が合わないため、既定値を使用しています：{names}",
+    "stores": {
+      "Windows": " Windows 資格情報マネージャー",
+      "macOS": " macOS キーチェーン",
+      "SecretService": "システムのキーリング",
+      "libsecret": "システムのキーリング",
+      "kwallet": " KWallet ",
+      "other": "システムの資格情報ストア"
+    },
     "placeTitle": "バックアップの保存先",
     "places": {
       "desktop": "デスクトップ",
@@ -2127,11 +2141,11 @@
   "cli": {
     "about": "Mibo：デスクトップに常駐し、あなたと会話し、あなたのことを覚え、代わりに操作するキャラクターです。",
     "noCommand": "コマンドを付けずに実行するとアプリが開きます。",
-    "home": ".env、persona.txt、runtime/ を置くフォルダー（既定：AGENT_HOME、Mibo をインストールしたこのフォルダー、または ~/mibo）",
+    "home": "settings.json、persona.txt、runtime/ を置くフォルダー（既定：AGENT_HOME、Mibo をインストールしたこのフォルダー、または ~/mibo）",
     "command": "以下のコマンドのいずれか",
     "commands": "コマンド:",
     "homeMissing": "Mibo：--home にはフォルダーが必要です",
-    "alsoHome": "\n--home DIR も指定できます（.env、persona.txt、runtime/ を置くフォルダー）。",
+    "alsoHome": "\n--home DIR も指定できます（settings.json、persona.txt、runtime/ を置くフォルダー）。",
     "broken": "Mibo を起動できませんでした。詳細は {log} にあります。",
     "argparse": {
       "usage": "使い方: ",

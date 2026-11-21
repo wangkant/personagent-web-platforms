@@ -5,7 +5,7 @@ API, the model calls counted by everyday.py's pass-through, and a few plain chec
     python tools/chatbench.py table <folder>          the table again from a run's saved results
 
 A turns file has one {"label", "chat", "text"} a line; "main" is the main chat, any other name a new plain chat.
-The home's .env is used as it is (its LLM_BASE_URL is pointed at the pass-through for the run and put back)."""
+The home's settings are used as they are (LLM_BASE_URL is pointed at the pass-through for the run and put back)."""
 from __future__ import annotations
 
 import argparse
@@ -118,24 +118,23 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     home, out = Path(args.home).resolve(), Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    from dotenv import dotenv_values
-    env_file = home / ".env"
+    from mibo import settingsfile
+    saved = settingsfile.values(home, keys=False)
+    env_file = settingsfile.path(home)
     kept = env_file.read_text(encoding="utf-8")
-    upstream = dotenv_values(env_file).get("LLM_BASE_URL") or ""
+    upstream = saved.get("LLM_BASE_URL") or ""
     if upstream.startswith(f"http://127.0.0.1:{args.meter_port}/"):
         raise SystemExit("the home's LLM_BASE_URL still points at the pass-through of a run that was stopped; put it back")
     meter = Meter(upstream, out / "model.jsonl", args.budget, (args.price_in, args.price_in, args.price_out))
     meter.serve(args.meter_port)
-    lines = [line for line in kept.splitlines() if line.partition("=")[0].strip() != "LLM_BASE_URL"]
-    env_file.write_text("\n".join(lines + [f"LLM_BASE_URL=http://127.0.0.1:{args.meter_port}/v1"]) + "\n",
-                        encoding="utf-8")
+    settingsfile.write(home, {"LLM_BASE_URL": f"http://127.0.0.1:{args.meter_port}/v1"})
     os.environ["AGENT_HOME"] = str(home)
     no_windows()
     (home / "runtime" / "desktop" / "welcome.json").unlink(missing_ok=True)
     threading.Thread(target=walk, args=(home, _turns(Path(args.turns)), meter, out), daemon=True).start()
     try:
         from mibo import welcome
-        port = dotenv_values(env_file).get("PAGE_PORT")
+        port = saved.get("PAGE_PORT")
         welcome.main(["--no-browser", *(["--port", port] if port else [])])
     finally:
         env_file.write_text(kept, encoding="utf-8")

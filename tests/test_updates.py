@@ -8,7 +8,7 @@ import time
 import httpx
 import pytest
 
-from mibo import __version__, updates, welcome
+from mibo import __version__, settingsfile, updates, welcome
 
 
 def _no_network(url, **kw):
@@ -63,7 +63,7 @@ def test_a_check_remembers_the_answer_and_a_failure_keeps_the_last_one(tmp_path,
     assert updates.check(tmp_path) == "99.0.0"
     url, kw = asked[0]
     assert url == updates.LATEST_URL
-    # Only the version travels: no key, no home, nothing from .env.
+    # Only the version travels: no key, no home, nothing from the settings.
     assert kw["headers"] == {"User-Agent": f"mibo/{__version__}"}
     found = updates.notice(tmp_path)
     assert found["version"] == "99.0.0"
@@ -85,11 +85,11 @@ def test_no_notice_when_current_or_switched_off(tmp_path, monkeypatch):
     _remember(tmp_path, __version__)
     assert updates.notice(tmp_path) is None
     _remember(tmp_path, "99.0.0")
-    (tmp_path / ".env").write_text("UPDATE_CHECK_ENABLED=false\n", encoding="utf-8")
+    settingsfile.write(tmp_path, {"UPDATE_CHECK_ENABLED": "false"})
     monkeypatch.delenv("UPDATE_CHECK_ENABLED")
     assert not updates.enabled(tmp_path)
     assert updates.notice(tmp_path) is None
-    # The shell wins over .env.
+    # The environment wins over the settings.
     monkeypatch.setenv("UPDATE_CHECK_ENABLED", "true")
     assert updates.notice(tmp_path)["version"] == "99.0.0"
 

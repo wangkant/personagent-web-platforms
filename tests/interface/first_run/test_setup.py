@@ -8,6 +8,7 @@ from harness.app import TOKEN
 from harness.model import fail, say
 from mibo import setup_wizard as sw
 from mibo import welcome
+from mibo import settingsfile
 
 HEADERS = {welcome.TOKEN_HEADER: TOKEN}
 
@@ -32,7 +33,7 @@ def test_one_key_is_enough_and_state_does_not_leak_it(client, workspace):
 
 
 def test_invalid_key_does_not_replace_a_working_configuration(client, workspace, monkeypatch):
-    sw.write_env(workspace.env, {"LLM_API_KEY": "old-key", "LLM_BASE_URL": "https://api.deepseek.com"})
+    settingsfile.write(workspace.home, {"LLM_API_KEY": "old-key", "LLM_BASE_URL": "https://api.deepseek.com"})
     monkeypatch.setattr(sw, "probe_key", lambda *a, **kw: sw.Probe("url", 401, "echoed-sensitive-key"))
     response = client.post("/api/config", headers=HEADERS, json={"apiKey": "new-key"})
     assert response.status_code == 400 and response.json()["error"] == "key_rejected"
@@ -41,7 +42,7 @@ def test_invalid_key_does_not_replace_a_working_configuration(client, workspace,
 
 
 def test_custom_persona_and_unrelated_settings_survive_editing(client, workspace):
-    sw.write_env(workspace.env, {"LLM_API_KEY": "old-key", "LLM_BASE_URL": "https://api.deepseek.com",
+    settingsfile.write(workspace.home, {"LLM_API_KEY": "old-key", "LLM_BASE_URL": "https://api.deepseek.com",
                                  "LLM_JUDGE_MODEL": "judge-small", "PERSONA_NAME": "Mira"})
     persona = workspace.home / "persona.txt"
     persona.write_text("My own character", encoding="utf-8")
@@ -53,7 +54,7 @@ def test_custom_persona_and_unrelated_settings_survive_editing(client, workspace
 
 
 def test_a_chosen_personality_keeps_a_copy_of_the_persona_someone_wrote(client, workspace):
-    sw.write_env(workspace.env, {"LLM_API_KEY": "old-key", "LLM_BASE_URL": "https://api.deepseek.com",
+    settingsfile.write(workspace.home, {"LLM_API_KEY": "old-key", "LLM_BASE_URL": "https://api.deepseek.com",
                                  "PERSONA_NAME": "Mira"})
     persona = workspace.home / "persona.txt"
     persona.write_text("My own character", encoding="utf-8")
@@ -97,7 +98,7 @@ def test_unknown_provider_or_insecure_remote_url_is_rejected(client, workspace):
 
 
 def test_changing_the_api_endpoint_never_sends_the_saved_key(client, workspace, monkeypatch):
-    sw.write_env(workspace.env, {"LLM_API_KEY": "old-key", "LLM_BASE_URL": "https://api.deepseek.com"})
+    settingsfile.write(workspace.home, {"LLM_API_KEY": "old-key", "LLM_BASE_URL": "https://api.deepseek.com"})
     monkeypatch.setattr(sw, "probe_key", lambda *a, **kw: pytest.fail("must not send a saved key to a new endpoint"))
     response = client.post("/api/config", headers=HEADERS, json={"baseUrl": "https://new.example/v1"})
     # Said as such: the saved key stays with the address it was saved for.
@@ -116,5 +117,5 @@ def test_the_state_says_when_the_character_cannot_reach_its_model(app):
 
 
 def test_the_state_carries_the_admins_name(client, workspace):
-    sw.write_env(workspace.env, {"ADMIN_NAME": "Kai"})
+    settingsfile.write(workspace.home, {"ADMIN_NAME": "Kai"})
     assert client.get("/api/state", headers=HEADERS).json()["adminName"] == "Kai"

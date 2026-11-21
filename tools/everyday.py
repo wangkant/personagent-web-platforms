@@ -17,7 +17,7 @@ script that writes a marker and three screenshots, Downloads with three pdfs of 
 Pictures, Documents, Music, Videos), builds the chat program (everyday/chat.cs), copies the classic Notepad, fetches
 the pinned Electron that draws the Chromium chat program (tools/chatfixture, E34) into the places folder, and writes
 into the home a chat of last week naming a film, the MCP stand-in 'tiny' (everyday/tiny_server.py) and a few
-unrelated finds (tools/feed_seed.py). The home must be a scratch folder with its .env and model set.
+unrelated finds (tools/feed_seed.py). The home must be a scratch folder with its settings and model set.
 
 `run` opens the app window off screen on that home, as tools/opbench.py does, and sends each request in a fresh chat,
 standing in for the person: it opens the page a request is typed beside (the pages under tools/opsite/e), answers
@@ -791,8 +791,9 @@ def headless(home: Path, steps, out: Path) -> None:
     page in headless Edge with a profile under `out`; `steps(driver)` once the chat is up, then the app's own exit."""
     import webbrowser
 
-    from dotenv import dotenv_values
     from playwright.sync_api import sync_playwright
+
+    from mibo import settingsfile
     os.environ["AGENT_HOME"] = str(home)
     driver = Headless(out)
     webbrowser.open = lambda url, *a, **k: driver.links.append(str(url)) or True
@@ -824,7 +825,7 @@ def headless(home: Path, steps, out: Path) -> None:
 
     threading.Thread(target=walk, daemon=True).start()
     from mibo import welcome
-    port = dotenv_values(home / ".env").get("PAGE_PORT")
+    port = settingsfile.values(home, keys=False).get("PAGE_PORT")
     welcome.main(["--no-browser", *(["--port", port] if port else [])])
 
 
@@ -1270,22 +1271,19 @@ def run(args) -> int:
     out.mkdir(parents=True, exist_ok=True)
     sys.path.insert(0, str(HERE))
     sys.path.insert(0, str(HERE.parent))
-    from dotenv import dotenv_values
-
+    from mibo import settingsfile
     from mibo.shell import grants
     real = [grants.known_folder(guid) for guid in KNOWN]
-    env_file = home / ".env"
+    upstream = settingsfile.values(home, keys=False).get("LLM_BASE_URL") or ""
+    env_file = settingsfile.path(home)
     kept = env_file.read_text(encoding="utf-8")
-    upstream = dotenv_values(env_file).get("LLM_BASE_URL") or ""
     if upstream.startswith(f"http://127.0.0.1:{args.site_port + 1}/"):
         raise SystemExit("the home's LLM_BASE_URL still points at the pass-through of a run that was stopped; put it back")
     # Another model's cached input is counted at its full input price: an upper bound.
     price = (args.price_in, PRICE[1] if args.price_in == PRICE[0] else args.price_in, args.price_out)
     meter = Meter(upstream, out / "model.jsonl", args.budget, price)
     meter.serve(args.site_port + 1)
-    lines = [line for line in kept.splitlines() if line.partition("=")[0].strip() != "LLM_BASE_URL"]
-    env_file.write_text("\n".join(lines + [f"LLM_BASE_URL=http://127.0.0.1:{args.site_port + 1}/v1"]) + "\n",
-                        encoding="utf-8")
+    settingsfile.write(home, {"LLM_BASE_URL": f"http://127.0.0.1:{args.site_port + 1}/v1"})
     site = f"http://127.0.0.1:{args.site_port}"
     server = subprocess.Popen([sys.executable, str(SITE_DIR / "serve.py"), str(args.site_port), str(out / "site.log")])
     wanted = [r for r in REQUESTS if (not args.only or r["id"] in args.only.split(","))

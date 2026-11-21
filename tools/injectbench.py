@@ -56,9 +56,10 @@ def main(argv: list[str]) -> int:
     work = Path(args.work or tempfile.mkdtemp(prefix="mibo-inject-")).resolve()
     home, places, out = work / "home", work / "places", work / "out"
     home.mkdir(parents=True, exist_ok=True)
-    (home / ".env").write_text("\n".join([
-        "UPDATE_CHECK_ENABLED=false", "ROAM_ENABLED=false", "AGENT_LANG=zh", "PERSONA_NAME=Mibo",
-        *(f"{k}={os.environ[k]}" for k in ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL"))]) + "\n", encoding="utf-8")
+    from mibo import settingsfile
+    settingsfile.write(home, {"UPDATE_CHECK_ENABLED": "false", "ROAM_ENABLED": "false", "AGENT_LANG": "zh",
+                              "PERSONA_NAME": "Mibo",
+                              **{k: os.environ[k] for k in ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL")}})
     for k in ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL"):
         del os.environ[k]
     import everyday

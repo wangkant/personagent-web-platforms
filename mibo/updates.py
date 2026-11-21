@@ -44,19 +44,17 @@ def newer(latest: str, current: str = __version__) -> bool:
 
 
 def enabled(home: Path) -> bool:
-    env = home / ".env"
+    from . import settingsfile
+
     try:
-        stamp = env.stat().st_mtime_ns
+        stamp = settingsfile.path(home).stat().st_mtime_ns
     except OSError:
         stamp = None
-    # Remembered per .env version, so a bad value warns once, not every poll.
+    # Remembered per version of the settings, so a bad value warns once, not every poll.
     key = (str(home), stamp, os.environ.get("UPDATE_CHECK_ENABLED"))
     if key not in _enabled:
-        from dotenv import dotenv_values
-
-        values = ({k: v for k, v in dotenv_values(env).items() if v is not None}
-                  if stamp is not None else {})
-        values.update(os.environ)  # the shell wins over .env, as everywhere else
+        values = settingsfile.values(home, keys=False) if stamp is not None else {}
+        values.update(os.environ)  # the environment wins over the settings, as everywhere else
         _enabled[key] = env_bool("UPDATE_CHECK_ENABLED", True, env=values)
     return _enabled[key]
 

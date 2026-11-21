@@ -6,7 +6,7 @@ import json
 import pytest
 
 from harness.app import TOKEN
-from mibo import abilities, drafting, welcome
+from mibo import abilities, drafting, settingsfile, welcome
 from mibo import setup_wizard as sw
 from mibo.endpoints import chat_completions_url
 from mibo.panels import tuning
@@ -18,9 +18,8 @@ SECRET = "sk-backup-secret-0123456789"
 @pytest.fixture
 def configured(workspace, monkeypatch):
     """A home with a model, a key check that passes and is kept, and the character's restarts counted."""
-    sw.copy_env_template(workspace.home)
-    sw.write_env(workspace.env, {"LLM_API_KEY": "sk-main-key-0123456789", "LLM_BASE_URL": "https://api.deepseek.com",
-                                 "LLM_MODEL": "deepseek-chat", "PERSONA_NAME": "Mira", "AGENT_LANG": "en"})
+    settingsfile.write(workspace.home, {"LLM_API_KEY": "sk-main-key-0123456789", "LLM_BASE_URL": "https://api.deepseek.com",
+                                        "LLM_MODEL": "deepseek-chat", "PERSONA_NAME": "Mira", "AGENT_LANG": "en"})
     probes, restarts = [], []
     monkeypatch.setattr(sw, "probe_key", lambda *a, **kw: probes.append(a) or sw.Probe("u", 200, ""))
     monkeypatch.setattr(workspace.character, "reload", lambda: restarts.append(True))
@@ -33,7 +32,7 @@ def post(client, payload):
 
 
 def test_view_lists_every_field_and_never_a_key(client, configured):
-    sw.write_env(configured.env, {"LLM_FALLBACK_API_KEY": SECRET})
+    settingsfile.write(configured.home, {"LLM_FALLBACK_API_KEY": SECRET})
     response = client.get("/api/tuning", headers=HEADERS)
     assert response.status_code == 200
     body = response.json()
@@ -43,39 +42,42 @@ def test_view_lists_every_field_and_never_a_key(client, configured):
     assert body["llmBaseUrl"] == "https://api.deepseek.com"
 
 
+def saved(workspace) -> bytes:
+    return settingsfile.path(workspace.home).read_bytes()
+
+
 def test_saving_writes_only_what_changed_and_restarts(client, configured):
-    before = configured.env.read_text(encoding="utf-8")
+    before = json.loads(saved(configured))
     body = post(client, {"values": {"LLM_JUDGE_MODEL": "judge-small", "LLM_DM_MODEL": "chat-large",
                                     # The same as what is there: not written.
                                     "LLM_FALLBACK_MODEL": ""}}).json()
     assert body["changed"] and configured.restarts == [True]
     values = configured.config()
     assert values["LLM_JUDGE_MODEL"] == "judge-small" and values["LLM_DM_MODEL"] == "chat-large"
-    after = configured.env.read_text(encoding="utf-8")
-    changed = [(a, b) for a, b in zip(before.splitlines(), after.splitlines()) if a != b]
-    assert {b.split("=")[0] for _, b in changed} == {"LLM_JUDGE_MODEL", "LLM_DM_MODEL"}
-    assert len(before.splitlines()) == len(after.splitlines())
+    after = json.loads(saved(configured))
+    assert {key for key in after if before.get(key) != after[key]} == {"LLM_JUDGE_MODEL", "LLM_DM_MODEL"}
+    assert set(before) <= set(after)
     assert body["values"]["LLM_JUDGE_MODEL"] == "judge-small"
 
 
 def test_nothing_changed_writes_nothing(client, configured):
-    before = configured.env.read_bytes()
+    before = saved(configured)
     body = post(client, {"values": {"LLM_JUDGE_MODEL": ""}}).json()
     assert body["changed"] is False and configured.restarts == []
-    assert configured.env.read_bytes() == before
+    assert saved(configured) == before
 
 
 @pytest.mark.parametrize("key, value", [
     ("LLM_FALLBACK_MODEL", "two words"), ("LLM_FALLBACK_BASE_URL", "ftp://x"),
-    ("LLM_JUDGE_MODEL", "${LLM_API_KEY}"), ("LLM_DM_MODEL", "x" * 257),
+    ("LLM_JUDGE_MODEL", "a\tb"), ("LLM_DM_MODEL", "x" * 257),
     ("CONTEXT_WINDOW", "128k"), ("CONTEXT_WINDOW", "512"),
 ])
 def test_a_bad_value_is_refused_naming_its_field(client, configured, key, value):
-    before = configured.env.read_bytes()
+    before = saved(configured)
     response = post(client, {"values": {key: value}})
     assert response.status_code == 400
     assert response.json()["error"] == f"tuning_invalid:{key}"
-    assert configured.env.read_bytes() == before and configured.restarts == []
+    assert saved(configured) == before and configured.restarts == []
 
 
 def test_the_context_window_says_where_it_comes_from_and_a_typed_one_is_saved(client, configured):
@@ -95,11 +97,11 @@ def test_other_refusals(client, configured):
     assert post(client, {"values": {"SERVER_HOST": "0.0.0.0"}}).json()["error"] == "tuning_unknown"
     assert post(client, {"values": {"LLM_API_KEY": "x"}}).json()["error"] == "tuning_unknown"
     assert post(client, {"values": {"LLM_FALLBACK_BASE_URL": "http://example.com"}}).json()["error"] == "tuning_https"
-    assert "SERVER_HOST" not in configured.env.read_text(encoding="utf-8")
+    assert b"SERVER_HOST" not in saved(configured)
 
 
 def test_refused_before_a_model(client, configured):
-    sw.write_env(configured.env, {"LLM_API_KEY": ""})
+    settingsfile.write(configured.home, {"LLM_API_KEY": ""})
     assert post(client, {"values": {"LLM_JUDGE_MODEL": "j"}}).json()["error"] == "tuning_not_configured"
 
 
@@ -119,7 +121,7 @@ def test_backup_model_key_is_kept_with_its_address_and_never_returned(client, co
     assert post(client, {"values": {"LLM_FALLBACK_BASE_URL": "https://api.groq.com/openai/v1"}}).json()["error"] \
         == "tuning_key_needed"
     post(client, {"values": {"LLM_FALLBACK_BASE_URL": ""}})
-    assert configured.config()["LLM_FALLBACK_API_KEY"] == ""
+    assert "LLM_FALLBACK_API_KEY" not in configured.config()
     # On the main service, the main key is used to check it.
     post(client, {"values": {"LLM_FALLBACK_MODEL": "deepseek-other"}})
     assert configured.probes[-1] == ("https://api.deepseek.com", "sk-main-key-0123456789", "deepseek-other")
@@ -131,7 +133,7 @@ def test_a_backup_model_that_does_not_answer_is_not_saved(client, configured, mo
     monkeypatch.setattr(sw, "probe_key", lambda *a, **kw: sw.Probe("u", status, "echo " + SECRET))
     response = post(client, {"values": {"LLM_FALLBACK_MODEL": "cheap"}})
     assert response.json()["error"] == code and SECRET not in response.text
-    assert configured.config()["LLM_FALLBACK_MODEL"] == ""
+    assert configured.config().get("LLM_FALLBACK_MODEL", "") == ""
 
 
 def test_backup_model_unreachable_when_the_probe_raises(client, configured, monkeypatch):

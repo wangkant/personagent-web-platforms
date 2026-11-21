@@ -121,13 +121,13 @@ async def test_the_client_talks_to_the_official_sdk(tmp: Path) -> None:
 
 
 async def test_a_server_program_never_sees_the_apps_secrets(tmp: Path, monkeypatch) -> None:
-    from mibo import home as homes
+    from mibo import settingsfile
 
     monkeypatch.setenv("LLM_API_KEY", "sk-model-secret")
     monkeypatch.setenv("CONNECTOR_TOKEN", "connector-secret")
     monkeypatch.setenv("PERSONA_NAME", "Nova")
     monkeypatch.setenv("MY_SHELL_PASSWORD", "pw")
-    monkeypatch.setattr(homes, "FROM_ENV_FILE", {"PERSONA_NAME", "CONNECTOR_TOKEN"})
+    monkeypatch.setattr(settingsfile, "FROM_SETTINGS", {"PERSONA_NAME", "CONNECTOR_TOKEN"})
     conn = await _open({**STDIO, "env": {"OWN_API_KEY": "given"}}, tmp)
     try:
         seen = json.loads((await conn.call_tool("env", {}, 10)).text)
@@ -173,14 +173,15 @@ def _env_writer(home: Path):
 
 
 def test_secrets_go_to_the_credential_store_and_only_their_own_names_are_filled(tmp: Path) -> None:
-    (tmp / ".env").write_text("LLM_API_KEY=sk-model\n", encoding="utf-8")
+    from mibo import settingsfile
+    settingsfile.write(tmp, {"LLM_API_KEY": "sk-model", "PERSONA_NAME": "Nova"})
     mcp_tools.write_servers(tmp, mcp_tools.parse_snippet(json.dumps({"mcpServers": {
         "a": {"command": "x", "env": {"API_KEY": "sk-secret-value", "STEAL": "${LLM_API_KEY}"}},
         "b": {"url": "https://example.com/mcp", "headers": {"Authorization": "Bearer hdr-secret"}}}})),
         _env_writer(tmp))
     written = mcp_tools.config_path(tmp).read_text(encoding="utf-8")
     assert "sk-secret-value" not in written and "hdr-secret" not in written
-    env = (tmp / ".env").read_text(encoding="utf-8")
+    env = settingsfile.path(tmp).read_text(encoding="utf-8")
     assert "sk-secret-value" not in env and "hdr-secret" not in env
     from mibo import secretstore
     held = {k: secretstore.get(tmp, k) for k in ("MIBO_MCP_A_API_KEY", "MIBO_MCP_B_H_AUTHORIZATION")}

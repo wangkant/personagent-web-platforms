@@ -2096,7 +2096,7 @@ class AppWindow:
                 elif self.start_hidden:
                     self.hide()
 
-        # A file:// page could read any file beside it, ~/mibo/.env among them.
+        # A file:// page could read any file beside it, ~/mibo/settings.json among them.
         webview.settings["ALLOW_FILE_URLS"] = False
         try:
             # WebView2 takes its menu setting from the next load on, so Windows

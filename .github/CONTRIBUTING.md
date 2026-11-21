@@ -9,7 +9,7 @@ python -m pip install -e ".[dev]"
 mibo
 ```
 
-Run from a clone, the clone is the home folder: `.env`, `persona.txt` and `runtime/` sit beside `mibo/` and are gitignored. `mibo --home DIR` uses another folder.
+Run from a clone, the clone is the home folder: `settings.json`, `persona.txt` and `runtime/` sit beside `mibo/` and are gitignored. `mibo --home DIR` uses another folder.
 
 ## Checks
 
@@ -48,7 +48,7 @@ python tools/welcome_smoke.py --mibo /tmp/smoke-env/bin/mibo
 
 ### Real-model benches
 
-The scripts under `tools/` that call a real model (`tools/everyday.py`, `tools/review_score.py`, `tools/memory_life.py`, `tools/recsim/` and the rest) run only on your own computer, by hand, never in CI. Give each run a scratch home of its own (`mibo --home DIR`, or `AGENT_HOME=DIR`) whose `.env` holds `LLM_BASE_URL`, `LLM_MODEL` and `LLM_API_KEY`; the key stays in that file and is never committed. Pass `--budget` where a script takes one. `tools/sandbox/everyday.py` reads its key from `SANDBOX_MODEL_KEY` and reports itself as not run without one.
+The scripts under `tools/` that call a real model (`tools/everyday.py`, `tools/review_score.py`, `tools/memory_life.py`, `tools/recsim/` and the rest) run only on your own computer, by hand, never in CI. Give each run a scratch home of its own (`mibo --home DIR`, or `AGENT_HOME=DIR`) whose `settings.json` holds `LLM_BASE_URL` and `LLM_MODEL`, with `LLM_API_KEY` in the environment or typed into that file (the app moves it to the credential store at start); never commit a key. Pass `--budget` where a script takes one. `tools/sandbox/everyday.py` reads its key from `SANDBOX_MODEL_KEY` and reports itself as not run without one.
 
 ### Tests
 
@@ -78,7 +78,7 @@ Paths are under `mibo/` unless noted.
 | Packaging | `packaging/windows/` (repository root) |
 | Scripts | `tools/` (repository root): measurements and checks, not shipped |
 
-To add a setting, add it to `AgentSettings` in `settings.py`, read it with the `config_env` helpers and document it in `.env.example`. `tests/parts/settings/test_settings_template.py` fails when a setting the code reads is missing there.
+To add a setting, add it to `AgentSettings` in `settings.py`, read it with the `config_env` helpers and declare and describe it on `Settings` in `settingsfile.py`. `tests/parts/settings/test_settings_model.py` fails when a setting the code reads is missing there.
 
 ## Languages
 
@@ -94,7 +94,7 @@ The interface ships in ten languages: English, 简体中文, 繁體中文, 日�
 - Comments state what the code cannot show; they do not narrate the next line.
 - A change to prompt text changes behaviour: describe the failure it fixes in the pull request.
 - No AI-assistant tooling files (`CLAUDE.md`, `.cursor*`, agent scratch folders) in the repository.
-- Never attach `.env`, `runtime/`, keys, tokens or real conversations to an issue or a commit.
+- Never attach `settings.json`, `credentials.json`, `runtime/`, keys, tokens or real conversations to an issue or a commit.
 
 ## Releasing
 

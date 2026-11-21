@@ -7,6 +7,7 @@ import pytest
 from harness.app import TOKEN
 from mibo import setup_wizard as sw
 from mibo import welcome
+from mibo import settingsfile
 
 HEADERS = {welcome.TOKEN_HEADER: TOKEN}
 FAN_MADE = ("chatgpt", "deepseek", "claude")
@@ -63,7 +64,7 @@ def test_choosing_a_character_sets_its_portrait_and_editing_keeps_it(client, wor
     state = client.post(url, headers=HEADERS, json={"apiKey": "k", "character": "custom", "name": "Claude"}).json()
     assert workspace.config()["PERSONA_AVATAR"] == "claude" and state["avatar"] == "claude"
     state = client.post(url, headers=HEADERS, json={"apiKey": "k", "character": "template", "name": "Mira"}).json()
-    assert workspace.config()["PERSONA_AVATAR"] == "" and state["avatar"] == ""
+    assert workspace.config().get("PERSONA_AVATAR", "") == "" and state["avatar"] == ""
     state = client.post(url, headers=HEADERS, json={"apiKey": "k", "character": "deepseek", "name": "Mira"}).json()
     assert (state["avatar"], state["name"]) == ("deepseek", "Mira")
 
@@ -111,7 +112,7 @@ def test_a_picture_of_ones_own_is_kept_checked_served_and_removed(client, worksp
     assert not list(workspace.home.glob("avatar.*"))
     assert client.get("/api/avatar", headers=HEADERS).status_code == 404
     # A setting left pointing at a deleted picture shows the portrait instead.
-    sw.write_env(workspace.env, {"PERSONA_AVATAR": "own"})
+    settingsfile.write(workspace.home, {"PERSONA_AVATAR": "own"})
     assert client.get("/api/state", headers=HEADERS).json()["avatar"] == "claude"
 
 
@@ -119,16 +120,16 @@ def test_state_shows_the_portrait_of_an_unedited_shipped_character(client, works
     def avatar() -> str:
         return client.get("/api/state", headers=HEADERS).json()["avatar"]
 
-    sw.write_env(workspace.env, {"LLM_API_KEY": "k", "AGENT_LANG": "en"})
+    settingsfile.write(workspace.home, {"LLM_API_KEY": "k", "AGENT_LANG": "en"})
     assert avatar() == ""
     sw.write_persona(workspace.home, "chatgpt", name="ChatGPT", lang="en")
     assert avatar() == "chatgpt"
-    sw.write_env(workspace.env, {"PERSONA_AVATAR": "claude"})
+    settingsfile.write(workspace.home, {"PERSONA_AVATAR": "claude"})
     assert avatar() == "claude"
-    sw.write_env(workspace.env, {"PERSONA_AVATAR": "../claude"})
+    settingsfile.write(workspace.home, {"PERSONA_AVATAR": "../claude"})
     assert avatar() == "chatgpt"
     (portraits / "chatgpt.webp").unlink()
     assert avatar() == ""
-    sw.write_env(workspace.env, {"PERSONA_AVATAR": ""})
+    settingsfile.write(workspace.home, {"PERSONA_AVATAR": ""})
     sw.write_persona(workspace.home, "template", name="Mira", lang="en")
     assert avatar() == ""

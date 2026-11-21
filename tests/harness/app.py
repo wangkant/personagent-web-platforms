@@ -1,4 +1,4 @@
-"""The app as the person's page reaches it: a home under tmp whose .env points the model at the ScriptedModel,
+"""The app as the person's page reaches it: a home under tmp whose settings point the model at the ScriptedModel,
 served by uvicorn on a free 127.0.0.1 port the way `mibo start --no-browser` serves it, with welcome.json
 written so the app's own calls back to its page (schedules, the built-in browser) reach it. Requests carry the
 token, and the window key when a route takes only the app's own page."""
@@ -11,9 +11,8 @@ import threading
 import httpx
 import uvicorn
 
-from mibo import paths, situation, welcome
+from mibo import paths, settingsfile, situation, welcome
 from mibo.panels import modelbar
-from mibo import setup_wizard as sw
 from mibo.storage import atomic_write_text
 
 TOKEN = "harness-local-capability"
@@ -26,9 +25,9 @@ class App:
     def __init__(self, home, model, **settings) -> None:
         self.home, self.model = home, model
         home.mkdir(parents=True, exist_ok=True)
-        sw.write_env(home / ".env", {"LLM_BASE_URL": model.url, "LLM_API_KEY": KEY, "LLM_MODEL": "scripted",
-                                     "PERSONA_NAME": "Mibo", "AGENT_LANG": "en", "ROAM_ENABLED": "false",
-                                     "UPDATE_CHECK_ENABLED": "false", **settings})
+        settingsfile.write(home, {"LLM_BASE_URL": model.url, "LLM_API_KEY": KEY, "LLM_MODEL": "scripted",
+                                  "PERSONA_NAME": "Mibo", "AGENT_LANG": "en", "ROAM_ENABLED": "false",
+                                  "UPDATE_CHECK_ENABLED": "false", **settings})
         paths.use_home(home)
         self.workspace = welcome.Workspace(home)
         self.app = welcome.create_app(home, TOKEN, workspace=self.workspace)

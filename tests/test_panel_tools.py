@@ -12,7 +12,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 import pytest
 
-from mibo import mcp_tools, welcome
+from mibo import mcp_tools, settingsfile, welcome
 
 TOKEN = "test-local-capability"
 HEADERS = {welcome.TOKEN_HEADER: TOKEN}
@@ -22,8 +22,7 @@ STANDIN = str(Path(__file__).with_name("mcp_standin.py"))
 @pytest.fixture
 def workspace(tmp_path, monkeypatch):
     home = tmp_path / "home"
-    home.mkdir()
-    (home / ".env").write_text("LLM_API_KEY=sk-model\nPERSONA_NAME=Nova\n", encoding="utf-8")
+    settingsfile.write(home, {"LLM_API_KEY": "sk-model", "PERSONA_NAME": "Nova"})
     value = welcome.Workspace(home)
     yield value
     value.close()
@@ -65,7 +64,7 @@ def test_a_pasted_block_or_command_adds_servers_and_secrets_stay_home(client, wo
     assert servers["stand"]["values"] == [{"kind": "env", "name": "API_KEY", "set": True}]
     assert servers["remote"]["values"] == [{"kind": "headers", "name": "Authorization", "set": True}]
     saved = mcp_tools.config_path(workspace.home).read_text(encoding="utf-8")
-    assert "env-secret" not in saved and "env-secret" not in workspace.env.read_text(encoding="utf-8")
+    assert "env-secret" not in saved and "env-secret" not in settingsfile.path(workspace.home).read_text(encoding="utf-8")
     from mibo import secretstore
     assert secretstore.get(workspace.home, "MIBO_MCP_STAND_API_KEY") == "env-secret"
     assert post(client, {"add": f'"{sys.executable}" "{STANDIN}"', "name": "stand"}).json() == \

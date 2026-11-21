@@ -86,7 +86,7 @@ def env_bool(name: str, default: bool, *, env=None) -> bool:
 
 
 #: What LLM_MODEL / LLM_BASE_URL mean when unset, everywhere. A new setup writes both,
-#: from the first preset; this keeps a .env holding only a DeepSeek key on DeepSeek.
+#: from the first preset; this keeps settings holding only a DeepSeek key on DeepSeek.
 DEFAULT_LLM_MODEL = "deepseek-flash"
 DEFAULT_LLM_BASE_URL = "https://api.deepseek.com"
 

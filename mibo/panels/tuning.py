@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 
 from fastapi import Request
 
-from .. import abilities, context, drafting
+from .. import abilities, context, drafting, settingsfile
 from .. import setup_wizard as sw
 from ..endpoints import chat_completions_url
 
@@ -46,7 +46,7 @@ def _url(key: str, value) -> str:
         return ""
     parsed = urlsplit(base)
     if (parsed.scheme not in ("https", "http") or not parsed.hostname or parsed.username
-            or parsed.password or "${" in base or len(base) > 512
+            or parsed.password or len(base) > 512
             or any(c.isspace() for c in base)):
         raise _bad(key)
     if parsed.scheme == "http" and parsed.hostname not in ("127.0.0.1", "localhost", "::1"):
@@ -55,7 +55,7 @@ def _url(key: str, value) -> str:
 
 
 def clean(field: Field, value) -> str:
-    """`value` as it would be written to .env, or a ValueError naming the field."""
+    """`value` as it would be saved, or a ValueError naming the field."""
     if field.kind == "url":
         return _url(field.key, value)
     if field.kind == "window":
@@ -64,7 +64,7 @@ def clean(field: Field, value) -> str:
             raise _bad(field.key)
         return str(int(text)) if text else ""
     text = str(value if value is not None else "").strip()
-    if (len(text) > (4096 if field.kind == "secret" else 256) or "${" in text
+    if (len(text) > (4096 if field.kind == "secret" else 256)
             or any(c.isspace() or not c.isprintable() for c in text)):
         raise _bad(field.key)
     return text
@@ -144,7 +144,7 @@ class Tuning:
                 self._fallback(old, changes, typed_key)
             if not changes:
                 return {**self.view(), "changed": False}
-            sw.write_env(self.ws.env, changes)
+            settingsfile.write(self.ws.home, changes)
             self.ws.character.reload()
             return {**self.view(), "changed": True}
 

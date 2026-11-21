@@ -3,7 +3,7 @@ off screen, with no figure on the desktop).
 
     python tools/panedock.py <scratch home> --out <folder> [--site-port 59409] [--model-port 59408]
 
-The home's .env must name the stand-in model started here (LLM_BASE_URL=http://127.0.0.1:<model-port>/v1). It
+The home's settings must name the stand-in model started here (LLM_BASE_URL=http://127.0.0.1:<model-port>/v1). It
 opens a page of tools/opsite and writes down, in results.json:
   open     the window before and after (does it make room for a site laid out for 1280?), the site's own width
            and zoom, and whether the chat's box is in sight with the page;

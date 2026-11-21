@@ -985,6 +985,20 @@
     "check": "업데이트 확인",
     "checking": "확인 중…",
     "dataTitle": "백업 및 복원",
+    "keptTitle": "설정 및 키",
+    "keptFile": "설정은 {path}에 저장되며 텍스트 편집기로 수정할 수 있습니다.",
+    "keptStore": "모델, 검색, 도구의 키는 {store}에 저장되며 파일에는 기록되지 않습니다.",
+    "keptPlain": "이 시스템에는 자격 증명 저장소가 없으므로 키가 {path}에 저장됩니다. 현재 사용자만 읽을 수 있습니다.",
+    "keptUnknown": "설정 파일의 다음 이름은 설정 항목이 아니므로 적용되지 않습니다: {names}",
+    "keptInvalid": "다음 설정은 값의 형식이 맞지 않아 기본값을 사용합니다: {names}",
+    "stores": {
+      "Windows": "Windows 자격 증명 관리자",
+      "macOS": "macOS 키체인",
+      "SecretService": "시스템 키링",
+      "libsecret": "시스템 키링",
+      "kwallet": "KWallet",
+      "other": "시스템 자격 증명 저장소"
+    },
     "placeTitle": "백업 위치",
     "places": {
       "desktop": "바탕 화면",
@@ -2127,11 +2141,11 @@
   "cli": {
     "about": "Mibo: 데스크톱에서 대화하고, 사용자를 기억하며, 대신 작업을 수행하는 캐릭터입니다.",
     "noCommand": "명령 없이 실행하면 앱이 열립니다.",
-    "home": ".env, persona.txt, runtime/이 있는 폴더 (기본값: AGENT_HOME, 이 체크아웃 또는 ~/mibo)",
+    "home": "settings.json, persona.txt, runtime/이 있는 폴더 (기본값: AGENT_HOME, 이 체크아웃 또는 ~/mibo)",
     "command": "아래 명령 중 하나",
     "commands": "명령:",
     "homeMissing": "mibo: --home에는 폴더가 필요합니다",
-    "alsoHome": "\n--home DIR도 쓸 수 있습니다. .env, persona.txt, runtime/이 있는 폴더입니다.",
+    "alsoHome": "\n--home DIR도 쓸 수 있습니다. settings.json, persona.txt, runtime/이 있는 폴더입니다.",
     "broken": "mibo를 시작하지 못했습니다. 자세한 내용은 {log}에 있습니다.",
     "argparse": {
       "usage": "사용법: ",

@@ -1123,7 +1123,7 @@ async def judge(runtime: Path, home: Optional[Path] = None, now: Optional[float]
                 rng: Optional[random.Random] = None) -> int:
     """After a round: the profile's own rewrite when due, then one batched judgement of what the
     sources brought when enough waits, written to the library. How many things were judged.
-    `home` is the folder of the .env the model is read from, runtime's parent unless given."""
+    `home` is the folder whose settings name the model, runtime's parent unless given."""
     runtime = Path(runtime)
     home = runtime.parent if home is None else Path(home)
     # Before the clock is read: a long game would leave `now` hours old.

@@ -985,6 +985,20 @@
     "check": "檢查更新",
     "checking": "正在檢查…",
     "dataTitle": "備份與還原",
+    "keptTitle": "設定與金鑰",
+    "keptFile": "設定儲存於 {path}，可用文字編輯器修改。",
+    "keptStore": "模型、搜尋和工具的金鑰儲存於{store}中，不寫入任何檔案。",
+    "keptPlain": "此系統沒有可用的憑證庫，金鑰儲存於 {path}，僅目前使用者可讀取。",
+    "keptUnknown": "設定檔中的下列名稱不是設定項目，不會生效：{names}",
+    "keptInvalid": "下列設定的值類型不符，已依預設值處理：{names}",
+    "stores": {
+      "Windows": " Windows 認證管理員",
+      "macOS": " macOS 鑰匙圈",
+      "SecretService": "系統金鑰圈",
+      "libsecret": "系統金鑰圈",
+      "kwallet": " KWallet ",
+      "other": "系統憑證庫"
+    },
     "placeTitle": "備份位置",
     "places": {
       "desktop": "桌面",
@@ -2127,11 +2141,11 @@
   "cli": {
     "about": "Mibo：常駐桌面的角色，可與你聊天、記住你的偏好，並代你執行操作。",
     "noCommand": "不帶命令執行即可開啟應用程式。",
-    "home": "存放 .env、persona.txt 和 runtime/ 的資料夾（預設：AGENT_HOME、目前的程式碼目錄或 ~/mibo）",
+    "home": "存放 settings.json、persona.txt 和 runtime/ 的資料夾（預設：AGENT_HOME、目前的程式碼目錄或 ~/mibo）",
     "command": "下列指令之一",
     "commands": "指令:",
     "homeMissing": "Mibo：--home 之後須指定一個資料夾",
-    "alsoHome": "\n亦可使用 --home DIR：存放 .env、persona.txt 和 runtime/ 的資料夾。",
+    "alsoHome": "\n亦可使用 --home DIR：存放 settings.json、persona.txt 和 runtime/ 的資料夾。",
     "broken": "Mibo 未能啟動。詳細資訊請參閱 {log}。",
     "argparse": {
       "usage": "用法: ",

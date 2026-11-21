@@ -24,9 +24,10 @@ SECRET = "zebrafinch"  # the words a forget must leave nowhere
 def _home(folder: Path) -> Path:
     home = folder / "home"
     home.mkdir(parents=True, exist_ok=True)
-    (home / ".env").write_text("LLM_API_KEY=bench\nLLM_MODEL=stub\nLLM_BASE_URL=http://127.0.0.1:9/v1\n"
-                               "PERSONA_NAME=Mibo\nAGENT_LANG=en\nROAM_ENABLED=false\nUPDATE_CHECK_ENABLED=false\n",
-                               encoding="utf-8")
+    from mibo import settingsfile
+    settingsfile.write(home, {"LLM_API_KEY": "bench", "LLM_MODEL": "stub", "LLM_BASE_URL": "http://127.0.0.1:9/v1",
+                              "PERSONA_NAME": "Mibo", "AGENT_LANG": "en", "ROAM_ENABLED": "false",
+                              "UPDATE_CHECK_ENABLED": "false"})
     os.environ["AGENT_HOME"] = str(home)
     return home
 

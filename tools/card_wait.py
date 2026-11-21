@@ -195,11 +195,13 @@ def main() -> int:
     work = home.parent / "work"
     work.mkdir(parents=True, exist_ok=True)
     home.mkdir(parents=True, exist_ok=True)
-    page_port, server_port, model_port = args.ports
-    (home / ".env").write_text("\n".join([
-        f"PAGE_PORT={page_port}", f"SERVER_PORT={server_port}", "UPDATE_CHECK_ENABLED=false", "ROAM_ENABLED=false",
-        "AGENT_LANG=zh", "PERSONA_TZ_OFFSET_HOURS=-8", "PERSONA_NAME=Mibo",
-        f"LLM_BASE_URL=http://127.0.0.1:{model_port}/v1", "LLM_MODEL=stub", "LLM_API_KEY=stub", ""]), encoding="utf-8")
+    page_port, _, model_port = args.ports
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from mibo import settingsfile
+    settingsfile.write(home, {
+        "PAGE_PORT": page_port, "UPDATE_CHECK_ENABLED": "false", "ROAM_ENABLED": "false", "AGENT_LANG": "zh",
+        "PERSONA_TZ_OFFSET_HOURS": "-8", "PERSONA_NAME": "Mibo", "LLM_BASE_URL": f"http://127.0.0.1:{model_port}/v1",
+        "LLM_MODEL": "stub", "LLM_API_KEY": "stub"})
     (home.parent / "echo_server.py").write_text(ECHO, encoding="utf-8")
     (home / "mcp.json").write_text(json.dumps({"mcpServers": {"echo": {
         "command": sys.executable, "args": [str(home.parent / "echo_server.py")]}}}), encoding="utf-8")

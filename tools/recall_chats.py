@@ -4,7 +4,7 @@
     python tools/recall_chats.py run <home>       ask the probes on the running home, each in a new chat
     python tools/recall_chats.py forget <home>    on the running home: a forget and a deleted chat leave the search
 
-`seed` writes eight page chats with their chat records (runtime/mibo.db) into a fresh home that already has its .env.
+`seed` writes eight page chats with their chat records (runtime/mibo.db) into a fresh home that already has its settings.
 `run` asks five questions about them, each in a chat of its own that is deleted after, and prints one JSON object:
 for each probe the reply, whether it names the answer, and the steps under it; then how many replies named it.
 `forget` checks with search_past_chats's own search, read from the database: a fact is found, "忘掉" it in the

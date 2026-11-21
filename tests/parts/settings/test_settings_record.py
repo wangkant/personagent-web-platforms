@@ -1,17 +1,15 @@
-"""The one record the app is configured from (mibo/settings.py): what .env sets is read, a bad value falls
-back to the documented default instead of stopping the start, and the defaults agree everywhere."""
+"""The one record the app is configured from (mibo/settings.py): what the home's settings set is read, a bad
+value falls back to the documented default instead of stopping the start, and the defaults agree everywhere."""
 from __future__ import annotations
 
 import dataclasses
 import re
-from pathlib import Path
 
 from mibo.config_env import DEFAULT_LLM_BASE_URL, DEFAULT_LLM_MODEL, env_int, vision_endpoint_from_env
 from mibo.settings import AgentSettings, normalize_lang
+from mibo.settingsfile import Settings
 
-TEMPLATE = Path(__file__).resolve().parents[3] / ".env.example"
-
-# A .env with every setting these tests read set to something distinctive.
+# Settings with every setting these tests read set to something distinctive.
 FULL_ENV = {
     "LLM_API_KEY": "sk-live", "LLM_BASE_URL": "https://llm.example/v1/",
     "LLM_MODEL": "live-model", "PERSONA_NAME": "Live", "MEMORY_FILE": "m.json",
@@ -37,7 +35,7 @@ def test_the_vision_endpoint_has_its_own_names_and_no_vendor_default() -> None:
     assert (s.vision_api_key, s.vision_base_url) == ("vk", "https://v.example/v4")
 
 
-def test_plain_construction_ignores_the_env_file_around_it() -> None:
+def test_plain_construction_ignores_the_settings_around_it() -> None:
     plain = AgentSettings(api_key="k")
     assert (plain.model, plain.base_url) == (DEFAULT_LLM_MODEL, DEFAULT_LLM_BASE_URL)
     assert (plain.llm_fallback_duration_s, plain.llm_rate_limit_cooldown_s) == (180, 20)
@@ -45,7 +43,7 @@ def test_plain_construction_ignores_the_env_file_around_it() -> None:
     assert (empty.roam_walks_a_day, empty.llm_timeout_s) == (3, 120.0)
 
 
-def test_every_setting_in_the_env_file_is_read() -> None:
+def test_every_setting_is_read() -> None:
     s = AgentSettings.from_env(env=FULL_ENV)
     assert (s.api_key, s.model, s.llm_fallback_api_key) == ("sk-live", "live-model", "sk-fb")
     # A trailing slash is trimmed off every base URL.
@@ -73,28 +71,26 @@ def test_an_out_of_range_setting_falls_back_rather_than_raising() -> None:
     assert (s.memory_calls_per_day, s.memory_prompt_chars) == (40, 2400)
 
 
-def _template_values() -> dict[str, str]:
-    """`KEY=value` lines of .env.example, an inline `# comment` cut off."""
-    text = TEMPLATE.read_text(encoding="utf-8")
-    return {m.group(1): re.sub(r"\s+#.*$", "", m.group(2)).strip()
-            for m in re.finditer(r"^([A-Z][A-Z0-9_]*)=(.*)$", text, re.MULTILINE)}
+def _documented() -> dict[str, str]:
+    """The defaults the settings model's descriptions state as a value ("Blank = 120")."""
+    found = {name: re.search(r"Blank = ([^\s,;]+)$", field.description or "")
+             for name, field in Settings.model_fields.items()}
+    return {name: m.group(1) for name, m in found.items() if m and not m.group(1).isupper()}
 
 
 def test_one_source_of_defaults(monkeypatch) -> None:
-    """The constructor, from_env() and .env.example agree on every default, compared by value through the
-    parser. `lang` is the raw input agent_lang comes from. The template starts a new setup on the first
-    preset, while an unset endpoint keeps meaning the built-in one, for a .env holding only a key."""
-    template = _template_values()
-    for name in template:
+    """The constructor, from_env() and the settings model's descriptions agree on every default, compared by
+    value through the parser. `lang` is the raw input agent_lang comes from."""
+    template = _documented()
+    for name in Settings.model_fields:
         monkeypatch.delenv(name, raising=False)
     plain = AgentSettings(api_key="k")
     env_defaults = AgentSettings.from_env(env={"LLM_API_KEY": "k"})
-    documented = AgentSettings.from_env(env={
-        **{k: v for k, v in template.items() if k not in {"LLM_BASE_URL", "LLM_MODEL"}}, "LLM_API_KEY": "k"})
+    documented = AgentSettings.from_env(env={**template, "LLM_API_KEY": "k"})
     fields = [f.name for f in dataclasses.fields(AgentSettings) if f.name != "lang"]
     assert {name: getattr(plain, name) for name in fields} == {name: getattr(env_defaults, name) for name in fields}
     assert {name: getattr(env_defaults, name) for name in fields} == {name: getattr(documented, name) for name in fields}
-    assert {"LLM_FALLBACK_DURATION_S", "ROAM_GAP_HOURS", "MEMORY_TIDY_EVERY"} <= set(template)
+    assert {"LLM_BASE_URL", "LLM_MODEL", "LLM_FALLBACK_DURATION_S", "ROAM_GAP_HOURS", "MEMORY_TIDY_EVERY"} <= set(template)
 
 
 def test_agent_lang_spellings_are_normalised() -> None:

@@ -18,7 +18,7 @@ import sys
 
 from _suite import Suite, run_tool, scratch_home, scrub_env
 
-# feature, script, its arguments after the home, and the stand-in model's port the home's .env names.
+# feature, script, its arguments after the home, and the stand-in model's port the home's settings name.
 SCRIPTS = [
     ("open and operate a page", "panedock.py", ["--site-port", "59409", "--model-port", "59408"], 59408),
     ("compact bar", "panebar.py", ["--site-port", "59751", "--model-port", "59752"], 59752),

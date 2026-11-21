@@ -20,6 +20,7 @@ from mibo import openrouter_signin as osr
 from mibo import setup_wizard as sw
 from mibo import welcome
 from mibo.panels import signin
+from mibo import settingsfile
 
 HEADERS = {welcome.TOKEN_HEADER: TOKEN}
 # The page's port as the callback address names it; nothing listens on it.
@@ -147,9 +148,9 @@ def test_signing_in_saves_the_form_with_the_new_key_and_never_shows_it(page, ope
     assert done.status_code == 200 and '<html lang="zh' in done.text
     assert 'href="/assets/signin.css"' in done.text
     assert client.get("/api/signin", headers=HEADERS).json() == {"state": "done", "error": "", "url": ""}
-    assert sw.env_get(workspace.home / ".env", "LLM_API_KEY") == KEY
-    assert sw.env_get(workspace.home / ".env", "LLM_BASE_URL") == "https://openrouter.ai/api/v1"
-    assert sw.env_get(workspace.home / ".env", "PERSONA_NAME") == "Juno"
+    assert settingsfile.values(workspace.home).get("LLM_API_KEY", "") == KEY
+    assert settingsfile.values(workspace.home).get("LLM_BASE_URL", "") == "https://openrouter.ai/api/v1"
+    assert settingsfile.values(workspace.home).get("PERSONA_NAME", "") == "Juno"
     assert page["probed"] == [("https://openrouter.ai/api/v1", KEY, "openrouter/free")]
     assert openrouter.seen[0]["code_verifier"] == attempt.verifier
     assert client.get("/api/state", headers=HEADERS).json()["configured"] is True
@@ -161,7 +162,7 @@ def test_another_address_in_the_form_falls_back_to_openrouter_s_own(page, openro
     client, workspace = page["client"], page["workspace"]
     back = openrouter.approve(_start(client, baseUrl="https://llm.example/v1")["url"])
     _back(client, {"code": back["code"], "state": back["state"]})
-    assert sw.env_get(workspace.home / ".env", "LLM_BASE_URL") == "https://openrouter.ai/api/v1"
+    assert settingsfile.values(workspace.home).get("LLM_BASE_URL", "") == "https://openrouter.ai/api/v1"
 
 
 def test_only_openrouter_signs_in_and_only_with_the_token(page) -> None:
@@ -182,17 +183,17 @@ def test_an_exchange_that_fails_says_why(page, openrouter, status, error) -> Non
     answer = _back(client, {"code": back["code"], "state": back["state"]})
     assert answer.status_code == 400
     assert client.get("/api/signin", headers=HEADERS).json() == {"state": "failed", "error": error, "url": ""}
-    assert not (workspace.home / ".env").exists()
+    assert "LLM_API_KEY" not in settingsfile.values(workspace.home)
 
 
-@pytest.mark.parametrize("answer", [{}, {"key": ""}, {"key": "two words"}, {"key": 5}, {"key": "${LLM_API_KEY}"}])
+@pytest.mark.parametrize("answer", [{}, {"key": ""}, {"key": "two words"}, {"key": 5}])
 def test_an_answer_without_a_usable_key_is_no_key(page, openrouter, answer) -> None:
     client, workspace = page["client"], page["workspace"]
     back = openrouter.approve(_start(client)["url"])
     openrouter.answer = answer
     _back(client, {"code": back["code"], "state": back["state"]})
     assert client.get("/api/signin", headers=HEADERS).json()["error"] == "signin_exchange_failed"
-    assert not (workspace.home / ".env").exists()
+    assert "LLM_API_KEY" not in settingsfile.values(workspace.home)
 
 
 def test_openrouter_out_of_reach(page, openrouter, monkeypatch) -> None:
@@ -213,7 +214,7 @@ def test_a_key_that_does_not_verify_is_not_saved(page, openrouter) -> None:
     answer = _back(client, {"code": back["code"], "state": back["state"]})
     assert answer.status_code == 400
     assert client.get("/api/signin", headers=HEADERS).json()["error"] == "signin_key_rejected"
-    assert not (workspace.home / ".env").exists()
+    assert "LLM_API_KEY" not in settingsfile.values(workspace.home)
 
 
 def test_an_attempt_left_waiting_expires(page, openrouter, monkeypatch) -> None:

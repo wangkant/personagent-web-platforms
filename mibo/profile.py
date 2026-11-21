@@ -32,7 +32,6 @@ from datetime import date
 from pathlib import Path
 from typing import Optional
 
-from dotenv import dotenv_values
 
 from . import drafting, langs, situation
 from . import setup_wizard as sw
@@ -418,7 +417,9 @@ class _Model(drafting._Client):
 
 
 def values_of(home: Path) -> dict:
-    return {k: str(v or "") for k, v in dotenv_values(Path(home) / ".env").items()}
+    from .settingsfile import values
+
+    return values(home)
 
 
 def character(home: Path, values: dict) -> tuple[str, str, str]:

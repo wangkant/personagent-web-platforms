@@ -29,7 +29,7 @@ def default_home() -> Path:
 def looks_like_home(path: Path) -> bool:
     # A stray data/ folder is not enough: that would claim most project folders.
     return is_checkout(path) or (
-        (path / ".env").is_file() and (path / "persona.txt").is_file())
+        any((path / name).is_file() for name in ("settings.json", ".env")) and (path / "persona.txt").is_file())
 
 
 def find_home() -> Path:
@@ -44,21 +44,3 @@ def find_home() -> Path:
         return cwd
     return default_home()
 
-
-#: Settings this process took from <home>/.env rather than from the shell.
-FROM_ENV_FILE: set[str] = set()
-
-
-def load_env(home: Path) -> None:
-    """Take <home>/.env into this process's environment. What the file says
-    decides: the app's page saves the settings there. Called again after a
-    save, a setting the file no longer holds goes back to unset."""
-    from dotenv import dotenv_values
-
-    values = {key: value for key, value in dotenv_values(home / ".env").items()
-              if value is not None and key != "AGENT_HOME"}
-    for key in FROM_ENV_FILE - values.keys():
-        os.environ.pop(key, None)
-        FROM_ENV_FILE.discard(key)
-    os.environ.update(values)
-    FROM_ENV_FILE.update(values)

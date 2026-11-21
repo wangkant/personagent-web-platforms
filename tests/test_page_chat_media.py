@@ -6,8 +6,8 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 import pytest
 
-from mibo import setup_wizard as sw
 from mibo import welcome
+from mibo import settingsfile
 
 TOKEN = "test-local-capability"
 HEADERS = {welcome.TOKEN_HEADER: TOKEN}
@@ -16,7 +16,7 @@ HEADERS = {welcome.TOKEN_HEADER: TOKEN}
 @pytest.fixture
 def workspace(tmp_path):
     value = welcome.Workspace(tmp_path)
-    sw.write_env(value.env, {"LLM_API_KEY": "key"})
+    settingsfile.write(value.home, {"LLM_API_KEY": "key"})
     yield value
     value.close()
 

@@ -1,8 +1,8 @@
 """Settings › 外出 (static/welcome/setup/walks.js): whether the character goes out on its own, how often,
 the sites it keeps off or favours, and the record of its walks. The time of the day's first walk (ROAM_AT) is
-read from the home's .env only.
+read from the home's settings only.
 
-GET /api/walks is all of it; POST /api/walks changes one part: {on}, {walks} (written to the home's .env and
+GET /api/walks is all of it; POST /api/walks changes one part: {on}, {walks} (written to the home's settings and
 applied to the walk loop at once), {site, steer} ("avoid", "favour" or "" on the host's card,
 web/sites.py), or {search, key}: the web search API the person brought ("brave" or "tavily", tried once
 before it is kept in the system's credential store; "" removes it). The key is never sent back. Each walk
@@ -19,8 +19,7 @@ from urllib.parse import urlsplit
 
 from fastapi import Request
 
-from .. import search, secretstore
-from .. import setup_wizard as sw
+from .. import search, secretstore, settingsfile
 from ..config_env import env_bool, env_int
 from ..storage import atomic_write_text
 from ..web import sites
@@ -104,7 +103,7 @@ def mount(app, workspace, body) -> None:
         changes = {**({"ROAM_ENABLED": "true" if on else "false"} if on is not None else {}),
                    **({"ROAM_WALKS_A_DAY": str(walks)} if walks is not None else {})}
         with workspace._lock:
-            sw.write_env(workspace.env, changes)
+            settingsfile.write(workspace.home, changes)
         if roam:
             # The walk loop reads its settings as it goes: the change holds from its next look.
             roam.settings.roam_enabled = on if on is not None else roam.settings.roam_enabled

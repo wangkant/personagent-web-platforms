@@ -7,6 +7,7 @@ import pytest
 
 from mibo import setup_wizard as sw
 from mibo import welcome
+from mibo import settingsfile
 
 
 @pytest.fixture
@@ -18,7 +19,7 @@ def workspace(tmp_path, monkeypatch):
 
 
 def test_a_memory_answer_is_marked_and_a_forget_marks_the_words_on_the_page(workspace, monkeypatch):
-    sw.write_env(workspace.env, {"LLM_API_KEY": "key", "PERSONA_NAME": "Mira", "AGENT_LANG": "en"})
+    settingsfile.write(workspace.home, {"LLM_API_KEY": "key", "PERSONA_NAME": "Mira", "AGENT_LANG": "en"})
     answers = {"my sister lives in Denver. The weather is fine": ["nice city"],
                "Mira, what do you remember": ["Here's what I remember:", "About you: your sister lives in Denver"],
                "Mira, forget Denver": ["forgotten: your sister lives in Denver"],

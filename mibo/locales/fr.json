@@ -993,6 +993,20 @@
     "check": "Rechercher des mises à jour",
     "checking": "Vérification…",
     "dataTitle": "Sauvegarde et restauration",
+    "keptTitle": "Réglages et clés",
+    "keptFile": "Les réglages sont enregistrés dans {path} et peuvent être modifiés avec un éditeur de texte.",
+    "keptStore": "Les clés du modèle, de la recherche et des outils sont conservées dans {store}, jamais dans un fichier.",
+    "keptPlain": "Ce système n’a pas de magasin d’identifiants : les clés sont conservées dans {path}, lisible uniquement par votre compte.",
+    "keptUnknown": "Ces noms du fichier de réglages ne sont pas des réglages et restent sans effet : {names}",
+    "keptInvalid": "Ces réglages ont une valeur d’un type incorrect et utilisent leur valeur par défaut : {names}",
+    "stores": {
+      "Windows": "le Gestionnaire d’identification Windows",
+      "macOS": "le trousseau macOS",
+      "SecretService": "le trousseau du système",
+      "libsecret": "le trousseau du système",
+      "kwallet": "KWallet",
+      "other": "le magasin d’identifiants du système"
+    },
     "placeTitle": "Emplacement des sauvegardes",
     "places": {
       "desktop": "Bureau",
@@ -2144,11 +2158,11 @@
   "cli": {
     "about": "Mibo : un personnage sur votre bureau qui discute avec vous, se souvient de vous et agit pour vous.",
     "noCommand": "Lancez-le sans commande pour ouvrir l'application.",
-    "home": "le dossier contenant .env, persona.txt et runtime/ (par défaut : AGENT_HOME, ce clone ou ~/mibo)",
+    "home": "le dossier contenant settings.json, persona.txt et runtime/ (par défaut : AGENT_HOME, ce clone ou ~/mibo)",
     "command": "l'une des commandes ci-dessous",
     "commands": "commandes :",
     "homeMissing": "Mibo : --home a besoin d'un dossier",
-    "alsoHome": "\nAussi accepté : --home DIR, le dossier contenant .env, persona.txt et runtime/.",
+    "alsoHome": "\nAussi accepté : --home DIR, le dossier contenant settings.json, persona.txt et runtime/.",
     "broken": "Mibo n'a pas pu démarrer. Les détails sont dans {log}.",
     "argparse": {
       "usage": "usage : ",

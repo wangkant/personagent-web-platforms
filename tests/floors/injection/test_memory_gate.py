@@ -8,9 +8,9 @@ from fastapi.testclient import TestClient
 import pytest
 
 from harness import attacks, app
-from mibo import setup_wizard as sw
 from mibo import welcome
 from mibo.agent import Agent
+from mibo import settingsfile
 
 NOTES = attacks.load("memory")
 TOKEN = "test-local-capability"
@@ -31,7 +31,7 @@ def test_a_note_that_instructs_is_kept_nowhere_when_added_or_pasted_on_the_memor
     fact = next(row["text"] for row in rows if row["family"] == "fact")
     app.quiet_start(monkeypatch)
     workspace = welcome.Workspace(tmp_path)
-    sw.write_env(workspace.env, {"LLM_API_KEY": "key", "LLM_BASE_URL": "http://127.0.0.1:9/v1", "LLM_MODEL": "m"})
+    settingsfile.write(workspace.home, {"LLM_API_KEY": "key", "LLM_BASE_URL": "http://127.0.0.1:9/v1", "LLM_MODEL": "m"})
     with TestClient(welcome.create_app(workspace.home, TOKEN, workspace=workspace),
                     base_url="http://127.0.0.1") as client:
         # One attack of each family, pasted as another assistant's memory list and then added one by one.

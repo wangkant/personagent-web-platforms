@@ -46,8 +46,9 @@ def make(folder: Path) -> Path:
     runtime = home / "runtime"
     (runtime / "library").mkdir(parents=True, exist_ok=True)
     (runtime / "desktop").mkdir(parents=True, exist_ok=True)
-    (home / ".env").write_text("LLM_MODEL=stub\nLLM_BASE_URL=http://127.0.0.1:9/v1\nPERSONA_NAME=Mibo\nAGENT_LANG=en\n"
-                               "ROAM_ENABLED=false\nUPDATE_CHECK_ENABLED=false\n", encoding="utf-8")
+    from mibo import settingsfile
+    settingsfile.write(home, {"LLM_MODEL": "stub", "LLM_BASE_URL": "http://127.0.0.1:9/v1", "PERSONA_NAME": "Mibo",
+                              "AGENT_LANG": "en", "ROAM_ENABLED": "false", "UPDATE_CHECK_ENABLED": "false"})
     now = time.time()
     items = []
     for n in range(ITEMS):

@@ -14,9 +14,9 @@ from pathlib import Path
 import pytest
 
 from mibo import db as _db
-from mibo import home as _home
 from mibo import modelcatalog as _modelcatalog
 from mibo import paths as _paths
+from mibo import settingsfile as _settingsfile
 from mibo.shell import run as _shell_run
 
 SUITE = Path(__file__).resolve().parent
@@ -35,8 +35,8 @@ class NetworkBlocked(RuntimeError):
 def _one_home_at_a_time(tmp_path_factory: pytest.TempPathFactory):
     """Each test gets a home of its own in the temporary folder: AGENT_HOME, paths.ROOT and the
     runtime folder point there, so nothing reaches the checkout's runtime/. A page a test starts takes
-    its home's .env into the environment (character.py); environment and roots are put back."""
-    environment, from_file, root = dict(os.environ), set(_home.FROM_ENV_FILE), _paths.ROOT
+    its home's settings into the environment (character.py); environment and roots are put back."""
+    environment, from_file, root = dict(os.environ), set(_settingsfile.FROM_SETTINGS), _paths.ROOT
     own = tmp_path_factory.mktemp("home")
     os.environ["AGENT_HOME"] = str(own)
     os.environ.pop("AGENT_RUNTIME_DIR", None)
@@ -48,8 +48,8 @@ def _one_home_at_a_time(tmp_path_factory: pytest.TempPathFactory):
     for key in set(os.environ) - set(environment):
         del os.environ[key]
     os.environ.update(environment)
-    _home.FROM_ENV_FILE.clear()
-    _home.FROM_ENV_FILE.update(from_file)
+    _settingsfile.FROM_SETTINGS.clear()
+    _settingsfile.FROM_SETTINGS.update(from_file)
     # A test may still be standing in another system's name here (its monkeypatch is put back later), and
     # before Python 3.12 a path cannot be made under a foreign name.
     with pytest.MonkeyPatch.context() as real:

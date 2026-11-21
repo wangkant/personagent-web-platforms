@@ -78,15 +78,15 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--port", type=int, default=59923)
     parser.add_argument("--budget", type=float, default=0.03)
     args = parser.parse_args(argv)
-    from dotenv import dotenv_values
+    from mibo import settingsfile
     home, out = Path(args.home).resolve(), Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    env_file = home / ".env"
+    upstream = settingsfile.values(home, keys=False).get("LLM_BASE_URL") or ""
+    env_file = settingsfile.path(home)
     kept = env_file.read_text(encoding="utf-8")
-    meter = FirstCall(dotenv_values(env_file).get("LLM_BASE_URL") or "", out / "model.jsonl", args.budget)
+    meter = FirstCall(upstream, out / "model.jsonl", args.budget)
     meter.serve(args.port)
-    lines = [line for line in kept.splitlines() if line.partition("=")[0].strip() != "LLM_BASE_URL"]
-    env_file.write_text("\n".join(lines + [f"LLM_BASE_URL=http://127.0.0.1:{args.port}/v1"]) + "\n", encoding="utf-8")
+    settingsfile.write(home, {"LLM_BASE_URL": f"http://127.0.0.1:{args.port}/v1"})
     wanted = [r for r in everyday.REQUESTS if r["id"] in ASKED]
     rows: list[dict] = []
 

@@ -541,10 +541,11 @@ def main() -> int:
     SITE, PROV = f"http://127.0.0.1:{base + 2}", f"http://localhost:{base + 3}"
     out.mkdir(parents=True, exist_ok=True)
     home.mkdir(parents=True, exist_ok=True)
-    (home / ".env").write_text(
-        f"PAGE_PORT={base}\nSERVER_PORT={base + 1}\nUPDATE_CHECK_ENABLED=false\nROAM_ENABLED=false\nAGENT_LANG=zh\n"
-        f"PERSONA_TZ_OFFSET_HOURS=-8\nPERSONA_NAME=Mibo\nLLM_BASE_URL=http://127.0.0.1:{base + 4}/v1\n"
-        f"LLM_MODEL=stub\nLLM_API_KEY=stub\n", encoding="utf-8")
+    from mibo import settingsfile
+    settingsfile.write(home, {
+        "PAGE_PORT": base, "UPDATE_CHECK_ENABLED": "false", "ROAM_ENABLED": "false", "AGENT_LANG": "zh",
+        "PERSONA_TZ_OFFSET_HOURS": "-8", "PERSONA_NAME": "Mibo", "LLM_BASE_URL": f"http://127.0.0.1:{base + 4}/v1",
+        "LLM_MODEL": "stub", "LLM_API_KEY": "stub"})
     import window_driver
 
     from mibo import window as appwindow

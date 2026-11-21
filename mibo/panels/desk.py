@@ -19,10 +19,10 @@ import time
 import zipfile
 from pathlib import Path
 
-from dotenv import dotenv_values
 from fastapi import Request
+from keyring.errors import KeyringError
 
-from .. import __version__, autostart, db
+from .. import __version__, autostart, db, secretstore, settingsfile
 from .. import setup_wizard as sw
 from ..storage import atomic_write_text
 
@@ -37,18 +37,20 @@ DIRS_ENV = "MIBO_USER_DIRS"
 PREFIX = "mibo-backup-"
 BACKUP_NAME = re.compile(r"mibo-backup-[0-9A-Za-z_-]{1,64}\.zip")
 MANIFEST = "mibo-backup.json"
+# What the credential store holds for the home (key_names), in an archive made with secrets; a restore puts it
+# back there.
+KEYS = "mibo-keys.json"
+KEY_NAME = re.compile(r"[A-Za-z0-9_]{1,120}")
 # Never in an archive: the archives themselves, the built-in browser's own storage (its sign-ins
 # hold only on this computer) and the walks' throwaway profile.
 LEFT_OUT = ("backups", "runtime/desktop/webview", "runtime/visitor")
 # Nor what means something only to the app that is running: its link and token, locks, logs and
-# half-written files.
-LEFT_OUT_NAMES = frozenset({"welcome.json", "__pycache__"})
+# half-written files; nor the values kept on a system with no credential store (KEYS carries the keys).
+LEFT_OUT_NAMES = frozenset({"welcome.json", "__pycache__", secretstore.FILE})
 LEFT_OUT_SUFFIXES = (".lock", ".tmp", ".part", ".pyc", ".log", "-wal", "-shm", "-journal")
 # The runtime database, copied whole and consistent through SQLite's backup API, without the chat
 # record, which a forget must reach in full (db.snapshot); a restore takes it back table by table.
 DB = f"runtime/{db.FILE}"
-# A setting that holds a key, a token or a password: blank in an archive made without secrets.
-SECRET = re.compile(r"(_KEY|_TOKEN|_SECRET)$|PASSWORD|^MIBO_MCP_")
 # What the next start does ({"restore": path} or {"reset": true}), and what a restore came to.
 PENDING = ("runtime", "desktop", "pending.json")
 RESTORED = ("runtime", "desktop", "restored.json")
@@ -112,17 +114,23 @@ def members(home: Path) -> list[tuple[Path, str]]:
     return sorted(found, key=lambda pair: pair[1])
 
 
-def _without_secrets(text: str) -> str:
-    lines = []
-    for line in text.splitlines(keepends=True):
-        name, equals, _ = line.partition("=")
-        name = name.strip().removeprefix("export ").strip()
-        lines.append(f"{name}=\n" if equals and not line.lstrip().startswith("#") and SECRET.search(name) else line)
-    return "".join(lines)
+def key_names(home: Path) -> list[str]:
+    """Every name the credential store holds for `home`: the model keys, the search API's key, and the values
+    and sign-ins of the connectors in mcp.json."""
+    from .. import mcp_market, mcp_tools, search
+
+    servers = mcp_tools.load_config(home)["mcpServers"]
+    refs = {found.group(1) for found in mcp_tools.REF_RE.finditer(json.dumps(servers))
+            if found.group(1).startswith(mcp_tools.SECRET_PREFIX)}
+    return [*settingsfile.KEYS, search.SEARCH_KEY, mcp_market.TOKEN_KEY, *sorted(refs),
+            *(f"MIBO_OAUTH_{server}" for server in servers)]
 
 
 def write(home: Path, folder: Path, secrets: bool, tag: str = "") -> Path:
-    """One archive of `home` in `folder`; its keys and tokens only when `secrets`."""
+    """One archive of `home` in `folder`; what the credential store holds for it only when `secrets`."""
+    # Moves a .env, or a key typed into settings.json, where it belongs before anything is copied.
+    settingsfile.values(home, keys=False)
+    keys = {name: value for name in key_names(home) if secrets and (value := secretstore.get(home, name))}
     stamp = time.strftime("%Y%m%d-%H%M%S")
     path, n = folder / f"{PREFIX}{stamp}{tag}.zip", 1
     while path.exists():
@@ -134,12 +142,11 @@ def write(home: Path, folder: Path, secrets: bool, tag: str = "") -> Path:
         with zipfile.ZipFile(partial, "w", zipfile.ZIP_DEFLATED) as archive:
             archive.writestr(MANIFEST, json.dumps({"version": __version__, "created": int(time.time()),
                                                    "secrets": secrets}))
+            if keys:
+                archive.writestr(KEYS, json.dumps(keys))
             for source, member in members(home):
                 try:
-                    if member == ".env" and not secrets:
-                        archive.writestr(member, _without_secrets(source.read_text(encoding="utf-8-sig")))
-                    else:
-                        archive.write(source, member)
+                    archive.write(source, member)
                 except FileNotFoundError:
                     # Replaced mid-walk by an atomic write; nothing to copy.
                     continue
@@ -172,7 +179,7 @@ def check(path: Path) -> tuple[list[zipfile.ZipInfo], dict]:
     plan = []
     for info in infos:
         name = info.filename
-        if info.is_dir() or name == MANIFEST:
+        if info.is_dir() or name in (MANIFEST, KEYS):
             continue
         if ("\\" in name or name.startswith("/") or ":" in name
                 or any(p in ("", ".", "..") for p in name.split("/")) or _left_out(name)):
@@ -181,8 +188,9 @@ def check(path: Path) -> tuple[list[zipfile.ZipInfo], dict]:
     return plan, manifest
 
 
-def _unpack(home: Path, path: Path, plan: list[zipfile.ZipInfo], kept: dict) -> None:
-    """The home as the archive has it; `kept` fills the keys an archive without secrets left blank."""
+def _unpack(home: Path, path: Path, plan: list[zipfile.ZipInfo]) -> None:
+    """The home as the archive has it, and the keys it carries back in the credential store. Keys an archive
+    without them does not carry stay as they are."""
     for source, _ in members(home):
         source.unlink()
     for folder, _, _ in os.walk(home, topdown=False):
@@ -201,36 +209,36 @@ def _unpack(home: Path, path: Path, plan: list[zipfile.ZipInfo], kept: dict) -> 
         db.take_back(home / "runtime", archived if archived.is_file() else None)
     finally:
         archived.unlink(missing_ok=True)
-    restored = dotenv_values(home / ".env") if (home / ".env").is_file() else {}
-    missing = {k: v for k, v in kept.items() if not restored.get(k)}
-    if missing:
-        sw.write_env(home / ".env", missing)
+    with zipfile.ZipFile(path) as archive:
+        if KEYS in archive.namelist():
+            secretstore.put_many(home, {name: str(value) for name, value in json.loads(archive.read(KEYS)).items()
+                                        if KEY_NAME.fullmatch(name)})
 
 
 def _restore(home: Path, path: Path) -> str:
     """Put the archive back, the present kept in backups/ first; '' or what went wrong."""
     try:
         plan, manifest = check(path)
-        safety = write(home, home / "backups", True, "-before-restore")
+        # With the present keys when the archive's would replace them.
+        safety = write(home, home / "backups", manifest.get("secrets") is True, "-before-restore")
     except ValueError as error:
         return str(error)
-    env = home / ".env"
-    present = dotenv_values(env) if env.is_file() else {}
-    kept = {} if manifest.get("secrets") else {k: v for k, v in present.items() if v and SECRET.search(k)}
     try:
-        _unpack(home, path, plan, kept)
-    except (OSError, sqlite3.Error, zipfile.BadZipFile):
+        _unpack(home, path, plan)
+    except (OSError, sqlite3.Error, zipfile.BadZipFile, KeyringError):
         try:
-            _unpack(home, safety, check(safety)[0], {})
-        except (OSError, ValueError, sqlite3.Error, zipfile.BadZipFile):
+            _unpack(home, safety, check(safety)[0])
+        except (OSError, ValueError, sqlite3.Error, zipfile.BadZipFile, KeyringError):
             return "desk_restore_failed"
         return "desk_restore_undone"
     return ""
 
 
 def _reset(home: Path) -> None:
-    """Everything of the home but its archives, as before the first run."""
+    """Everything of the home but its archives, as before the first run, its keys in the credential store too."""
     db.close(home / "runtime")
+    for name in key_names(home):
+        secretstore.delete(home, name)
     for folder, _, files in os.walk(home, topdown=False):
         here = Path(folder)
         if here.relative_to(home).parts[:1] == ("backups",):
@@ -301,7 +309,14 @@ class Desk:
         restored.unlink(missing_ok=True)
         return {"targets": [{"id": name, "path": str(path)} for name in TARGETS
                             if (path := self.target(name)) is not None],
-                "backups": self.backups(), "restored": told or None}
+                "backups": self.backups(), "restored": told or None, "settings": self.settings()}
+
+    def settings(self) -> dict:
+        """Where the settings and the keys are kept, and the names in settings.json that change nothing."""
+        kept = secretstore.kept_in(self.home)
+        return {"file": str(settingsfile.path(self.home)), "keys": kept,
+                "store": secretstore.store_name() if kept == "store" else str(self.home / secretstore.FILE),
+                **settingsfile.problems(self.home)}
 
     def backups(self) -> list[dict]:
         found = []

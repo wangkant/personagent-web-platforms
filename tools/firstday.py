@@ -4,7 +4,7 @@ topics, its round of sample finds, and the first cards after it.
     python tools/firstday.py --home <fresh home> --port <page port> --topics 美食,历史,天文
                              [--after 60] [--cards 10] [--out first.json]
 
-The home holds only a .env (a model, AGENT_LANG, PAGE_PORT and SERVER_PORT in a free range). The app
+The home holds only its settings (a model, AGENT_LANG and PAGE_PORT in a free range). The app
 starts headless (welcome.main --no-browser); --after seconds later (the time a person spends on the
 language, character and model steps) the topics are saved as the first run saves them, the round of
 sample finds is asked for (GET /api/feed/first) and answered by a stand-in person who wants what is on a

@@ -94,12 +94,12 @@ def program_env(own: Optional[dict] = None) -> dict:
     """What a server program starts with: what a program needs to run and find
     its tools here, never this app's own settings or anything named like a
     secret, plus the server's own `env`."""
-    from .home import FROM_ENV_FILE
+    from .settingsfile import FROM_SETTINGS
 
     out = {}
     for name, value in os.environ.items():
         upper = name.upper()
-        if name in FROM_ENV_FILE or upper in FROM_ENV_FILE or _SECRET_NAME.search(upper):
+        if name in FROM_SETTINGS or upper in FROM_SETTINGS or _SECRET_NAME.search(upper):
             continue
         if upper in _ENV_KEEP or upper.startswith(_ENV_KEEP_PREFIXES):
             out[name] = value

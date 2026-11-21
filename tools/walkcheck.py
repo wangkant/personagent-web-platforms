@@ -3,12 +3,12 @@ those bear on the person's interests, and the model tokens and money the walk to
 
     python tools/walkcheck.py --home <home> --walks 10 [--topics 美食,历史,天文] [--out walks.json]
 
-The home is a folder with its own .env (a model, AGENT_LANG); the walks run in this process through
+The home is a folder with its own settings (a model, AGENT_LANG); the walks run in this process through
 roam.Roam with the app's own agent, headless and signed out, as the service would walk them, only one
 after another instead of hours apart. --topics are written as the first run's topics before the first
 walk. "Bears on" is the feed's own topic matcher (feed.topic_matcher) over title, excerpt and site, so
 it counts what the ranking can see, not what a reader would judge; the titles are printed for that.
-The key in the .env is read into this process only and never printed.
+The model key is read into this process only and never printed.
 """
 from __future__ import annotations
 
@@ -32,8 +32,8 @@ def main() -> None:
     parser.add_argument("--out", type=Path)
     args = parser.parse_args()
     home = args.home.resolve()
-    from dotenv import dotenv_values
-    os.environ.update({k: str(v or "") for k, v in dotenv_values(home / ".env").items()})
+    from mibo import settingsfile
+    os.environ.update(settingsfile.values(home))
     os.environ["AGENT_HOME"] = str(home)
     asyncio.run(walks(home, args.walks, [t for t in args.topics.split(",") if t], args.out))
 

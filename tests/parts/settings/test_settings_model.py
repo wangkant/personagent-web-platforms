@@ -1,5 +1,5 @@
-"""The template a person copies their .env from (.env.example) lists every setting the code reads, in every
-folder of the package and the tools, and every setting a log line tells them to change exists."""
+"""The settings model (settingsfile.Settings) declares every setting the code reads, in every folder of the
+package and the tools, and every setting a log line tells the person to change exists."""
 from __future__ import annotations
 
 import ast
@@ -7,11 +7,15 @@ import re
 import warnings
 from pathlib import Path
 
+from mibo.settingsfile import Settings
+
 ROOT = Path(__file__).resolve().parents[3]
 READERS = {"env_int", "env_float", "env_bool", "env_str", "env_csv"}
 
-# Variables the system or another program owns, read but never a Mibo setting.
+# Variables the system or another program owns, read but never a Mibo setting, and the one that names the home
+# the settings file is in.
 NOT_SETTINGS = {
+    "AGENT_HOME",
     "PATH", "TEMP", "USERPROFILE", "COMPUTERNAME",
     # The OpenAI SDK's own variable, read to know whose key OPENAI_API_KEY is (panels/detect.py).
     "OPENAI_BASE_URL",
@@ -20,7 +24,7 @@ NOT_SETTINGS = {
     # The freedesktop base folders, where Electron keeps its own folders by default (tools/xplat/electron_check.py).
     "XDG_CONFIG_HOME", "XDG_CACHE_HOME",
 }
-# Switches the measuring scripts and benches set, kept out of the person's template until the author
+# Switches the measuring scripts and benches set, kept out of the settings model until the author
 # decides otherwise.
 SWITCHES = {
     "SHELL_OPEN_DRY",  # tools/computer_tasks.py: report what would open, open nothing
@@ -70,23 +74,21 @@ def _settings_read() -> dict[str, str]:
     return read
 
 
-def test_every_setting_the_code_reads_is_in_the_template() -> None:
+def test_every_setting_the_code_reads_is_declared_and_described() -> None:
     read = _settings_read()
-    template = (ROOT / ".env.example").read_text(encoding="utf-8")
-    documented = {line.split("=", 1)[0].strip() for line in template.splitlines()
-                  if "=" in line and not line.lstrip().startswith("#")}
+    documented = set(Settings.model_fields)
     assert len(read) > 30, "the scan found the settings at all"
     missing = sorted(f"{key} ({where})" for key, where in read.items()
                      if key not in documented | NOT_SETTINGS | SWITCHES)
-    assert missing == [], "add these to .env.example"
+    assert missing == [], "declare these on settingsfile.Settings"
+    assert [name for name, field in Settings.model_fields.items() if not field.description] == []
     # The two lists only name what the code still reads.
     assert sorted((NOT_SETTINGS | SWITCHES) - set(read)) == []
 
 
 def test_settings_named_in_log_messages_exist() -> None:
-    """A log line that tells the person to change a setting names one the template knows."""
-    template = (ROOT / ".env.example").read_text(encoding="utf-8")
-    known = set(re.findall(r"^#?\s*([A-Z][A-Z0-9_]*)=", template, re.MULTILINE))
+    """A log line that tells the person to change a setting names one the settings model knows."""
+    known = set(Settings.model_fields) | {"AGENT_HOME"}
     name = re.compile(r"\b[A-Z][A-Z0-9]*_[A-Z0-9_]*[A-Z0-9]\b")
     unknown = []
     for path in _sources():

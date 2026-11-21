@@ -1,5 +1,11 @@
 # Secrets / local config
+settings.json
+.settings.json.lock
+settings.json.unreadable
+# Keys on a system with no credential store (secretstore.py).
+credentials.json
 .env
+.env.unmoved
 # The setup wizard's atomic-replace temporary. It holds the same API keys .env does,
 # and the interruption that atomicity exists for is exactly what leaves it
 # behind — where `git add -A` would stage it.

@@ -64,10 +64,11 @@ def main() -> int:
     home = Path(a.home).resolve()
     user = home / "user"
     user.mkdir(parents=True, exist_ok=True)
-    if not (home / ".env").exists():
-        (home / ".env").write_text("UPDATE_CHECK_ENABLED=false\nROAM_ENABLED=false\nAGENT_LANG=zh\n"
-                                   f"PERSONA_NAME=Mibo\nPAGE_PORT={a.port}\nSERVER_PORT={a.port + 1}\n",
-                                   encoding="utf-8")
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from mibo import settingsfile
+    if not settingsfile.path(home).exists():
+        settingsfile.write(home, {"UPDATE_CHECK_ENABLED": "false", "ROAM_ENABLED": "false", "AGENT_LANG": "zh",
+                                  "PERSONA_NAME": "Mibo", "PAGE_PORT": a.port})
     if os.name == "nt":
         system = os.environ["SYSTEMROOT"]
         path = os.pathsep.join([system + r"\System32", system, system + r"\System32\Wbem"])

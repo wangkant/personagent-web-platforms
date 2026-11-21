@@ -993,6 +993,20 @@
     "check": "Verificar atualizações",
     "checking": "Verificando…",
     "dataTitle": "Backup e restauração",
+    "keptTitle": "Configurações e chaves",
+    "keptFile": "As configurações ficam em {path} e podem ser editadas em um editor de texto.",
+    "keptStore": "As chaves do modelo, da pesquisa e das ferramentas ficam em {store}, nunca em um arquivo.",
+    "keptPlain": "Este sistema não tem um repositório de credenciais, então as chaves ficam em {path}, legível apenas pela sua conta de usuário.",
+    "keptUnknown": "Estes nomes no arquivo de configurações não são configurações e não têm efeito: {names}",
+    "keptInvalid": "Estas configurações têm valores do tipo errado e usam o padrão: {names}",
+    "stores": {
+      "Windows": "o Gerenciador de Credenciais do Windows",
+      "macOS": "as Chaves do macOS",
+      "SecretService": "o chaveiro do sistema",
+      "libsecret": "o chaveiro do sistema",
+      "kwallet": "KWallet",
+      "other": "o repositório de credenciais do sistema"
+    },
     "placeTitle": "Onde ficam os backups",
     "places": {
       "desktop": "Área de trabalho",
@@ -2144,11 +2158,11 @@
   "cli": {
     "about": "Mibo: um personagem na sua área de trabalho que conversa com você, se lembra de você e age por você.",
     "noCommand": "Execute sem nenhum comando para abrir o aplicativo.",
-    "home": "a pasta que contém .env, persona.txt e runtime/ (padrão: AGENT_HOME, esta cópia ou ~/mibo)",
+    "home": "a pasta que contém settings.json, persona.txt e runtime/ (padrão: AGENT_HOME, esta cópia ou ~/mibo)",
     "command": "um dos comandos abaixo",
     "commands": "comandos:",
     "homeMissing": "mibo: --home requer uma pasta",
-    "alsoHome": "\nTambém é aceito: --home DIR, a pasta que contém .env, persona.txt e runtime/.",
+    "alsoHome": "\nTambém é aceito: --home DIR, a pasta que contém settings.json, persona.txt e runtime/.",
     "broken": "O Mibo não conseguiu iniciar. Os detalhes estão em {log}.",
     "argparse": {
       "usage": "uso: ",

@@ -4,13 +4,14 @@
 
 * ``AgentSettings(...)``: literal defaults for the home's settings, the
   environment for the operational knobs (the memory and roam limits). A tool
-  or test gets the agent it configured, not one the surrounding ``.env``
-  configured.
+  or test gets the agent it configured, not one the surrounding home's
+  settings configured.
 * ``AgentSettings.from_env()``: also reads the home's settings
-  (``LLM_API_KEY``, ``PERSONA_NAME``, ...). This is the app.
+  (``LLM_API_KEY``, ``PERSONA_NAME``, ...), which settingsfile.load put in the
+  environment. This is the app.
 
-Both share the defaults ``.env.example`` documents, and every read goes
-through :mod:`mibo.config_env`: a bad value means the default and a
+Both share the defaults :class:`mibo.settingsfile.Settings` documents, and every
+read goes through :mod:`mibo.config_env`: a bad value means the default and a
 warning.
 """
 from __future__ import annotations

@@ -1,10 +1,10 @@
 """The interface languages (mibo/locales): every language has every key with its slots in its own script, the
-language follows the home's .env, and a first run starts in the system's language."""
+language follows the home's settings, and a first run starts in the system's language."""
 from __future__ import annotations
 
 import pytest
 
-from mibo import i18n, langs
+from mibo import i18n, langs, settingsfile
 from mibo import setup_wizard as sw
 from tools import locale_gaps
 
@@ -14,19 +14,17 @@ def test_every_language_has_every_key(code: str) -> None:
     assert locale_gaps.problems(code) == [], f"locales/{code}.json"
 
 
-def test_the_interface_language_follows_the_env_file(tmp_path, monkeypatch) -> None:
-    """A rewritten .env is read again, and another home has its own answer."""
+def test_the_interface_language_follows_the_home_s_settings(tmp_path, monkeypatch) -> None:
+    """Changed settings are read again, a file edited by hand too, and another home has its own answer."""
     monkeypatch.delenv("UI_LANG", raising=False)
     monkeypatch.delenv("AGENT_LANG", raising=False)
     monkeypatch.setenv("AGENT_HOME", str(tmp_path))
-    env = tmp_path / ".env"
-    env.write_text("AGENT_LANG=ja", encoding="utf-8")
+    settingsfile.write(tmp_path, {"AGENT_LANG": "ja"})
     assert i18n.lang() == "ja"
-    env.write_text("AGENT_LANG=de  # switched", encoding="utf-8")
+    settingsfile.path(tmp_path).write_text('{"AGENT_LANG": "de"}', encoding="utf-8")
     assert i18n.lang() == "de"
     other = tmp_path / "other"
-    other.mkdir()
-    (other / ".env").write_text("AGENT_LANG=ko", encoding="utf-8")
+    settingsfile.write(other, {"AGENT_LANG": "ko"})
     monkeypatch.setenv("AGENT_HOME", str(other))
     assert i18n.lang() == "ko"
 

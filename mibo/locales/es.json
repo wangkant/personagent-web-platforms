@@ -993,6 +993,20 @@
     "check": "Buscar actualizaciones",
     "checking": "Comprobando…",
     "dataTitle": "Copia de seguridad y restauración",
+    "keptTitle": "Ajustes y claves",
+    "keptFile": "Los ajustes se guardan en {path} y pueden editarse con un editor de texto.",
+    "keptStore": "Las claves del modelo, la búsqueda y las herramientas se guardan en {store}, nunca en un archivo.",
+    "keptPlain": "Este sistema no tiene almacén de credenciales, por lo que las claves se guardan en {path}, legible solo por su usuario.",
+    "keptUnknown": "Estos nombres del archivo de ajustes no son ajustes y no tienen efecto: {names}",
+    "keptInvalid": "Estos ajustes tienen valores de un tipo incorrecto y usan su valor predeterminado: {names}",
+    "stores": {
+      "Windows": "el Administrador de credenciales de Windows",
+      "macOS": "el llavero de macOS",
+      "SecretService": "el llavero del sistema",
+      "libsecret": "el llavero del sistema",
+      "kwallet": "KWallet",
+      "other": "el almacén de credenciales del sistema"
+    },
     "placeTitle": "Dónde se guardan las copias",
     "places": {
       "desktop": "Escritorio",
@@ -2144,11 +2158,11 @@
   "cli": {
     "about": "Mibo: un personaje en su escritorio que conversa con usted, lo recuerda y actúa por usted.",
     "noCommand": "Ejecútalo sin ningún comando para abrir la aplicación.",
-    "home": "la carpeta que contiene .env, persona.txt y runtime/ (de forma predeterminada: AGENT_HOME, esta copia o ~/mibo)",
+    "home": "la carpeta que contiene settings.json, persona.txt y runtime/ (de forma predeterminada: AGENT_HOME, esta copia o ~/mibo)",
     "command": "uno de los comandos siguientes",
     "commands": "comandos:",
     "homeMissing": "mibo: --home requiere una carpeta",
-    "alsoHome": "\nTambién se acepta: --home DIR, la carpeta que contiene .env, persona.txt y runtime/.",
+    "alsoHome": "\nTambién se acepta: --home DIR, la carpeta que contiene settings.json, persona.txt y runtime/.",
     "broken": "Mibo no se pudo iniciar. Los detalles se encuentran en {log}.",
     "argparse": {
       "usage": "uso: ",

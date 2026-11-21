@@ -75,11 +75,10 @@ def test_the_workflows_take_the_test_tools_from_the_dev_extra() -> None:
 
 
 def test_the_wheel_bundles_the_shared_files_under_bundled() -> None:
-    """hatchling maps data/ and .env.example under mibo/_bundled, where home.resource() looks in an
-    installed copy; CI installs the built wheel and reads them back."""
+    """hatchling maps data/ under mibo/_bundled, where home.resource() looks in an installed copy; CI installs
+    the built wheel and reads it back."""
     text = _pyproject()
     assert '"data" = "mibo/_bundled/data"' in text
-    assert '".env.example" = "mibo/_bundled/.env.example"' in text
     wheel = re.search(r"^\[tool\.hatch\.build\.targets\.wheel\]\n(.*?)\n\n", text, re.MULTILINE | re.DOTALL).group(1)
     for included in ("mibo", "data"):
         assert f'"{included}"' in wheel, included
@@ -101,7 +100,7 @@ def test_resource_reads_the_checkout_here_and_the_bundle_when_installed(monkeypa
 def test_a_folder_is_a_home_only_with_its_own_settings(tmp_path: Path) -> None:
     (tmp_path / "data").mkdir()
     assert not home.looks_like_home(tmp_path), "a stray data/ folder is not a home"
-    (tmp_path / ".env").write_text("", encoding="utf-8")
+    (tmp_path / "settings.json").write_text("{}", encoding="utf-8")
     (tmp_path / "persona.txt").write_text("", encoding="utf-8")
     assert home.looks_like_home(tmp_path)
     assert home.looks_like_home(ROOT)

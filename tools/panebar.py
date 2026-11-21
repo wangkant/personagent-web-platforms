@@ -3,7 +3,7 @@ off screen, with no figure on the desktop).
 
     python tools/panebar.py <scratch home> --out <folder> [--site-port 59751] [--model-port 59752]
 
-The home's .env must name the stand-in model started here (LLM_BASE_URL=http://127.0.0.1:<model-port>/v1). It opens a
+The home's settings must name the stand-in model started here (LLM_BASE_URL=http://127.0.0.1:<model-port>/v1). It opens a
 page laid out like a site made for a desktop (its content 1000 px wide, as zhihu.com's), then at window widths 760,
 1024, 1280 and 1600 (955 high), with the chat beside the page and without, writes down in results.json and a
 picture each: how tall the browser's own top is (the bar, and the tab strip where there is one), how much of the

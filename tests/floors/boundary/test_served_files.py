@@ -1,6 +1,6 @@
 """The page's file routes serve only what they hold: a shipped portrait, a cover the finds library stored,
 a picture a chat message shows. No spelling of a path, no link and no folder that leads elsewhere reaches
-another file of the home (its .env least of all), and a picture is never written through a planted link."""
+another file of the home (its settings least of all), and a picture is never written through a planted link."""
 from __future__ import annotations
 
 import base64
@@ -11,6 +11,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 import pytest
 
+from mibo import settingsfile
 from mibo import setup_wizard as sw
 from mibo import welcome
 from mibo.library import Item, Library
@@ -22,14 +23,15 @@ SECRET = "sk-served-files-secret-0123456789"
 PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
 # Ways of naming a file outside the route's folder, as a URL path segment.
-TRAVERSALS = ("..%2F..%2F.env", "..%5C..%5C.env", "%2Fetc%2Fpasswd", "C%3A%5CWindows%5Cwin.ini", ".env",
-              "%2E%2E%2F.env", "..", "%2E%2E")
+TRAVERSALS = ("..%2F..%2Fsettings.json", "..%5C..%5Csettings.json", "%2Fetc%2Fpasswd", "C%3A%5CWindows%5Cwin.ini",
+              "settings.json", "%2E%2E%2Fsettings.json", "..", "%2E%2E")
 
 
 @pytest.fixture
 def workspace(tmp_path):
     value = welcome.Workspace(tmp_path / "home")
-    sw.write_env(value.env, {"LLM_API_KEY": SECRET})
+    # Words only the home's settings file holds.
+    settingsfile.write(value.home, {"LLM_API_KEY": "sk-served-files-key", "ADMIN_NAME": SECRET})
     yield value
     value.close()
 
@@ -88,10 +90,10 @@ def test_the_cover_comes_from_the_library_only(client, workspace):
     assert cover.status_code == 200 and cover.content.startswith(b"\xff\xd8\xff")
     for name in (plain.id, "0" * 16, *TRAVERSALS):
         assert _refused(client.get(f"/api/library/picture/{name}", headers=HEADERS)), name
-    # A stored item whose picture names a file outside the library's pictures: the home's .env, or a
+    # A stored item whose picture names a file outside the library's pictures: the home's settings, or a
     # picture of the person's elsewhere on the disk.
     (workspace.home / "elsewhere.jpg").write_bytes(b"\xff\xd8\xff" + SECRET.encode())
-    for outside in ("../../../.env", "../../../elsewhere.jpg"):
+    for outside in ("../../../settings.json", "../../../elsewhere.jpg"):
         plain.picture = outside
         library.add(plain)
         assert _refused(client.get(f"/api/library/picture/{plain.id}", headers=HEADERS)), outside

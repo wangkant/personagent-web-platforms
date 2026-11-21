@@ -31,7 +31,7 @@ A way around any of the following is a vulnerability:
 | Destination | What is sent | When |
 |---|---|---|
 | The model service the person chose | Chat messages, relevant memory, and the text or pictures of pages and files used for a reply | Each model call |
-| Fallback, vision and embedding endpoints | Parts of the same | Only when set in `.env` |
+| Fallback, vision and embedding endpoints | Parts of the same | Only when set in Settings or `settings.json` |
 | Websites and public feeds | Ordinary page requests: signed out on walks, with the person's session in the built-in browser | When a page is read or operated |
 | Tavily, or DuckDuckGo without a Tavily key | A short search query | When a reply needs a search |
 | GitHub (`api.github.com`) | A request for the latest release; it carries only the version number | At most once a day; `UPDATE_CHECK_ENABLED=false` turns it off |
@@ -41,7 +41,7 @@ A way around any of the following is a vulnerability:
 
 | Kept | Where |
 |---|---|
-| Model key and settings | `.env` in the home folder, readable only by its user |
-| MCP and connector tokens | The system credential store (Windows Credential Manager, macOS Keychain, Secret Service) |
+| Settings | `settings.json` in the home folder, readable only by its user; it never holds a key |
+| Model, search, MCP and connector keys and tokens | The system credential store (Windows Credential Manager, macOS Keychain, Secret Service); on a system with none, `credentials.json` in the home folder, readable only by its user, and Settings › 本机 says so |
 | Built-in browser sign-ins | A browser profile in the home folder (`runtime/desktop/browser`); saved passwords stay in the browser's own store and are never read by the app |
 | Memory, chats and history | `runtime/` in the home folder |

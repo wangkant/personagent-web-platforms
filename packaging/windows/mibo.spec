@@ -14,8 +14,8 @@ MACOS = sys.platform == "darwin"
 package = Path(mibo.__file__).resolve().parent
 static = package / "static"
 
-# The package's own files (pages, locales, portraits); _bundled (the seed data and
-# the .env template) is added whole below.
+# The package's own files (pages, locales, portraits); _bundled (the seed data) is
+# added whole below.
 datas = [d for d in collect_data_files("mibo") if "_bundled" not in Path(d[1]).parts]
 for folder, dirs, files in os.walk(package / "_bundled"):
     dirs[:] = [d for d in dirs if d != "__pycache__"]

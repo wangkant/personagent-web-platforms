@@ -69,6 +69,6 @@ def exchange(code: str, verifier: str) -> str:
     except (ValueError, AttributeError):
         key = None
     if (not isinstance(key, str) or not key or len(key) > MAX_KEY or not key.isascii()
-            or any(c.isspace() for c in key) or "${" in key):
+            or any(c.isspace() for c in key)):
         raise SignInError("signin_exchange_failed")
     return key

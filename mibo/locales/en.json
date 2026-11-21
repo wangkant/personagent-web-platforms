@@ -994,6 +994,20 @@
     "check": "Check for updates",
     "checking": "Checking…",
     "dataTitle": "Backup and restore",
+    "keptTitle": "Settings and keys",
+    "keptFile": "Settings are kept in {path} and can be edited in a text editor.",
+    "keptStore": "Keys for the model, search and tools are kept in {store}, never in a file.",
+    "keptPlain": "This system has no credential store, so keys are kept in {path}, readable only by your user account.",
+    "keptUnknown": "These names in the settings file are not settings and have no effect: {names}",
+    "keptInvalid": "These settings have values of the wrong type and use their defaults: {names}",
+    "stores": {
+      "Windows": "Windows Credential Manager",
+      "macOS": "the macOS keychain",
+      "SecretService": "the system keyring",
+      "libsecret": "the system keyring",
+      "kwallet": "KWallet",
+      "other": "the system credential store"
+    },
     "placeTitle": "Where backups go",
     "places": {
       "desktop": "Desktop",
@@ -2138,11 +2152,11 @@
   "cli": {
     "about": "Mibo: a character on your desktop that chats with you, remembers you and acts for you.",
     "noCommand": "Run it with no command to open the app.",
-    "home": "the folder holding .env, persona.txt and runtime/ (default: AGENT_HOME, this checkout, or ~/mibo)",
+    "home": "the folder holding settings.json, persona.txt and runtime/ (default: AGENT_HOME, this checkout, or ~/mibo)",
     "command": "one of the commands below",
     "commands": "commands:",
     "homeMissing": "mibo: --home needs a folder",
-    "alsoHome": "\nAlso accepted: --home DIR, the folder holding .env, persona.txt and runtime/.",
+    "alsoHome": "\nAlso accepted: --home DIR, the folder holding settings.json, persona.txt and runtime/.",
     "broken": "Mibo could not start. The details are in {log}.",
     "argparse": {
       "usage": "usage: ",

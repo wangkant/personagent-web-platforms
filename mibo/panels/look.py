@@ -11,7 +11,7 @@ from pathlib import Path
 
 from fastapi import Request
 
-from .. import i18n, langs
+from .. import i18n, langs, settingsfile
 from .. import setup_wizard as sw
 from ..endpoints import model_problem
 from ..storage import atomic_write_text
@@ -106,7 +106,7 @@ def choose(workspace, payload: dict) -> dict:
     """Make the home one of the characters: persona.txt, its name, its picture and
     the pet's figure in one step. The person's own ("custom") takes the name and
     words given, else those it had, and is kept aside while another is in use."""
-    from ..welcome import PERSONA_LIMIT, _expands, save_app_settings
+    from ..welcome import PERSONA_LIMIT, save_app_settings
 
     key = str(payload.get("key") or "")
     if key not in (*BUILT_IN, CUSTOM):
@@ -130,8 +130,7 @@ def choose(workspace, payload: dict) -> dict:
             sw.write_persona(workspace.home, key, name=name, lang=lang,
                              admin_name=values.get("ADMIN_NAME", ""),
                              admin_relationship=values.get("ADMIN_RELATIONSHIP", ""))
-            sw.copy_env_template(workspace.home)
-            sw.write_env(workspace.env, {"PERSONA_NAME": name, "PERSONA_AVATAR": sw.avatar_for(key)})
+            settingsfile.write(workspace.home, {"PERSONA_NAME": name, "PERSONA_AVATAR": sw.avatar_for(key)})
             save_app_settings(desktop, pet=key)
         else:
             given = "name" in payload or "about" in payload
@@ -139,7 +138,7 @@ def choose(workspace, payload: dict) -> dict:
                 raise ValueError("custom_empty")
             name = str((payload.get("name") if given else own["name"]) or "").strip()
             about = str((payload.get("about") if given else own["about"]) or "").replace("\r\n", "\n").strip()
-            if not name or len(name) > NAME_MAX or _expands(name) or "\n" in name:
+            if not name or len(name) > NAME_MAX or "\n" in name:
                 raise ValueError("custom_name")
             if not about or len(about) > PERSONA_LIMIT:
                 raise ValueError("custom_about")
@@ -147,9 +146,8 @@ def choose(workspace, payload: dict) -> dict:
             text = about if name in about else _name_line(name, lang) + "\n" + about
             sw.back_up_persona(workspace.home)
             atomic_write_text(workspace.home / "persona.txt", text + "\n")
-            sw.copy_env_template(workspace.home)
             picture = sw.OWN_AVATAR if sw.own_avatar(workspace.home) else ""
-            sw.write_env(workspace.env, {"PERSONA_NAME": name, "PERSONA_AVATAR": picture})
+            settingsfile.write(workspace.home, {"PERSONA_NAME": name, "PERSONA_AVATAR": picture})
             save_app_settings(desktop, pet=OWN_FIGURE, custom={"name": name, "about": about})
         workspace.character.reload()
     workspace.figure_changed()
@@ -225,7 +223,7 @@ def mount(app, workspace, body) -> None:
         if not lang:
             raise ValueError("invalid_lang")
         # The screens speak it too, until Settings › Language picks another for them.
-        await asyncio.to_thread(sw.write_env, workspace.env, {"AGENT_LANG": lang, "UI_LANG": lang})
+        await asyncio.to_thread(settingsfile.write, workspace.home, {"AGENT_LANG": lang, "UI_LANG": lang})
         os.environ["UI_LANG"] = lang
         return {"lang": lang}
 
@@ -235,7 +233,7 @@ def mount(app, workspace, body) -> None:
         lang = langs.normalize((await body(request)).get("lang"))
         if not lang:
             raise ValueError("invalid_lang")
-        await asyncio.to_thread(sw.write_env, workspace.env, {"UI_LANG": lang})
+        await asyncio.to_thread(settingsfile.write, workspace.home, {"UI_LANG": lang})
         os.environ["UI_LANG"] = lang
         return {"lang": lang}
 

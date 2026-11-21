@@ -1,7 +1,7 @@
 """Single anchor for on-disk locations.
 
 ROOT is the deployment folder (home.find_home(): AGENT_HOME, a checkout, or
-~/mibo), never the package directory. It holds .env, persona.txt and
+~/mibo), never the package directory. It holds settings.json, persona.txt and
 stickers; mutable state goes under ``runtime_dir()``. Read-only seed data comes from
 ``seed_file()``: ``<ROOT>/data/...`` when present (a user's override, and how
 a checkout reads its tracked data), else the copy shipped in the package.

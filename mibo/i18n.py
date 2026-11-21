@@ -88,13 +88,12 @@ def words(ns: str, lang: str) -> dict:
 
 def lang(values: dict | None = None) -> str:
     """The interface's language: UI_LANG, else the character's (AGENT_LANG), else the system's. `values` are the
-    home's settings; without them this process's environment over the home's .env, as a start reads them."""
-    from dotenv import dotenv_values
-
+    home's settings; without them this process's environment over the home's settings, as a start reads them."""
     from .home import find_home
     from .langs import normalize
     from .setup_wizard import detect_lang
+    from . import settingsfile
 
     if values is None:
-        values = {**dotenv_values(find_home() / ".env"), **os.environ}
+        values = {**settingsfile.values(find_home(), keys=False), **os.environ}
     return normalize(values.get("UI_LANG")) or normalize(values.get("AGENT_LANG")) or detect_lang()

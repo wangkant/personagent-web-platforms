@@ -1004,6 +1004,20 @@
     "check": "检查更新",
     "checking": "正在检查…",
     "dataTitle": "备份与恢复",
+    "keptTitle": "设置与密钥",
+    "keptFile": "设置保存在 {path}，可用文本编辑器修改。",
+    "keptStore": "模型、搜索和工具的密钥保存在{store}中，不写入任何文件。",
+    "keptPlain": "此系统没有可用的凭据库，密钥保存在 {path}，仅当前用户可读。",
+    "keptUnknown": "设置文件中的以下名称不是设置项，不会生效：{names}",
+    "keptInvalid": "以下设置的值类型不符，已按默认值处理：{names}",
+    "stores": {
+      "Windows": " Windows 凭据管理器",
+      "macOS": " macOS 钥匙串",
+      "SecretService": "系统密钥环",
+      "libsecret": "系统密钥环",
+      "kwallet": " KWallet ",
+      "other": "系统凭据库"
+    },
     "placeTitle": "备份位置",
     "places": {
       "desktop": "桌面",
@@ -2146,11 +2160,11 @@
   "cli": {
     "about": "Mibo：常驻桌面的角色，可与你聊天、记住你的偏好，并代你执行操作。",
     "noCommand": "不带命令运行即可打开应用。",
-    "home": "存放 .env、persona.txt 和 runtime/ 的文件夹（默认依次为 AGENT_HOME、当前代码目录或 ~/mibo）",
+    "home": "存放 settings.json、persona.txt 和 runtime/ 的文件夹（默认依次为 AGENT_HOME、当前代码目录或 ~/mibo）",
     "command": "下列命令之一",
     "commands": "命令：",
     "homeMissing": "Mibo：--home 后须指定一个文件夹",
-    "alsoHome": "\n也可使用 --home DIR 指定存放 .env、persona.txt 和 runtime/ 的文件夹。",
+    "alsoHome": "\n也可使用 --home DIR 指定存放 settings.json、persona.txt 和 runtime/ 的文件夹。",
     "broken": "Mibo 未能启动。详情请查看 {log}。",
     "argparse": {
       "usage": "用法：",

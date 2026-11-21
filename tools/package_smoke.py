@@ -16,7 +16,7 @@ import sys
 from http.server import BaseHTTPRequestHandler
 
 REPLY = "hey there"
-# Settings a developer's shell may carry that would override the test home's .env.
+# Settings a developer's shell may carry that would override the test home's settings.
 _SCRUBBED_PREFIXES = ("LLM_", "AGENT_", "PERSONA_", "ADMIN_", "EMBEDDING_", "VISION_", "TAVILY_", "BENCH_", "EVAL_")
 
 

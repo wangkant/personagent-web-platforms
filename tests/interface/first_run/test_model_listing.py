@@ -12,6 +12,7 @@ import pytest
 
 from mibo import setup_wizard as sw
 from mibo.panels import models as model_panel
+from mibo import settingsfile
 
 KEY = "sk-or-v1-standin-0123456789abcdef"
 
@@ -66,7 +67,7 @@ def _listed(workspace) -> dict:
 
 
 def _save(workspace, base: str) -> None:
-    sw.write_env(workspace.home / ".env", {"LLM_BASE_URL": base, "LLM_API_KEY": KEY, "LLM_MODEL": "openrouter/free"})
+    settingsfile.write(workspace.home, {"LLM_BASE_URL": base, "LLM_API_KEY": KEY, "LLM_MODEL": "openrouter/free"})
 
 
 def test_the_listing_marks_the_free_models_and_keeps_the_key_on_the_server(workspace, service) -> None:
@@ -91,7 +92,7 @@ def test_the_listing_marks_the_free_models_and_keeps_the_key_on_the_server(works
 
 
 def test_a_service_without_a_listing_leaves_the_field_as_it_is(workspace, service) -> None:
-    sw.write_env(workspace.home / ".env", {"LLM_BASE_URL": service.base + "/other/v1", "LLM_API_KEY": KEY,
+    settingsfile.write(workspace.home, {"LLM_BASE_URL": service.base + "/other/v1", "LLM_API_KEY": KEY,
                                            "LLM_MODEL": "m"})
     assert _listed(workspace)["models"] is None
     model_panel._cache.clear()

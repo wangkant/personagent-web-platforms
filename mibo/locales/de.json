@@ -993,6 +993,20 @@
     "check": "Nach Updates suchen",
     "checking": "Wird geprüft…",
     "dataTitle": "Sichern und wiederherstellen",
+    "keptTitle": "Einstellungen und Schlüssel",
+    "keptFile": "Die Einstellungen liegen in {path} und lassen sich mit einem Texteditor bearbeiten.",
+    "keptStore": "Schlüssel für Modell, Suche und Werkzeuge liegen in {store}, nie in einer Datei.",
+    "keptPlain": "Dieses System hat keinen Anmeldeinformationsspeicher; die Schlüssel liegen daher in {path}, lesbar nur für Ihr Benutzerkonto.",
+    "keptUnknown": "Diese Namen in der Einstellungsdatei sind keine Einstellungen und bleiben ohne Wirkung: {names}",
+    "keptInvalid": "Diese Einstellungen haben Werte vom falschen Typ und verwenden ihre Standardwerte: {names}",
+    "stores": {
+      "Windows": "der Windows-Anmeldeinformationsverwaltung",
+      "macOS": "dem macOS-Schlüsselbund",
+      "SecretService": "dem Schlüsselbund des Systems",
+      "libsecret": "dem Schlüsselbund des Systems",
+      "kwallet": "KWallet",
+      "other": "dem Anmeldeinformationsspeicher des Systems"
+    },
     "placeTitle": "Speicherort für Sicherungen",
     "places": {
       "desktop": "Desktop",
@@ -2144,11 +2158,11 @@
   "cli": {
     "about": "Mibo: eine Figur auf Ihrem Desktop, die mit Ihnen chattet, sich an Sie erinnert und für Sie handelt.",
     "noCommand": "Ohne Befehl ausführen, um die App zu öffnen.",
-    "home": "der Ordner mit .env, persona.txt und runtime/ (Standard: AGENT_HOME, dieser Klon oder ~/mibo)",
+    "home": "der Ordner mit settings.json, persona.txt und runtime/ (Standard: AGENT_HOME, dieser Klon oder ~/mibo)",
     "command": "einer der folgenden Befehle",
     "commands": "Befehle:",
     "homeMissing": "mibo: --home erfordert einen Ordner",
-    "alsoHome": "\nAuch möglich: --home DIR, der Ordner mit .env, persona.txt und runtime/.",
+    "alsoHome": "\nAuch möglich: --home DIR, der Ordner mit settings.json, persona.txt und runtime/.",
     "broken": "Mibo konnte nicht starten. Einzelheiten stehen in {log}.",
     "argparse": {
       "usage": "Verwendung: ",

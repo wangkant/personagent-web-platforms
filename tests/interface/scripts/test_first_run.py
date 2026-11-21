@@ -3,9 +3,9 @@ following the language picked at once, and each choice kept where the app reads 
 from __future__ import annotations
 
 import pytest
-from dotenv import dotenv_values
 
 from harness.page import measured
+from mibo import settingsfile
 
 pytestmark = pytest.mark.browser
 
@@ -42,7 +42,7 @@ def test_the_first_run_walks_five_steps_and_keeps_each_choice(app, browser):
 
     assert p.locator("#onboard-view").is_hidden()
     assert app.get("/api/look").json()["toured"] is True
-    settings = dotenv_values(app.home / ".env")
+    settings = settingsfile.values(app.home)
     assert (settings["AGENT_LANG"], settings["UI_LANG"]) == ("zh", "zh")
     assert "潮汐" in app.get("/api/feed/interests?lang=zh").json()["topics"]
     assert app.get("/api/characters").json()["chosen"] != "mibo"

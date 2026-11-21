@@ -8,7 +8,7 @@ import os
 
 import httpx
 
-from .. import home as homes
+from .. import settingsfile
 
 ERRORS: frozenset[str] = frozenset()
 # Seconds; a closed local port refuses at once, so this only bounds a hung one.
@@ -79,7 +79,7 @@ async def _local(client: httpx.AsyncClient, row: tuple) -> dict | None:
 
 def env_key(variable: str) -> str:
     """The key in an environment variable this panel offers, '' for any other name."""
-    if variable not in ENV_KEYS or variable in homes.FROM_ENV_FILE:
+    if variable not in ENV_KEYS or variable in settingsfile.FROM_SETTINGS:
         return ""
     if variable == "OPENAI_API_KEY" and "api.openai.com" not in os.environ.get("OPENAI_BASE_URL", "api.openai.com"):
         # A key for whatever else OPENAI_BASE_URL points at.

@@ -135,11 +135,12 @@ def main() -> int:
     args = parser.parse_args()
     home, work, shots = Path(args.home), Path(args.work), Path(args.shots)
     home.mkdir(parents=True, exist_ok=True)
-    page_port, server_port, model_port = args.ports
-    (home / ".env").write_text("\n".join([
-        f"PAGE_PORT={page_port}", f"SERVER_PORT={server_port}", "UPDATE_CHECK_ENABLED=false", "ROAM_ENABLED=false",
-        "AGENT_LANG=zh", "PERSONA_TZ_OFFSET_HOURS=-8", "PERSONA_NAME=Mibo",
-        f"LLM_BASE_URL=http://127.0.0.1:{model_port}/v1", "LLM_MODEL=stub", "LLM_API_KEY=stub", ""]), encoding="utf-8")
+    page_port, _, model_port = args.ports
+    from mibo import settingsfile
+    settingsfile.write(home, {
+        "PAGE_PORT": page_port, "UPDATE_CHECK_ENABLED": "false", "ROAM_ENABLED": "false", "AGENT_LANG": "zh",
+        "PERSONA_TZ_OFFSET_HOURS": "-8", "PERSONA_NAME": "Mibo", "LLM_BASE_URL": f"http://127.0.0.1:{model_port}/v1",
+        "LLM_MODEL": "stub", "LLM_API_KEY": "stub"})
     (home / "runtime" / "desktop" / "welcome.json").unlink(missing_ok=True)
     first = fixture(work)
     threading.Thread(target=stand_in, args=(model_port, work), daemon=True).start()

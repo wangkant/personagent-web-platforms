@@ -30,7 +30,6 @@ from urllib.parse import urlsplit
 import webbrowser
 
 import httpx
-from dotenv import dotenv_values
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 
@@ -38,6 +37,7 @@ from . import __version__, channels, db, home as homes, i18n, langs
 from . import setup_wizard as sw
 from . import life
 from . import quiet
+from . import settingsfile
 from . import pacing
 from . import recommend
 from . import updates
@@ -354,12 +354,8 @@ class Workspace:
             raise ValueError("invalid_chat")
         return self._chats[ident]
 
-    @property
-    def env(self) -> Path:
-        return self.home / ".env"
-
     def config(self) -> dict:
-        return {k: str(v or "") for k, v in dotenv_values(self.env).items()}
+        return settingsfile.values(self.home)
 
     def summary(self) -> dict:
         with self._lock:
@@ -447,13 +443,8 @@ class Workspace:
                        or sw.DEFAULT_NAMES[lang]).strip()
             if not name:
                 raise ValueError("name_required")
-            if len(name) > 64 or _expands(name):
+            if len(name) > 64:
                 raise ValueError("invalid_character")
-            # dotenv would read ${VAR} back as another setting, a key included.
-            if _expands(key):
-                raise ValueError("key_required")
-            if _expands(model):
-                raise ValueError("model_required")
             try:
                 probe = sw.probe_key(base, key, model, timeout=20)
             except Exception:
@@ -463,15 +454,14 @@ class Workspace:
                 problem = model_problem(probe.status, probe.detail) if probe.status else ""
                 raise ValueError({"key": "key_rejected", "limited": "model_limited", "no_balance": "model_no_balance",
                                   "not_found": "model_not_found"}.get(problem, "model_unreachable"))
-            sw.copy_env_template(self.home)
             values = {"LLM_BASE_URL": base, "LLM_MODEL": model, "LLM_API_KEY": key,
                       "PERSONA_NAME": name, "AGENT_LANG": lang}
             # The page names the picture; without it, a written character keeps its own.
             if avatar is not None:
                 values["PERSONA_AVATAR"] = avatar
             elif character != "custom":
-                values["PERSONA_AVATAR"] = sw.kept_avatar(self.env, character)
-            sw.write_env(self.env, values)
+                values["PERSONA_AVATAR"] = sw.kept_avatar(self.home, old, character)
+            settingsfile.write(self.home, values)
             if character != "custom":
                 self._keep_written_persona()
                 sw.write_persona(self.home, character, name=name, lang=lang,
@@ -507,8 +497,7 @@ class Workspace:
             raise ValueError("avatar_type")
         with self._lock:
             sw.write_own_avatar(self.home, data)
-            sw.copy_env_template(self.home)
-            sw.write_env(self.env, {"PERSONA_AVATAR": sw.OWN_AVATAR})
+            settingsfile.write(self.home, {"PERSONA_AVATAR": sw.OWN_AVATAR})
             self.figure_changed()
             return self.summary()
 
@@ -522,7 +511,7 @@ class Workspace:
             if self.config().get("PERSONA_AVATAR", "").strip() == sw.OWN_AVATAR:
                 card = self.home / "persona.txt"
                 origin = sw.shipped_persona(card.read_text(encoding="utf-8")) if card.is_file() else None
-                sw.write_env(self.env, {"PERSONA_AVATAR": sw.avatar_for(origin[0]) if origin else ""})
+                settingsfile.write(self.home, {"PERSONA_AVATAR": sw.avatar_for(origin[0]) if origin else ""})
                 self.figure_changed()
             return self.summary()
 
@@ -768,9 +757,9 @@ class Workspace:
         return {"stopped": stopped}
 
     def _runtime(self) -> Path:
-        # Where the character keeps its state: .env over this process's
-        # environment, else <home>/runtime.
-        configured = dotenv_values(self.env).get("AGENT_RUNTIME_DIR")
+        # Where the character keeps its state: the home's settings over this
+        # process's environment, else <home>/runtime.
+        configured = settingsfile.values(self.home, keys=False).get("AGENT_RUNTIME_DIR")
         if configured is None:
             configured = os.environ.get("AGENT_RUNTIME_DIR", "")
         runtime = Path(configured.strip() or "runtime").expanduser()
@@ -1269,18 +1258,12 @@ class Workspace:
             self._closed = True
 
 
-def _expands(text: str) -> bool:
-    """Would dotenv read `text` back as another setting? It expands ${VAR}
-    even inside quotes, so ${LLM_API_KEY} saved as a vision key is the chat key."""
-    return "${" in str(text)
-
-
 def _endpoint(value) -> str:
     """An OpenAI-compatible base URL: https, or http only on this computer."""
     base = str(value or "").strip()
     parsed = urlsplit(base)
     if (parsed.scheme not in ("https", "http") or not parsed.hostname or parsed.username
-            or parsed.password or _expands(base)):
+            or parsed.password):
         raise ValueError("invalid_url")
     if parsed.scheme == "http" and parsed.hostname not in ("127.0.0.1", "localhost", "::1"):
         raise ValueError("https_required")
@@ -1929,8 +1912,8 @@ def relaunch(home: Path, args: argparse.Namespace) -> None:
 
 
 def _page_port(home: Path) -> int | None:
-    """PAGE_PORT, the environment over the home's .env: 0 when blank, None when it is no port."""
-    raw = (os.environ.get("PAGE_PORT") or sw.env_get(home / ".env", "PAGE_PORT") or "").strip()
+    """PAGE_PORT, the environment over the home's settings: 0 when blank, None when it is no port."""
+    raw = (os.environ.get("PAGE_PORT") or settingsfile.values(home, keys=False).get("PAGE_PORT") or "").strip()
     if not raw:
         return 0
     return int(raw) if raw.isdigit() and 0 < int(raw) < 65536 else None

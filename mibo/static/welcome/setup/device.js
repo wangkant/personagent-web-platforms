@@ -265,6 +265,8 @@
     function buildData() {
       const card = kit.card(t.dataTitle);
       card.classList.add("setup-options");
+      // Where the settings and the keys are kept, and names in settings.json that change nothing (desk.Desk.settings).
+      const keptRow = kit.optionRow(t.keptTitle, "");
       // Its choices are the places this computer has, once read.
       const placeRow = kit.optionRow(t.placeTitle, "");
 
@@ -296,8 +298,8 @@
       note.setAttribute("aria-live", "polite");
       note.hidden = true;
       const error = kit.errorLine();
-      card.append(placeRow.row, backupRow.row, restoreRow.row, resetRow.row, note, error);
-      Object.assign(data, { placeRow: placeRow.row, backup, secrets: secrets.box, savedLine, open, chosen, restore,
+      card.append(keptRow.row, placeRow.row, backupRow.row, restoreRow.row, resetRow.row, note, error);
+      Object.assign(data, { keptRow, placeRow: placeRow.row, backup, secrets: secrets.box, savedLine, open, chosen, restore,
         restoreRow, reset, first: first.box, note, error });
       return card;
     }
@@ -325,6 +327,16 @@
       d.chosen.hidden = !d.backups.length;
       d.restore.hidden = !d.backups.length;
       d.restoreRow.about.textContent = d.backups.length ? t.restoreText : t.restoreNone;
+      const s = d.settings;
+      if (s) {
+        const lines = [paI18n.t("setup_device.keptFile", { path: s.file }),
+          s.keys === "store" ? paI18n.t("setup_device.keptStore", { store: t.stores[s.store] || t.stores.other })
+            : paI18n.t("setup_device.keptPlain", { path: s.store })];
+        if (s.unknown.length) lines.push(paI18n.t("setup_device.keptUnknown", { names: s.unknown.join(", ") }));
+        if (s.invalid.length) lines.push(paI18n.t("setup_device.keptInvalid", { names: s.invalid.join(", ") }));
+        d.keptRow.about.replaceChildren(...lines.flatMap((line, i) => (i ? [el("br"), line] : [line])));
+        d.keptRow.about.hidden = false;
+      }
       for (const control of [d.backup, d.secrets, d.chosen, d.restore, d.reset, d.first]) control.disabled = d.working;
     }
 
@@ -334,6 +346,7 @@
         const value = await ctx.api("desk/data");
         data.targets = value.targets;
         data.backups = value.backups;
+        data.settings = value.settings;
         if (!data.targets.some((one) => one.id === data.place)) data.place = data.targets[0]?.id || "";
         if (value.restored) {
           data.note.textContent = value.restored.error ? t.errors[value.restored.error] : t.restored;

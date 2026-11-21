@@ -117,19 +117,18 @@ def main(argv: list[str]) -> int:
     out.mkdir(parents=True, exist_ok=True)
     wanted = [t for t in bench.TASKS if not args.tasks or t["id"] in args.tasks.split(",")]
 
-    from dotenv import dotenv_values
-    # The agent takes its model from the home's .env: for the run it points at the counter, and is put back after.
-    env_file = home / ".env"
+    from mibo import settingsfile
+    # The agent takes its model from the home's settings: for the run it points at the counter, and is put back after.
+    upstream = settingsfile.values(home, keys=False).get("LLM_BASE_URL") or ""
+    env_file = settingsfile.path(home)
     kept = env_file.read_text(encoding="utf-8")
-    upstream = dotenv_values(env_file).get("LLM_BASE_URL") or ""
     if upstream.startswith(f"http://127.0.0.1:{args.site_port + 1}/"):
-        # A run killed before it put the .env back: the counter would call itself.
+        # A run killed before it put the settings back: the counter would call itself.
         raise SystemExit("the home's LLM_BASE_URL still points at the counter of a run that was stopped; put it back")
     counter = Counter(upstream, out / "model.jsonl")
     through = {"LLM_BASE_URL": f"http://127.0.0.1:{counter.serve(args.site_port + 1)}/v1",
                **({"LLM_MODEL": args.model} if args.model else {})}
-    lines = [line for line in kept.splitlines() if line.partition("=")[0].strip() not in through]
-    env_file.write_text("\n".join(lines + [f"{k}={v}" for k, v in through.items()]) + "\n", encoding="utf-8")
+    settingsfile.write(home, through)
     site = f"http://127.0.0.1:{args.site_port}"
     server = subprocess.Popen([sys.executable, str(HERE / "opsite" / "serve.py"), str(args.site_port),
                                str(out / "site.log")])

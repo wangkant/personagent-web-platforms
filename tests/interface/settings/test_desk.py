@@ -10,11 +10,9 @@ import time
 import zipfile
 
 import pytest
-from dotenv import dotenv_values
 
 from harness.app import TOKEN
-from mibo import browsed, chatlog, db, i18n, shortcut, taste
-from mibo import setup_wizard as sw
+from mibo import browsed, chatlog, db, i18n, secretstore, settingsfile, shortcut, taste
 from mibo import welcome
 from mibo.library import Item, Library
 from mibo.panels import desk, feed
@@ -61,10 +59,13 @@ def opened(monkeypatch):
 
 
 def seed(home):
-    sw.write_env(home / ".env", {"LLM_API_KEY": KEY, "LLM_MODEL": "m", "PERSONA_NAME": "Ann",
-                                 "MIBO_MCP_GITHUB_TOKEN": MCP_KEY})
+    settingsfile.write(home, {"LLM_API_KEY": KEY, "LLM_MODEL": "m", "PERSONA_NAME": "Ann"})
     (home / "persona.txt").write_text("You are Ann.\n", encoding="utf-8")
-    (home / "mcp.json").write_text('{"mcpServers": {}}', encoding="utf-8")
+    # A connector whose token the credential store keeps, as Settings › 工具 saves one.
+    (home / "mcp.json").write_text(json.dumps({"mcpServers": {"github": {
+        "command": "npx", "args": ["-y", "github-mcp"], "env": {"GITHUB_TOKEN": "${MIBO_MCP_GITHUB_TOKEN}"}}}}),
+        encoding="utf-8")
+    secretstore.put(home, "MIBO_MCP_GITHUB_TOKEN", MCP_KEY)
     (home / "skills" / "notes").mkdir(parents=True)
     (home / "skills" / "notes" / "SKILL.md").write_text("notes", encoding="utf-8")
     runtime = home / "runtime"
@@ -209,7 +210,7 @@ def test_a_backup_holds_the_home_but_no_keys_logs_sign_ins_or_chat_record(client
     assert value["path"] == str(path) and value["size"] == path.stat().st_size > 0
     archive = zipfile.ZipFile(path)
     names = set(archive.namelist())
-    assert {desk.MANIFEST, ".env", "persona.txt", "mcp.json", "skills/notes/SKILL.md", "runtime/memory.json",
+    assert {desk.MANIFEST, "settings.json", "persona.txt", "mcp.json", "skills/notes/SKILL.md", "runtime/memory.json",
             "runtime/mibo.db", "runtime/desktop/app.json", "data/examples.en.jsonl"} <= names
     for left in ("runtime/desktop/app.log", "runtime/desktop/welcome.json",
                  "runtime/desktop/webview/Cookies", "runtime/mibo.db-wal", "runtime/mibo.db-shm"):
@@ -219,8 +220,9 @@ def test_a_backup_holds_the_home_but_no_keys_logs_sign_ins_or_chat_record(client
     copy.write_bytes(archive.read("runtime/mibo.db"))
     assert _page_texts(copy) == ["tea at four"] and SAID.encode() not in copy.read_bytes()
     assert _finds(copy) == [("tide tables", 1, 1)], "the finds, what was said of them and the pages read"
-    env = archive.read(".env").decode("utf-8")
-    assert KEY not in env and MCP_KEY not in env and "LLM_MODEL=m" in env and "LLM_API_KEY=" in env
+    assert desk.KEYS not in names
+    assert not [n for n in names if KEY.encode() in archive.read(n) or MCP_KEY.encode() in archive.read(n)]
+    assert json.loads(archive.read("settings.json"))["LLM_MODEL"] == "m"
     assert json.loads(archive.read(desk.MANIFEST))["secrets"] is False
     assert [b["name"] for b in value["backups"]] == [value["name"]]
     assert value["backups"][0]["place"] == "documents"
@@ -231,7 +233,10 @@ def test_keys_go_into_a_backup_only_when_asked(client, workspace, places):
     seed(workspace.home)
     name = post(client, "/backup", {"to": "desktop", "secrets": True}).json()["name"]
     archive = zipfile.ZipFile(places / "Desktop" / name)
-    assert KEY in archive.read(".env").decode("utf-8") and MCP_KEY in archive.read(".env").decode("utf-8")
+    keys = json.loads(archive.read(desk.KEYS))
+    assert keys["LLM_API_KEY"] == KEY and keys["MIBO_MCP_GITHUB_TOKEN"] == MCP_KEY
+    # Only there: the settings file of the archive holds no key either.
+    assert KEY.encode() not in archive.read("settings.json")
     assert json.loads(archive.read(desk.MANIFEST))["secrets"] is True
     copy = places / "copy.db"
     copy.write_bytes(archive.read("runtime/mibo.db"))
@@ -267,8 +272,8 @@ def test_a_restore_is_done_by_the_next_start_and_keeps_the_keys_here(client, wor
     desk.apply_pending(home)
     assert (home / "runtime" / "memory.json").read_text(encoding="utf-8") == '{"a": "likes tea"}'
     assert not (home / "skills" / "later").exists()
-    values = dotenv_values(home / ".env")
-    assert values["LLM_API_KEY"] == KEY and values["MIBO_MCP_GITHUB_TOKEN"] == MCP_KEY
+    assert settingsfile.values(home)["LLM_API_KEY"] == KEY
+    assert secretstore.get(home, "MIBO_MCP_GITHUB_TOKEN") == MCP_KEY
     assert (home / "runtime" / "desktop" / "webview" / "Cookies").exists()
     # The page's chats as the backup has them; the chat record, never in a backup, as it was.
     assert _page_texts(home / "runtime" / "mibo.db") == ["tea at four"]
@@ -282,6 +287,21 @@ def test_a_restore_is_done_by_the_next_start_and_keeps_the_keys_here(client, wor
     told = client.get("/api/desk/data", headers=HEADERS).json()
     assert told["restored"] == {"error": ""}
     assert client.get("/api/desk/data", headers=HEADERS).json()["restored"] is None
+
+
+def test_a_restore_of_a_backup_with_keys_puts_them_back_and_keeps_the_ones_it_replaced(
+        client, workspace, places, restarts):
+    seed(workspace.home)
+    home = workspace.home
+    name = post(client, "/backup", {"to": "desktop", "secrets": True}).json()["name"]
+    settingsfile.write(home, {"LLM_API_KEY": "sk-newer-key-0123456789"})
+    secretstore.put(home, "MIBO_MCP_GITHUB_TOKEN", "")
+    post(client, "/restore", {"place": "desktop", "name": name})
+    desk.apply_pending(home)
+    assert settingsfile.values(home)["LLM_API_KEY"] == KEY
+    assert secretstore.get(home, "MIBO_MCP_GITHUB_TOKEN") == MCP_KEY
+    safety = next((home / "backups").glob("mibo-backup-*-before-restore.zip"))
+    assert json.loads(zipfile.ZipFile(safety).read(desk.KEYS)) == {"LLM_API_KEY": "sk-newer-key-0123456789"}
 
 
 def test_a_restore_that_fails_midway_puts_the_present_back(client, workspace, places, restarts, monkeypatch):
@@ -316,14 +336,16 @@ def test_a_reset_backs_up_first_when_asked_then_leaves_only_the_backups(client, 
     answer = post(client, "/reset", {"backupTo": "desktop", "secrets": True})
     value = answer.json()
     assert value["restarting"] is True and value["path"].startswith(str(places / "Desktop"))
-    assert KEY in zipfile.ZipFile(value["path"]).read(".env").decode("utf-8")
+    assert json.loads(zipfile.ZipFile(value["path"]).read(desk.KEYS))["LLM_API_KEY"] == KEY
     assert restarts == ["relaunch", "shutdown"]
-    assert (home / ".env").exists(), "nothing is deleted before the next start"
+    assert (home / "settings.json").exists(), "nothing is deleted before the next start"
     desk.apply_pending(home)
     assert (home / "backups" / "mibo-backup-kept.zip").exists() and (home / "runtime" / "desktop" / "app.log").exists()
-    for gone in (".env", "persona.txt", "mcp.json", "skills", "data", "runtime/memory.json", "runtime/mibo.db",
+    for gone in ("settings.json", "persona.txt", "mcp.json", "skills", "data", "runtime/memory.json", "runtime/mibo.db",
                  "runtime/desktop/webview", "runtime/desktop/app.json", "runtime/desktop/pending.json"):
         assert not (home / gone).exists(), gone
+    # The keys go with it: the credential store holds nothing more for this home.
+    assert secretstore.get(home, "LLM_API_KEY") == "" and secretstore.get(home, "MIBO_MCP_GITHUB_TOKEN") == ""
 
 
 def test_a_reset_without_a_backup_writes_none(client, workspace, places, restarts):

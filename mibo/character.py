@@ -14,8 +14,7 @@ import time
 from pathlib import Path
 from typing import Callable, Optional
 
-from . import home as homes
-from . import life, paths, person, quiet
+from . import life, paths, person, quiet, settingsfile
 from .dm import chat_key
 from .library import KEPT, Library
 from .memstore import MemoryFileDamaged
@@ -80,8 +79,8 @@ class Character:
 
         self._stale = False
         self.problem = ""
-        # The home's .env decides, as saved by the page: this process reads its settings from it.
-        homes.load_env(self.home)
+        # The home's settings, as saved by the page, under what the environment the app started with says.
+        settingsfile.load(self.home)
         paths.use_home(self.home)
         try:
             agent = Agent(AgentSettings.from_env())

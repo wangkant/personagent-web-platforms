@@ -4,7 +4,7 @@ without end (tools/opsite/t/t41-profile.html), asked for its account numbers.
 
     python tools/panereading.py <scratch home> --out <folder> [--site-port 59413] [--model-port 59412]
 
-The home's .env must name the stand-in model started here (LLM_BASE_URL=http://127.0.0.1:<model-port>/v1). The
+The home's settings must name the stand-in model started here (LLM_BASE_URL=http://127.0.0.1:<model-port>/v1). The
 stand-in plans a read and then done; asked to read, it answers from the numbers it was sent. results.json holds
 how many reading calls the read took, whether the numbers reached the first one, how far the page scrolled while
 it ran (the furthest any scroller went), the steps and the reply. The last lines say what held; it exits 1 when

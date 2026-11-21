@@ -18,9 +18,9 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from dotenv import dotenv_values
 from PIL import Image, ImageDraw
 
+from mibo import settingsfile
 from mibo.home import looks_like_home
 from mibo.library import Item, Library, item_id
 from mibo.roam import player_for
@@ -67,7 +67,7 @@ SAMPLES = [
 
 def runtime_of(home: Path) -> Path:
     # Where the service keeps its state, read as the page reads it.
-    configured = dotenv_values(home / ".env").get("AGENT_RUNTIME_DIR") or "runtime"
+    configured = settingsfile.values(home, keys=False).get("AGENT_RUNTIME_DIR") or "runtime"
     runtime = Path(configured.strip() or "runtime").expanduser()
     return runtime if runtime.is_absolute() else home / runtime
 
@@ -88,12 +88,12 @@ def cover(top: tuple, bottom: tuple) -> bytes:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Put sample finds into a home's library.")
-    parser.add_argument("--home", required=True, help="the home folder (with .env and persona.txt)")
+    parser.add_argument("--home", required=True, help="the home folder (with settings.json and persona.txt)")
     parser.add_argument("--lang", choices=("zh", "en"), default="en", help="the language of the character's words")
     args = parser.parse_args()
     home = Path(args.home).expanduser().resolve()
     if not looks_like_home(home):
-        print(f"feed_seed: {home} is not a mibo home (no .env and persona.txt); nothing written.")
+        print(f"feed_seed: {home} is not a mibo home (no settings.json and persona.txt); nothing written.")
         return 2
     library = Library(runtime_of(home))
     now = int(time.time())

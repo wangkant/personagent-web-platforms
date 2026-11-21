@@ -9,7 +9,7 @@ from pathlib import Path
 
 from fastapi import Request
 
-from .. import abilities, drafting, modelcatalog, spend
+from .. import abilities, drafting, modelcatalog, settingsfile, spend
 from .. import setup_wizard as sw
 from ..endpoints import chat_completions_url, model_problem
 from . import models as listing
@@ -101,10 +101,9 @@ async def model_list(workspace) -> dict:
 
 def switch(workspace, model: str) -> None:
     """Save another model of the saved service, as Settings saves one: tried first,
-    then written to .env and the character service restarted to read it."""
-    from ..welcome import _expands
+    then saved and the character built again to read it."""
     model = str(model or "").strip()
-    if not model or len(model) > 256 or _expands(model):
+    if not model or len(model) > 256:
         raise ValueError("model_required")
     with workspace._lock:
         values = workspace.config()
@@ -120,7 +119,7 @@ def switch(workspace, model: str) -> None:
             problem = model_problem(probe.status, probe.detail) if probe.status else ""
             raise ValueError({"key": "key_rejected", "limited": "model_limited", "no_balance": "model_no_balance",
                               "not_found": "model_not_found"}.get(problem, "model_unreachable"))
-        sw.write_env(workspace.env, {"LLM_MODEL": model})
+        settingsfile.write(workspace.home, {"LLM_MODEL": model})
         abilities.add_recent(_runtime(workspace), base, model)
         workspace.character.reload()
 

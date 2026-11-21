@@ -12,7 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 from harness.app import TOKEN
-from mibo import home as homes
+from mibo import settingsfile
 from mibo import setup_wizard as sw
 from mibo import welcome
 from mibo.panels import detect
@@ -126,10 +126,10 @@ def test_a_key_in_the_environment_is_named_and_never_shown(client, monkeypatch) 
     assert "sk-from-the-shell" not in answer.text
 
 
-def test_a_key_this_home_s_own_env_file_set_is_not_a_find(client, monkeypatch) -> None:
+def test_a_key_this_home_s_own_settings_set_is_not_a_find(client, monkeypatch) -> None:
     monkeypatch.setattr(detect, "LOCAL", ())
-    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-from-env-file")
-    monkeypatch.setattr(homes, "FROM_ENV_FILE", {"OPENROUTER_API_KEY"})
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-from-settings")
+    monkeypatch.setattr(settingsfile, "FROM_SETTINGS", {"OPENROUTER_API_KEY"})
     assert client.get("/api/detect", headers=HEADERS).json()["keys"] == []
 
 
@@ -156,7 +156,7 @@ def test_a_save_takes_the_key_from_the_variable_the_page_names(client, workspace
         "provider": "deepseek", "apiKey": "", "apiKeyFrom": "DEEPSEEK_API_KEY", "lang": "en"})
     assert saved.status_code == 200, saved.text
     assert probed and probed[0][1] == "sk-from-the-shell"
-    assert sw.env_get(workspace.home / ".env", "LLM_API_KEY") == "sk-from-the-shell"
+    assert settingsfile.values(workspace.home).get("LLM_API_KEY", "") == "sk-from-the-shell"
     assert "sk-from-the-shell" not in saved.text
 
 

@@ -67,7 +67,7 @@ class Remarks:
         """The character is asleep on its own clock, or out walking."""
         hours = parse_tz_offset(values.get("PERSONA_TZ_OFFSET_HOURS", ""))
         if hours is None:
-            # As the character reads it, with the language from the .env here.
+            # As the character reads it, with the language from the home's settings.
             hours = default_tz_offset(values.get("AGENT_LANG") or "")
         return bool(life.asleep_until(now, hours)) or Library(self.ws._runtime()).outing().state == "out"
 

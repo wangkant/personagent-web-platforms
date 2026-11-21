@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from mibo import life, pacing, person as person_rows, profile, recommend, situation, taste  # noqa: E402
+from mibo import life, pacing, person as person_rows, profile, recommend, settingsfile, situation, taste  # noqa: E402
 from mibo.library import Item, Library  # noqa: E402
 from mibo.panels import feed  # noqa: E402
 from llm import env_values  # noqa: E402
@@ -196,8 +196,7 @@ class Arm:
         self.asked = 0
         if name in APP:
             home.mkdir(parents=True, exist_ok=True)
-            (home / ".env").write_text("AGENT_LANG=zh\nPERSONA_NAME=Mibo\nPERSONA_TZ_OFFSET_HOURS=-8\n",
-                                       encoding="utf-8")
+            settingsfile.write(home, {"AGENT_LANG": "zh", "PERSONA_NAME": "Mibo", "PERSONA_TZ_OFFSET_HOURS": "-8"})
             self.runtime.mkdir(parents=True, exist_ok=True)
             self.library = Library(self.runtime)
             known = {f.name for f in fields(Item)}
@@ -449,8 +448,7 @@ async def main() -> None:
             items[it["id"]] = it
     at = arrivals(list(items.values()))
     pop = popularity(items, labels)
-    values = {**profile.values_of(args.env.parent), **{k: v for k, v in env_values(args.env).items()
-                                                        if k.startswith("LLM_")}}
+    values = env_values(args.env)
     truth = next(t for t in EVERYONE if t.name == args.person)
     seed = EVERYONE.index(truth) + 1000 * args.seed
     results = []

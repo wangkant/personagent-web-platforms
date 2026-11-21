@@ -1,7 +1,7 @@
 """The errand «给主agent发一个hello» on the chat fixture (tools/chatfixture), through the app's own loop
 (mibo/desk/operate.run): does hello reach the program's main agent, in each variant of the fixture?
 
-    python tools/chatfixture_errand.py replay --looks <looks.json> [--home <home with .env>] [--model stub|real]
+    python tools/chatfixture_errand.py replay --looks <looks.json> [--home <home>] [--model stub|real]
                                               [--eyes none|look] [--runs N] [--out <file>]
     python tools/chatfixture_errand.py window --home <folder> [--model stub|real] [--out <file>]
 
@@ -16,7 +16,7 @@ window starts the fixture and works it through the real program layer (mibo/desk
 the send confirmed on a stand-in card: it needs a screen and moves windows, so it runs on the sandbox's runners,
 never on someone's own desktop.
 
---model real calls the person's model (LLM_BASE_URL, LLM_API_KEY and LLM_MODEL from <home>/.env) and counts what
+--model real calls the person's model (LLM_BASE_URL, LLM_API_KEY and LLM_MODEL from <home>'s settings) and counts what
 each answer cost; stub is a scripted stand-in that presses what the look names or describes. The last lines give,
 per variant, how many runs ended with hello in the main agent's chat and nowhere else. Exit 0 when every run did.
 """
@@ -47,8 +47,8 @@ class Real:
     """The person's model through its OpenAI-compatible service, as tool.use calls it for this loop."""
 
     def __init__(self, home: Path):
-        env = dict(line.split("=", 1) for line in (home / ".env").read_text(encoding="utf-8").splitlines()
-                   if "=" in line and not line.startswith("#"))
+        from mibo import settingsfile
+        env = settingsfile.values(home)
         self.url, self.key, self.model = env["LLM_BASE_URL"].rstrip("/"), env["LLM_API_KEY"], env["LLM_MODEL"]
         self.cost = 0.0
         self.calls = 0

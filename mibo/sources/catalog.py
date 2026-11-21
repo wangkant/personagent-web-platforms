@@ -395,7 +395,7 @@ async def run_round(runtime: Path, lang: str) -> tuple[int, list[str]]:
 class Rounds:
     """A round soon after start, then every ROUND_EVERY_S, and at once when asked.
     `runtime` and `lang` are read again for each round, so a changed setting counts. `home` is the folder
-    whose .env names the character's model, the runtime's parent unless given."""
+    whose settings name the character's model, the runtime's parent unless given."""
 
     def __init__(self, runtime: Callable[[], Path], lang: Callable[[], str],
                  home: Optional[Callable[[], Path]] = None):

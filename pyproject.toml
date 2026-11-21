@@ -71,7 +71,8 @@ dependencies = [
     # arguments against the tool's schema before the card (mcp_tools.py).
     "mcp>=2.3,<3",
     "jsonschema>=4.20,<5",
-    # Keeps MCP servers' values and sign-in tokens in the system's credential store (secretstore.py).
+    # Keeps the model keys and MCP servers' values and sign-in tokens in the system's credential store
+    # (secretstore.py, settingsfile.py).
     "keyring>=25,<26",
     # Scheduled tasks (schedule.py): dateutil's rrule finds the next time of a rhythm; tzlocal names this
     # computer's zone; tzdata is the zone database Windows lacks, for zoneinfo and daylight saving.
@@ -110,7 +111,7 @@ Documentation = "https://github.com/wangkant/mibo#readme"
 [tool.hatch.build.targets.sdist]
 # The version PyPI took for 1.2.1; hatchling defaults to a newer one.
 core-metadata-version = "2.4"
-only-include = ["mibo", "data", ".env.example"]
+only-include = ["mibo", "data"]
 
 [tool.hatch.build.targets.wheel]
 core-metadata-version = "2.4"
@@ -122,9 +123,6 @@ dev-mode-dirs = ["."]
 
 [tool.hatch.build.targets.wheel.sources]
 "data" = "mibo/_bundled/data"
-
-[tool.hatch.build.targets.wheel.force-include]
-".env.example" = "mibo/_bundled/.env.example"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

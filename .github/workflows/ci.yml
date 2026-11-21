@@ -129,7 +129,7 @@ jobs:
           names = zipfile.ZipFile(glob.glob("dist/*.whl")[0]).namelist()
           shipped = {n[len(prefix):] for n in names if n.startswith(prefix)}
           tracked = set(subprocess.run(
-              ["git", "ls-files", "data", ".env.example"],
+              ["git", "ls-files", "data"],
               capture_output=True, text=True, check=True).stdout.split())
           assert tracked and tracked <= shipped, sorted(tracked - shipped)
           print(len(tracked), "tracked shared files are in the wheel")
@@ -152,8 +152,7 @@ jobs:
           from mibo.agent import Agent
           assert mibo.__version__ == md.version('mibo'), mibo.__version__
           assert not home.is_checkout(), home.CHECKOUT
-          for shipped in ('.env.example', 'data/persona.example.en.txt'):
-              assert home.resource(*shipped.split('/')).is_file(), shipped
+          assert home.resource('data', 'persona.example.en.txt').is_file(), 'data/persona.example.en.txt'
           assert (home.PACKAGE_DIR / 'py.typed').is_file(), 'py.typed missing from the wheel'
           print('wheel import ok', mibo.__version__)
           "

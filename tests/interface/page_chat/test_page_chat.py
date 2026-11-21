@@ -8,8 +8,8 @@ import base64
 import pytest
 
 from harness.app import TOKEN
-from mibo import setup_wizard as sw
 from mibo import welcome
+from mibo import settingsfile
 
 HEADERS = {welcome.TOKEN_HEADER: TOKEN}
 # The smallest PNG: one transparent pixel.
@@ -21,7 +21,7 @@ SHOWN = base64.b64encode(PNG).decode()
 @pytest.fixture(autouse=True)
 def configured(workspace):
     """A home with a key: the page takes messages only once a model is set up."""
-    sw.write_env(workspace.env, {"LLM_API_KEY": "key"})
+    settingsfile.write(workspace.home, {"LLM_API_KEY": "key"})
 
 
 def _replying(monkeypatch, workspace, replies, asked=None):

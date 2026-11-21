@@ -28,6 +28,6 @@ def holding(root: Path, words) -> dict[str, list[str]]:
 
 def restarted(app: App) -> App:
     """`app` stopped (its character closed with it) and its home served again by a new one behind the same model;
-    the home's .env keeps the settings the first was given."""
+    the home keeps the settings the first was given."""
     app.close()
     return App(app.home, app.model).open()

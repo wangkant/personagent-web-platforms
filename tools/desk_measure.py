@@ -17,7 +17,7 @@ It only operates programs it starts itself, on the second monitor when there is 
 them. Real keys and clicks are sent only while one of its own windows is in front; otherwise the run stops.
 `--tree` measures another copy of the package (an earlier one, for a before and after); `--script` replays fixed
 model answers from a JSON file ({"T1": [reply, ...]}) instead of calling a model. LLM_API_KEY and LLM_BASE_URL are
-read from DIR/.env and never printed.
+read from DIR's settings and never printed.
 """
 from __future__ import annotations
 
@@ -205,8 +205,13 @@ class Bench:
     # --- the model
 
     def key(self) -> tuple[str, str]:
-        env = dict(line.split("=", 1) for line in (self.home / ".env").read_text(encoding="utf-8").splitlines()
-                   if "=" in line)
+        try:
+            from mibo import settingsfile
+            env = settingsfile.values(self.home)
+        except ImportError:
+            # An earlier copy of the package (--tree) keeps them in .env.
+            env = dict(line.split("=", 1) for line in (self.home / ".env").read_text(encoding="utf-8").splitlines()
+                       if "=" in line)
         return env["LLM_BASE_URL"].strip().rstrip("/"), env["LLM_API_KEY"].strip()
 
     def spent(self) -> float:

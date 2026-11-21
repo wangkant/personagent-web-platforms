@@ -4,7 +4,7 @@ sandbox runner only (tools/sandbox/pane.py): it moves the machine's own pointer,
 
     python tools/panecard.py <scratch home> --out <folder> [--site-port 59411] [--model-port 59410]
 
-The home's .env must name the stand-in model started here (LLM_BASE_URL=http://127.0.0.1:<model-port>/v1).
+The home's settings must name the stand-in model started here (LLM_BASE_URL=http://127.0.0.1:<model-port>/v1).
 Writes results.json ({"card": what the card said, "pressed_at", "paused": the holds seen while the card was up,
 "answered", "site_got_it"}) and exits 0 when the card was answered by the press, nothing paused the run and the
 site got the message, else 1."""

@@ -263,7 +263,7 @@ _WINDOWS = os.name == "nt"
 
 def replace(source: str | Path, target: str | Path) -> None:
     """os.replace that waits out a reader. On Windows a file someone has open
-    for an instant cannot be replaced, and the page reads .env on every poll."""
+    for an instant cannot be replaced, and the page reads settings.json on every poll."""
     for attempt in range(20):
         try:
             os.replace(source, target)
