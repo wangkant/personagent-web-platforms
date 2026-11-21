@@ -154,29 +154,6 @@ def test_out_of_time_after_calls_were_made_the_reply_says_what_was_done(hurried)
     assert "tools" not in last and "schedule_list" in _context(last)
 
 
-def test_past_sixty_turns_forty_are_kept_and_the_dropped_ones_wait_for_the_fold(app, turn):
-    # The fold fails once and waits ten minutes: nothing of the chat is folded meanwhile.
-    app.model.script(fail(500), purpose="fold")
-    for n in range(29):
-        turn(f"turn {n}", say(f"ok {n}"))
-    full = turn("turn 29", say("ok 29"))
-    # The system prompt and 59 turns, the new one among them.
-    assert len(full.asked()[0]["messages"]) == 1 + 59
-    trimmed = turn("one more", say("noted"))
-    messages = trimmed.asked()[0]["messages"]
-    assert len(messages) == 1 + 40 and messages[1]["content"] == "ok 10"
-    # The 21 turns the trim dropped were never folded: they wait in the spill, kept across a restart.
-    kept = app.home / "runtime" / "recent.json"
-    spill: list = []
-    for _ in range(200):
-        convs = json.loads(kept.read_text(encoding="utf-8"))["convs"] if kept.is_file() else {}
-        spill = next((c.get("dm_spill") for c in convs.values() if c.get("dm_spill")), [])
-        if spill:
-            break
-        time.sleep(0.05)
-    assert [row["content"] for row in spill][:2] == ["turn 0", "ok 0"] and len(spill) == 21
-
-
 def test_no_card_comes_before_a_reply(app, turn):
     done = turn("can you help me write a cover letter?", say("Sure. Who is it for?"))
     assert done.reply == "Sure. Who is it for?" and not done.cards

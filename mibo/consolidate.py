@@ -17,7 +17,6 @@ from collections import Counter
 from datetime import datetime
 from typing import Callable, Optional
 
-from . import channels
 from . import memstate
 from . import quiet
 from . import ranking
@@ -98,42 +97,11 @@ class Consolidation:
                 and int(getattr(self.settings, "memory_calls_per_day", 0) or 0) > 0
                 and int(self.memory_tidy_every or 0) > 0)
 
-    def _window_rows(self, conv: str) -> tuple[list, list]:
-        """(spill, window) of a chat: the turns its trim dropped, and its turns."""
-        uid = channels.dm_user(conv)
-        return (list(self._dm_spill.get(uid) or []),
-                list(self.dm_history.get(uid) or []))
-
     def _maybe_consolidate(self, conv: str, reason: str) -> Optional[str]:
         """After a turn: the fold starts when due, and the memory loop looks
         each minute until it has run."""
         self.__dict__["_person_heard"] = True
         return self._maybe_fold_person()
-
-    def _advance_cursor(self, conv: str, max_seq: int) -> None:
-        """Everything numbered up to `max_seq` is consolidated: the cursor
-        moves and the spill lets go of it. An evicted chat's copy on disk
-        is moved instead."""
-        uid = channels.dm_user(conv)
-        if conv in self.window_seq:
-            # Before the spill lets go: what was read stays in the log.
-            self._log_chat(conv)
-            self.folded_upto[conv] = max(self.folded_upto.get(conv, 0), max_seq)
-            spill = self._dm_spill.get(uid)
-            if spill:
-                spill[:] = [r for r in spill if _seq(r) > max_seq]
-            self._recent_dirty.add(conv)
-            return
-        snap = self._recent.snapshot(conv)
-        if not snap:
-            return
-        snap["folded_upto"] = max(int(snap.get("folded_upto") or 0), max_seq)
-        snap["dm_spill"] = [r for r in snap.get("dm_spill") or [] if _seq(r) > max_seq]
-        if getattr(self.settings, "memory_keep_recent", True):
-            try:
-                self._recent.write()
-            except OSError as e:
-                logger.warning("[Agent] recent messages save failed: %s", e)
 
     # ---- the one person of the page chats (person.py) ----------------------------
 
@@ -274,7 +242,6 @@ class Consolidation:
             upto = fold.setdefault("upto", {})
             for conv, seq in newest.items():
                 upto[conv] = max(int(upto.get(conv) or 0), seq)
-                self._advance_cursor(conv, seq)
             fold.update(day=memstate._day(time.time()), failed=0, why="", at=time.time())
             self._save_person()
             # What it newly kept: the page shows 已记住 under the chat each came from.

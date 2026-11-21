@@ -14,8 +14,8 @@ A script is a list of rounds, one per request, taken first in, first out. A roun
     drop()                        the connection closed with no answer
 
 Inner calls go to their own scripts by purpose, recognised from the constant each module sends first
-(review.POLICY, pagejudge.SYSTEM, consolidate's prompt, ingestion's vision prompt), never
-from prose. A request
+(review.POLICY, pagejudge.SYSTEM, consolidate's prompt, ingestion's vision prompt), or the
+chat's checkpoint request by the constant it asks with last (context.COMPACT), never from prose. A request
 with max_tokens 1 is the endpoint probe a character makes when it starts, answered "ok" unless the test
 scripts "probe". Every request is recorded, with its key apart from its headers (None when none was sent).
 
@@ -32,7 +32,7 @@ import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from mibo import consolidate, ingestion, review
+from mibo import consolidate, context, ingestion, review
 from mibo.web import pagejudge
 
 MODEL = "scripted"
@@ -43,7 +43,7 @@ SYSTEM_OF = {
     "fold": consolidate._PERSON_PROMPT,
     "vision": ingestion.ContentIngestion.VISION_READ_PROMPT,
 }
-PURPOSES = ("reply", "probe", *SYSTEM_OF)
+PURPOSES = ("reply", "probe", "compact", *SYSTEM_OF)
 
 
 def say(text: str) -> dict:
@@ -110,6 +110,9 @@ def purpose_of(body: dict) -> str:
     for purpose, constant in SYSTEM_OF.items():
         if lead.startswith(constant):
             return purpose
+    # The chat's checkpoint request replays the reply's prefix and asks last (context.COMPACT).
+    if str(messages[-1].get("content") or "").startswith(context.COMPACT):
+        return "compact"
     if body.get("max_tokens") == 1:
         return "probe"
     return "reply"

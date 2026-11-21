@@ -44,11 +44,15 @@ def test_a_model_whose_window_nobody_states_is_given_the_assumed_windows_room(tu
 
 
 def test_the_window_an_overflow_error_states_is_the_models_from_then_on(app, turn):
-    # The host lists more than its server takes: the first reply is refused, naming the window.
+    # The host lists more than its server takes: the first request is refused, naming the window, and the same
+    # request is fitted to that window and sent once more within the turn.
     app.model.window = 16384
     _abilities(app, context=65536)
-    refused = turn("hello")
-    assert refused.status != 200 and refused.asked()[0]["max_tokens"] == context.budget(65536).answer
+    first = turn("hello", say("hey."))
+    refused, again = first.asked()
+    assert (first.status, first.reply) == (200, "hey.")
+    assert refused["max_tokens"] == context.budget(65536).answer
+    assert again["max_tokens"] == context.budget(16384).answer and tokens(again) + again["max_tokens"] <= 16384
     done = turn("hello again", say("hey."))
     assert done.status == 200 and done.asked()[0]["max_tokens"] == context.budget(16384).answer
 

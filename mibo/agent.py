@@ -193,10 +193,6 @@ class Agent(Turns, DirectMessages, MessageParsing, ReplyDecision, PromptBuilder,
         self._recent_dirty: set[str] = set()
         self._recent_flushed_at: Optional[float] = None
         self.window_seq: dict[str, int] = {}
-        # Every line or turn numbered up to this is consolidated (consolidate.py).
-        self.folded_upto: dict[str, int] = {}
-        # Unconsolidated turns of a chat that the history's trim dropped.
-        self._dm_spill: dict[str, list] = {}
         # A chat's state is read and written under its lock.
         self.locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         # One turn of a chat at a time: an answer, or the follow-up of a plan (dm.py, followup.py).
@@ -239,13 +235,9 @@ class Agent(Turns, DirectMessages, MessageParsing, ReplyDecision, PromptBuilder,
         """A chat's saved entry into the running state; what is held wins."""
         self.window_seq[conv] = max(int(entry.get("seq") or 0),
                                     self.window_seq.get(conv, 0))
-        self.folded_upto[conv] = max(int(entry.get("folded_upto") or 0),
-                                     self.folded_upto.get(conv, 0))
         uid = channels.dm_user(conv)
         if entry.get("dm"):
             self.dm_history.setdefault(uid, list(entry["dm"]))
-        if entry.get("dm_spill"):
-            self._dm_spill.setdefault(uid, list(entry["dm_spill"]))
         if entry.get("unanswered"):
             self._dm_unanswered.setdefault(uid, list(entry["unanswered"]))
         if not self.last_dm_activity_at.get(uid):
@@ -270,18 +262,15 @@ class Agent(Turns, DirectMessages, MessageParsing, ReplyDecision, PromptBuilder,
             # Not held (evicted, or never woken): the copy on disk stands.
             return dict(snap) if snap else None
         uid = channels.dm_user(conv)
-        folded = int(self.folded_upto.get(conv, snap.get("folded_upto", 0)) or 0)
         turns = (self.dm_history[uid] if uid in self.dm_history
                  else snap.get("dm") or [])
         entry = {"dm": list(turns),
-                 "dm_spill": list(self._dm_spill.get(uid) or []),
                  "unanswered": list(self._dm_unanswered.get(uid) or [])[
                      -recent_mod.UNANSWERED_MAX:]}
         if not any(entry.values()):
             return None
         newest = max((float(r.get("t1") or r.get("t") or 0.0) for r in entry["dm"]), default=0.0)
         entry.update(seq=int(self.window_seq.get(conv, snap.get("seq", 0)) or 0),
-                     folded_upto=folded,
                      last_at=max(float(self.last_dm_activity_at.get(uid, 0.0) or 0.0), newest,
                                  float(snap.get("last_at") or 0.0)))
         return entry

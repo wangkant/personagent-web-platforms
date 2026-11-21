@@ -65,18 +65,8 @@ class MemoryState:
 
     # ---- small per-chat records --------------------------------------------
 
-    def add_lost(self, conv: str, n: int) -> None:
-        if n > 0:
-            lost = self._map("lost_lines")
-            lost[conv] = int(lost.get(conv) or 0) + n
-            self.touch()
-
-    def lost(self, conv: str) -> int:
-        return int(self._map("lost_lines").get(conv) or 0)
-
     def drop_conv(self, conv: str) -> None:
-        for key in ("per_conv", "lost_lines"):
-            self._map(key).pop(conv, None)
+        self._map("per_conv").pop(conv, None)
         self.touch()
 
 
@@ -160,7 +150,7 @@ class CallBudget:
 
     def status(self, now: float, cap: int, conv: Optional[str] = None) -> dict:
         """What the page shows: calls in the last 24 hours against the cap,
-        a pause, and for one chat its next try and lost lines."""
+        a pause, and for one chat its next try."""
         row = self.state._map("per_conv").get(conv) if conv else None
         paused = float(self.state.data.get("paused_until") or 0.0)
         return {
@@ -170,6 +160,4 @@ class CallBudget:
             "next_at": (float(row.get("next_at") or 0.0)
                         if isinstance(row, dict)
                         and float(row.get("next_at") or 0.0) > now else 0.0),
-            "lost_lines": self.state.lost(conv) if conv else sum(
-                int(v or 0) for v in self.state._map("lost_lines").values()),
         }

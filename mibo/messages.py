@@ -6,7 +6,6 @@ import itertools
 from contextvars import ContextVar
 from typing import Optional
 
-from . import recent as recent_mod
 from .textproc import (
     _WEB_DESC_CLOSE,
     _WEB_DESC_OPEN,
@@ -75,15 +74,3 @@ class MessageParsing:
         seqs = self.__dict__.setdefault("window_seq", {})
         seqs[conv] = int(seqs.get(conv) or 0) + 1
         return seqs[conv]
-
-    def _spill_rows(self, conv: str, rows: list, *, dm_reader: str) -> None:
-        """Keep unconsolidated turns the trim dropped, oldest dropped (and
-        counted) past the cap."""
-        spill = self.__dict__.setdefault("_dm_spill", {}).setdefault(dm_reader, [])
-        spill.extend(rows)
-        if len(spill) > recent_mod.DM_SPILL_MAX:
-            lost = len(spill) - recent_mod.DM_SPILL_MAX
-            del spill[:lost]
-            state = getattr(self, "memory_state", None)
-            if state is not None:
-                state.add_lost(conv, lost)

@@ -12,12 +12,14 @@ commands, each a message and what it is:
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import pytest
 
-from mibo import chatlangs, paths
+from mibo import chatlangs, db, dm, paths
 from mibo.agent import Agent
+from mibo.context import CHECKPOINT
 from mibo.settings import AgentSettings
 
 CASES = Path(__file__).resolve().parents[2] / "data" / "chat_language_cases"
@@ -95,3 +97,19 @@ async def test_a_command_may_open_with_a_nickname_from_the_card_or_the_name_with
     assert whale.persona_aliases == ("鲸鱼",)
     await _say(whale, "鲸鱼，记住 我养了一只猫")
     assert list(_kept(whale).values()) == ["养了一只猫"]
+
+
+async def test_a_forget_takes_the_sentences_it_names_out_of_the_chats_checkpoint(tmp_path: Path) -> None:
+    agent = _character(tmp_path, "Mibo", "en")
+    reader = dm.chat_key(CHAT)[0]
+    with db.at(tmp_path).write() as conn:
+        conn.execute("INSERT INTO page_chats VALUES (?,?,?,?,?)", ("p1", CHAT, "", "2026-11-21T08:00:00+00:00", 0))
+    head = {"role": CHECKPOINT, "content": "Threads:\n- They moved to Lisbon. They like green tea.\nMood: calm",
+            "t": time.time(), "seq": 0}
+    agent._keep_checkpoint(reader, head)
+    agent.dm_history[reader] = [head]
+    await _say(agent, "remember that I moved to Lisbon")
+    await _say(agent, "forget Lisbon")
+    (row,) = db.at(tmp_path).read("SELECT body FROM page_messages WHERE kind = 'summary'")
+    for text in (agent.dm_history[reader][0]["content"], json.loads(row[0])["text"]):
+        assert "Lisbon" not in text and "green tea" in text and "Mood" in text

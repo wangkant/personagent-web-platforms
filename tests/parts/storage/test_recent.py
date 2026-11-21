@@ -10,7 +10,7 @@ from mibo import recent
 
 
 def _chat(at: float) -> dict:
-    return {"seq": 1, "folded_upto": 0, "last_at": at, "dm": [{"role": "user", "content": "hi", "t": at, "seq": 1}]}
+    return {"seq": 1, "last_at": at, "dm": [{"role": "user", "content": "hi", "t": at, "seq": 1}]}
 
 
 def test_a_damaged_window_file_is_set_aside(tmp_path: Path) -> None:

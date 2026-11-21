@@ -65,12 +65,17 @@ def _flat(messages: list[dict]) -> list[dict]:
     return out
 
 
+def system_of(system: str, tools: list[dict]) -> str:
+    """The system prompt with the tools described in writing, as `ask` sends it."""
+    return system + RULES.replace("{tools}", describe(tools))
+
+
 async def ask(agent, system: str, messages: list[dict], model: str, tools: list[dict], *,
                 timeout: float) -> dict | None:
     """One reply-model call with the tools described in writing: {"content"}, or None when it failed."""
     try:
         text = await asyncio.wait_for(agent._call_llm(
-            system + RULES.replace("{tools}", describe(tools)), _flat(messages), model, max_tokens=4096,
+            system_of(system, tools), _flat(messages), model, max_tokens=4096,
             disable_thinking=True), timeout)
     except asyncio.TimeoutError:
         return None

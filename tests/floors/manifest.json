@@ -45,7 +45,8 @@
       "tests/floors/injection/test_hidden_text.py::test_zwj_emoji_survive_the_scrubber",
       "tests/floors/injection/test_hidden_text.py::test_the_escaper_reads_what_a_model_reads",
       "tests/test_mcp_tools.py::test_third_party_words_are_bounded_and_fenced",
-      "tests/parts/finds/test_walks.py::test_the_prompt_fences_page_text"
+      "tests/parts/finds/test_walks.py::test_the_prompt_fences_page_text",
+      "tests/floors/injection/test_checkpoint.py::test_a_checkpoint_keeps_no_instruction_card_number_or_hidden_text_from_what_it_condensed"
     ],
     "grants": [
       "tests/floors/grants/test_what_is_granted.py::test_a_write_outside_what_was_granted_asks_for_the_folder_and_on_no_nothing_is_written",

@@ -13,7 +13,10 @@ import threading
 import time
 from pathlib import Path
 
+import openai
+
 from . import catalog, context, lookup_need, mcp_offer, review, surface, today
+from .endpoints import model_problem
 from .llm import FROM_BUDGET, purpose
 from .shell import written as _written
 from .storage import atomic_write_text
@@ -162,6 +165,11 @@ class ChatLookups:
         self.pictures: list[str] = []
         # The app tools this turn reaches through find_tools and use_tool (catalog.offered).
         self.deferred: list[dict] = []
+        # The (system prompt, tools) the turn's last request sent, which the chat's compaction replays (dm.py); the
+        # chat's turns with this message last, and whether the turn's fit has compacted them already.
+        self.sent: tuple | None = None
+        self.history: list[dict] | None = None
+        self.squeezed = False
         self._read: list[dict] = []
         self._found: list[dict] = []
 
@@ -246,13 +254,30 @@ class ToolLoop:
         # Every request fitted to the reply's budget, the system prompt and the tools being its fixed part.
         lead = [{"role": "system", "content": system}]
         ratio = context.ratio(self, url, model)
-        with purpose("reply"):
-            plan = self._budget(url, model, self._reply_effort(url, model),
-                                fixed=round(ratio * context.estimate({"messages": lead, "tools": tools})))
-        fit = context.Fit(plan, lambda c: context.count(self, url, model, {"messages": lead + c, "tools": tools}),
+
+        def planned() -> context.Budget:
+            with purpose("reply"):
+                return self._budget(url, model, self._reply_effort(url, model),
+                                    fixed=round(ratio * context.estimate({"messages": lead, "tools": tools})))
+        fit = context.Fit(planned(), lambda c: context.count(self, url, model, {"messages": lead + c, "tools": tools}),
                           ratio, TOOL_PICTURES)
+
+        async def fitted() -> bool:
+            # The fit ladder: results held and cut (context.Fit), then the history compacted now (dm.py).
+            return fit(convo) or await self._fit_history(system, tools, convo, fit, lookups)
+
+        async def asked(left: float) -> dict | None:
+            with purpose("reply"):
+                if _written.wanted(self, model):
+                    # An endpoint without tool calls: the same tools, called in writing (shell/written.py).
+                    lookups.sent = (_written.system_of(system, tools), None)
+                    return await _written.ask(self, system, convo, model, tools,
+                                              timeout=min(self.llm_timeout_s, left))
+                lookups.sent = (system, tools)
+                return await self._tool_round(system, convo, model, tools, timeout=min(self.llm_timeout_s, left))
         lookups.said = said
         made: dict[str, int] = {}
+        overflowed = False
         token = review.turn_verdicts.set(lookups.verdicts)
         try:
             if "read_page" in schemas:
@@ -266,19 +291,27 @@ class ToolLoop:
                 left = WITHIN_S - (time.monotonic() - started - lookups.away())
                 if left < 5 or lookups.refused():
                     break
-                if not fit(convo):
+                if not await fitted():
                     return await self._last_word(system, convo, model, fit)
                 lookups.doing("write")
-                with purpose("reply"):
-                    if _written.wanted(self, model):
-                        # An endpoint without tool calls: the same tools, called in writing (shell/written.py).
-                        message = await _written.ask(self, system, convo, model, tools,
-                                                     timeout=min(self.llm_timeout_s, left))
-                    else:
-                        message = await self._tool_round(system, convo, model, tools,
-                                                         timeout=min(self.llm_timeout_s, left))
+                try:
+                    message = await asked(left)
+                except openai.APIStatusError as e:
+                    if overflowed or model_problem(e.status_code, e.response.text) != "context":
+                        raise
+                    # Past the window: the request counted at least what the window left, the window is the one
+                    # the error stated (llm._recovered learned it), and the request is fitted again and sent once
+                    # more (dsh compaction-basic's overflow retry).
+                    overflowed, room = True, fit.plan.answer
+                    fit.plan = planned()
+                    context.refused(self, url, model, {"messages": lead + convo, "tools": tools},
+                                    fit.plan.window - room + 1)
+                    if not await fitted():
+                        return await self._last_word(system, convo, model, fit)
+                    message = await asked(left)
                 if message is None:
                     # No tools at this endpoint: the answer without them.
+                    lookups.sent = (system, None)
                     return await self._plain_reply(system, convo, model)
                 content = str(message.get("content") or "").strip()
                 calls = [c for c in message.get("tool_calls") or []
@@ -296,7 +329,7 @@ class ToolLoop:
                 if content:
                     lookups.text.append(content)
                 await self._round(message, calls, convo, schemas, made, lookups)
-            if not fit(convo):
+            if not await fitted():
                 return await self._last_word(system, convo, model, fit)
             return await self._answer_now(system, convo, model, tools)
         except asyncio.CancelledError:
@@ -318,9 +351,8 @@ class ToolLoop:
                 logger.info("[Agent] %d older results cut to fit the model's window", fit.rewrites)
 
     async def _last_word(self, system: str, convo: list, model: str, fit: context.Fit) -> str:
-        """A request still past the input limit with the older results cut: the turn's last call answers from what
-        was done, without tools and with every result small. The history's compaction (context design, stage S4)
-        comes before this once it is built."""
+        """A request still past the input limit with the older results cut and the history compacted: the turn's
+        last call answers from what was done, without tools and with every result small."""
         logger.info("[Agent] turn past the model's input limit: answered from what was done")
         fit.last(convo)
         return await self._plain_reply(system, convo + [{"role": "user", "content": ANSWER_NOW}], model)

@@ -7,30 +7,45 @@ import contextvars
 import json
 import logging
 import time
+from datetime import datetime
 
+from . import catalog
 from . import channels
+from . import context
 from . import db
 from . import person
 from . import today
-from .llm import FROM_BUDGET, purpose
+from .llm import FROM_BUDGET, ProviderError, answer_text, purpose
 from .loop import ANSWER_NOW, ChatLookups, stopped_reply
 from .messages import turn_pictures
 from .decision import PASS, SEND
+from .pastchats import NAME as PAST_CHATS
+from .prompt import history_messages
 from .schedule_tool import run_of
 from .turns import OutOfTime, Turn, current_turn
 from .textproc import (
     TextProcessing,
     _detect_image_mime,
     _strip_web_desc,
+    scrub_third_party_text,
 )
 
 logger = logging.getLogger("agent")
 
 # The name the person's turns are kept under; the prompt calls them by the name they gave (ADMIN_NAME).
 _THEM = "you"
-
-_DM_HISTORY_MAX = 60
-_DM_HISTORY_KEEP = 40
+# A page message said this many seconds before the checkpoint's first verbatim turn comes back with it when the
+# chat is read from the page: the turn is stamped when the character hears it, after the page stamped it.
+_HEARD_AFTER_S = 60.0
+# The summary's own room: twice the checkpoint's size, so one a little long still finishes and is kept.
+_SUMMARY_ROOM = 2
+# The person's newest message past its share, cut at ingestion (context design: the person's newest message).
+_MESSAGE_CUT = "\n\n[... {n} characters of this message left out: it is longer than the model can read ...]\n\n"
+# After two failed summaries in a row the older turns are cut without one (context design: compaction failure).
+_FAILS_BEFORE_CUT = 2
+# The line a cut without a summary adds to the checkpoint: (zh, en).
+_CUT_LINE = ("（{span}的对话未写入摘要，可使用 {tool} 查找。）",
+             "(The conversation of {span} is not in this checkpoint; {tool} finds it.)")
 
 # The owner's turn on the page looks things up itself (loop.py); a
 # context, so no fake `_chat_dm` needs a new argument or return value. None: no tools.
@@ -61,22 +76,33 @@ def _done_so_far(lookups: ChatLookups) -> str:
             + (f"; calls made: {calls}" if calls else "") + ")")
 
 
-def _trimmed_history(history: list[dict]) -> list[dict]:
-    """Drop a batch of old turns at once: dropping a little every turn would
-    shift the whole history and lose its prefix cache each time."""
-    return history[-_DM_HISTORY_KEEP:] if len(history) > _DM_HISTORY_MAX else history
+def _at(stamp) -> float:
+    """A page message's time (welcome.PageChat stamps ISO with its offset) as seconds; 0 without one."""
+    return datetime.fromisoformat(stamp).timestamp() if isinstance(stamp, str) and stamp else 0.0
+
+
+_OF_CHAT = "SELECT id FROM page_chats WHERE conversation = ?"
 
 
 def _page_turns(runtime, conversation: str) -> list[dict]:
     """The page's own saved copy of the chat `conversation` (welcome.PageChat, in the runtime database) as turns,
-    for a page chat that has no recent window yet; [] if the page keeps no such chat."""
+    for a page chat that has no recent window yet: its checkpoint first (the page's summary row), then the turns
+    from where the checkpoint's verbatim turns began; [] if the page keeps no such chat."""
+    store = db.at(runtime)
+    marks = store.read(f"SELECT body FROM page_messages WHERE kind = 'summary' AND chat IN ({_OF_CHAT})",
+                       (conversation,))
+    mark = json.loads(marks[0][0]) if marks else {}
+    since = float(mark.get("from") or 0.0)
     turns: list[dict] = []
-    for (body,) in db.at(runtime).read(
-            "SELECT body FROM page_messages WHERE kind = 'message' AND chat IN "
-            "(SELECT id FROM page_chats WHERE conversation = ?) ORDER BY seq", (conversation,)):
+    for (body,) in store.read(f"SELECT body FROM page_messages WHERE kind = 'message' AND chat IN ({_OF_CHAT}) "
+                              "ORDER BY seq", (conversation,)):
         message = json.loads(body)
         # A message that was never answered is shown to the person, not a turn the character had.
         if message.get("failed"):
+            continue
+        at = _at(message.get("at"))
+        # What the checkpoint holds; a turn may come back with it, never go missing.
+        if at < since - _HEARD_AFTER_S:
             continue
         role, text = message.get("role"), message.get("text")
         if not isinstance(text, str):
@@ -91,11 +117,12 @@ def _page_turns(runtime, conversation: str) -> list[dict]:
         if turns and turns[-1]["role"] == role:
             turns[-1]["content"] += "\n" + text
         else:
-            turns.append({"role": role, "content": text})
+            turns.append({"role": role, "content": text, "t": at})
     # The words still waiting for this answer are the turn being answered.
     while turns and turns[-1]["role"] == "user":
         turns.pop()
-    return turns[-_DM_HISTORY_KEEP:]
+    head = [{"role": context.CHECKPOINT, "content": mark["text"], "t": since}] if mark.get("text") else []
+    return head + turns
 
 
 def chat_key(conversation: str) -> tuple[str, str]:
@@ -172,25 +199,17 @@ class DirectMessages:
         return said
 
     def _commit_dm_history(self, user_id: str, pkey: str, history: list[dict]) -> None:
-        """Keep `history` as the reader's turns, trimmed; the unconsolidated
-        turns the trim drops wait in the DM spill for consolidation."""
-        before = self.dm_history.get(user_id, [])
-        kept = _trimmed_history(history)
-        held = {id(turn) for turn in kept}
-        folded = self.folded_upto.get(pkey, 0)
-        dropped = {id(turn): turn for turn in [*before, *history]
-                   if id(turn) not in held and int(turn.get("seq") or 0) > folded}
-        if dropped:
-            self._spill_rows(pkey, sorted(dropped.values(),
-                                          key=lambda turn: int(turn.get("seq") or 0)),
-                             dm_reader=user_id)
-        self.dm_history[user_id] = kept
+        """Keep `history` as the reader's turns, and give the chat's record what it lacks of them now: a compaction
+        then never drops a turn the record does not have (the record is what the fold and past-chat search read)."""
+        self.dm_history[user_id] = history
         vars(self).get("_dm_heard_at", {}).pop(user_id, None)
+        self._log_chat(pkey)
         self._recent_dirty.add(pkey)
         self._maybe_flush_recent()
 
     def _rehydrate_page(self, user_id: str, pkey: str) -> None:
-        """A page chat with no turns held reads the page's saved copy once."""
+        """A page chat with no turns held reads the page's saved copy once: its checkpoint and the newest whole
+        turns after it within the history's share."""
         if user_id in self.dm_history:
             return
         done = self.__dict__.setdefault("_page_rehydrated", set())
@@ -198,11 +217,160 @@ class DirectMessages:
             return
         done.add(pkey)
         turns = _page_turns(self.memory_file.parent, user_id.split(":", 1)[-1])
-        for turn in turns:
-            turn["t"], turn["seq"] = 0.0, self._next_seq(pkey)
-        if turns:
-            self.dm_history[user_id] = turns
+        head = turns[:1] if turns and turns[0]["role"] == context.CHECKPOINT else []
+        rest = turns[len(head):]
+        model = self.llm_dm_model
+        url = self._endpoint_for(model)[0]
+        rest = rest[context.tail_from(rest, self._budget(url, model).history / context.ratio(self, url, model)):]
+        for turn in head:
+            turn["seq"] = 0
+        for turn in rest:
+            turn["seq"] = self._next_seq(pkey)
+        if head or rest:
+            self.dm_history[user_id] = head + rest
             self._recent_dirty.add(pkey)
+
+    # ---- the history kept within its share (context design, stage S4) ------------------------------
+
+    def _history_plan(self, sent: tuple) -> tuple[context.Budget, float]:
+        """(the reply model's budget, its tokens per estimated one) with `sent`, the (system prompt, tools) of the
+        chat's last request, as the fixed part."""
+        model = self.llm_dm_model
+        url = self._endpoint_for(model)[0]
+        ratio = context.ratio(self, url, model)
+        system, tools = sent
+        fixed = round(ratio * context.estimate({"messages": [{"role": "system", "content": system}],
+                                                "tools": tools}))
+        with purpose("reply"):
+            return self._budget(url, model, self._reply_effort(url, model), fixed), ratio
+
+    async def _compact_after(self, user_id: str, pkey: str, sent: tuple) -> None:
+        """After a committed reply: once the checkpoint and the verbatim turns pass the history's share, the older
+        turns become one checkpoint, the newest whole turns up to half the share kept as they are. Under the chat's
+        lock, so a message sent meanwhile waits for it rather than racing it."""
+        async with self.locks[pkey]:
+            rows = self.dm_history.get(user_id)
+            if not rows:
+                return
+            plan, ratio = self._history_plan(sent)
+            held = ratio * context.rows_tokens(rows)
+            if held <= plan.history:
+                return
+            # The next request with this history and a full turn context would pass the ceiling T.
+            over = plan.limit - plan.available + held + plan.turn > plan.ceiling
+            kept = await self._compacted(user_id, rows, context.tail_from(rows, plan.tail / ratio), sent, plan,
+                                         now=over)
+            # A forget meanwhile replaced the turns: they stay as it left them.
+            if kept is not None and self.dm_history.get(user_id) is rows:
+                self.dm_history[user_id] = kept
+                self._recent_dirty.add(pkey)
+                self._maybe_flush_recent()
+
+    async def _fit_history(self, system: str, tools: list | None, convo: list[dict], fit: context.Fit,
+                           lookups: ChatLookups) -> bool:
+        """The fit ladder's third step, once a turn: a request still past the input limit with its older results
+        cut has the history before this message compacted now, its newest whole turn kept, and is fitted again.
+        Whether it fits now."""
+        rows = lookups.history
+        if not rows or lookups.squeezed:
+            return False
+        lookups.squeezed = True
+        before = rows[:-1]
+        start = context.tail_from(before, fit.plan.tail / fit.ratio)
+        if start >= len(before):
+            return False
+        kept = await self._compacted(chat_key(lookups.conversation)[0], before, start, (system, tools), fit.plan,
+                                     now=True)
+        if kept is None:
+            return False
+        convo[:len(history_messages(before))] = history_messages(kept)
+        rows[:-1] = kept
+        return fit(convo)
+
+    async def _compacted(self, user_id: str, rows: list[dict], start: int, sent: tuple, plan: context.Budget, *,
+                         now: bool) -> list[dict] | None:
+        """`rows` with those before `start` made one checkpoint, the one before merged into it, and kept as the
+        page's summary row; None when there is nothing to fold or the summary failed and the turns can wait. A
+        failed summary, the second in a row or with `now`, leaves a cut without one: the turns go, and the old
+        checkpoint says which days went and that past-chat search finds them (the chat's record keeps them)."""
+        first = 1 if rows and rows[0].get("role") == context.CHECKPOINT else 0
+        if start <= first:
+            return None
+        span = rows[:start]
+        summary = await self._summary(span, sent, plan)
+        fails = self.__dict__.setdefault("_compact_fails", {})
+        if summary is None:
+            fails[user_id] = fails.get(user_id, 0) + 1
+            if fails[user_id] < _FAILS_BEFORE_CUT and not now:
+                return None
+            summary = self._cut_without_summary(span)
+        fails.pop(user_id, None)
+        head = {"role": context.CHECKPOINT, "content": summary, "t": float(rows[start].get("t") or time.time()),
+                "seq": 0}
+        self._keep_checkpoint(user_id, head)
+        logger.info("[Agent] %d older turns of the chat condensed into its checkpoint", start - first)
+        return [head, *rows[start:]]
+
+    async def _summary(self, span: list[dict], sent: tuple, plan: context.Budget) -> str | None:
+        """The checkpoint of `span`, written by the reply model on the same prefix as the chat's last request (its
+        system prompt and tools as sent, then the turns), thinking off, with the request appended (dsh
+        summarizer.ts); None when the call fails, the answer is cut off, calls a tool or does not shrink the span."""
+        system, tools = sent
+        steps = [r["steps"] for r in span if r.get("steps")]
+        messages = ([{"role": "system", "content": system}] if system else []) + history_messages(span) + [
+            {"role": "user", "content": context.instruction(plan.checkpoint, self.chat_lang, steps)}]
+
+        async def ask(model: str) -> dict:
+            url, key = self._endpoint_for(model)
+            payload = {"model": model, "max_tokens": _SUMMARY_ROOM * plan.checkpoint, "messages": messages,
+                       **({"tools": tools} if tools else {})}
+            self._thinking_off(payload, url)
+            body = await self._post_chat(url, key, payload, timeout=self.llm_timeout_s, retries=self._retries(model))
+            if body.get("error") or not body.get("choices"):
+                raise ProviderError(body)
+            return body
+
+        try:
+            with purpose("reply"):
+                body, _ = await self._recovered(ask, self.llm_dm_model)
+        except Exception as e:
+            logger.warning("[Agent] the chat's checkpoint was not written: %s", type(e).__name__)
+            return None
+        choice = body["choices"][0]
+        message = choice.get("message") or {}
+        text = self._checked_checkpoint(answer_text(message))
+        if choice.get("finish_reason") == "length" or message.get("tool_calls") or not text \
+                or context.text_tokens(text) >= context.rows_tokens(span):
+            logger.warning("[Agent] the chat's checkpoint was not kept (%s)", choice.get("finish_reason"))
+            return None
+        return text
+
+    def _checked_checkpoint(self, text: str) -> str:
+        """The summary as it may be kept: nothing invisible, a line that reads as an instruction (the memory gate's
+        shapes, its bullet aside) dropped, and an ID or card number, password or code masked."""
+        lines = [person.mask(line, {})[0] for line in scrub_third_party_text(text).splitlines()
+                 if not self._reads_as_instruction(line.strip().lstrip("-*•·").strip())]
+        return "\n".join(lines).strip()
+
+    def _cut_without_summary(self, span: list[dict]) -> str:
+        """The checkpoint after a cut without a summary: the old one, and a line naming the days of the turns cut."""
+        old = span[0]["content"] if span[0].get("role") == context.CHECKPOINT else ""
+        days = [datetime.fromtimestamp(float(r["t"]), self._prompt_tz()).strftime("%Y-%m-%d")
+                for r in span if r.get("role") != context.CHECKPOINT and r.get("t")]
+        zh = self.chat_lang in ("zh", "zh-TW")
+        span_words = (days[0] if not days or days[0] == days[-1] else
+                      f"{days[0]}{'至' if zh else ' to '}{days[-1]}") if days else ("此前" if zh else "before")
+        line = _CUT_LINE[0 if zh else 1].format(span=span_words, tool=PAST_CHATS)
+        return f"{old}\n{line}".strip()
+
+    def _keep_checkpoint(self, user_id: str, head: dict) -> None:
+        """The checkpoint as the page's summary row of the chat (page_messages kind 'summary', seq 0, which the
+        page's own messages never take), replaced on each compaction; a 无痕对话 has no row on the page."""
+        body = json.dumps({"text": head["content"], "from": head["t"], "at": time.time()}, ensure_ascii=False)
+        with db.at(self.memory_file.parent).write() as conn:
+            conn.execute("INSERT OR REPLACE INTO page_messages(chat, seq, kind, body) "
+                         "SELECT id, 0, 'summary', ? FROM page_chats WHERE conversation = ?",
+                         (body, user_id.split(":", 1)[-1]))
 
     async def _dm_turn(self, user_id: str, pkey: str, text: str) -> None:
         """One turn of the model: the call under the turn's time budget, the
@@ -229,7 +397,8 @@ class DirectMessages:
                                 "content": "\n".join(said),
                                 "name": _THEM, "t": heard or time.time(),
                                 "seq": self._next_seq(pkey)})
-                history = _trimmed_history(history)
+            # What a turn's fit compacts now is kept with the turn (_fit_history).
+            lookups.history = history
 
             cue = {"pictures": pictures} if pictures else {}
             # Only this await is stopped: the commit below runs whole or not at all.
@@ -321,6 +490,8 @@ class DirectMessages:
                     # The memories the reply drew on, listed under it with edit and forget (activity.js).
                     texts[-1]["memory"] = {"used": used}
                 self._maybe_consolidate(pkey, "trim")
+            if lookups.sent is not None:
+                self._spawn(self._compact_after(user_id, pkey, lookups.sent))
             # Never the words: what they say may be forgotten later.
             logger.info("[Agent] reply (chat=%s, %d chars)", conversation, len(reply))
         finally:
@@ -353,6 +524,8 @@ class DirectMessages:
         await self._prepare_retrieval(self._last_user_text(history), pkey)
         prompt = self._build_dm_prompt(history, pkey=pkey, follow_up=follow_up,
                                        pictures=len(pictures))
+        if not follow_up and self._cut_message(history, prompt.system):
+            prompt = self._build_dm_prompt(history, pkey=pkey, pictures=len(pictures))
         system = prompt.system
         # A turn of the person's: the reply model looks things up itself (loop.py).
         lookups = None if follow_up else chat_lookups.get()
@@ -367,6 +540,24 @@ class DirectMessages:
         if lookups is None or out_of_time:
             if out_of_time:
                 messages = _with_found(messages, _done_so_far(lookups) + "\n" + ANSWER_NOW)
+                lookups.sent = (system, None)
             with purpose("reply"):
                 return await self._call_llm(system, messages, self.llm_dm_model, max_tokens=FROM_BUDGET)
         return await self._reply(system, messages, self.llm_dm_model, lookups, said=self._last_user_text(history))
+
+    def _cut_message(self, history: list[dict], system: str) -> bool:
+        """The person's newest message, when it alone passes its share of the request (half of what the system
+        prompt and tools leave), cut at ingestion to its head and tail, and the page told (it marks their message,
+        welcome.py). Whether it was cut."""
+        last = history[-1] if history else {}
+        if last.get("role") != "user":
+            return False
+        model = self.llm_dm_model
+        tools = catalog.offered(self._budget(self._endpoint_for(model)[0], model)).tools
+        plan, ratio = self._history_plan((system, tools))
+        words = str(last.get("content") or "")
+        if context.text_tokens(words) <= plan.message / ratio:
+            return False
+        last["content"] = context.cut(words, plan.message / ratio, _MESSAGE_CUT)
+        current_turn.get().said.append({"type": "cut"})
+        return True

@@ -234,8 +234,15 @@ class PageChat:
         """The chat as the page shows it; with `after`, only what came since that number.
         `chat` changes when a new chat starts, so the page knows to start over."""
         messages = [dict(m) for m in self.history if after is None or m["seq"] > after]
+        summary = self.summary()
         return {"messages": messages, "chat": self.tag(), "last": self.seq,
-                **({"private": True} if self.private else {})}
+                **({"private": True} if self.private else {}), **({"summary": summary} if summary else {})}
+
+    def summary(self) -> dict | None:
+        """The chat's checkpoint, which the character keeps as this chat's summary row (dm.py): {"text", "from":
+        the time of the first turn still read whole, "at": when it was written}; None before the first."""
+        rows = self.store.read("SELECT body FROM page_messages WHERE chat = ? AND kind = 'summary'", (self.id,))
+        return json.loads(rows[0][0]) if rows else None
 
     def reset(self) -> None:
         self.conversation = secrets.token_hex(12)
@@ -924,6 +931,9 @@ class Workspace:
                 self._replying[2].set()
                 self._replying = None
             said.pop("pending", None)
+            if any(item.get("type") == "cut" for item in items):
+                # Longer than the model reads at once: the character took its head and tail (dm._cut_message).
+                said["cut"] = True
             stopped = said.pop("stopping", "")
             if stopped and not items:
                 # Stopped from the page: nothing came, and the message waits to be sent again.

@@ -189,16 +189,17 @@ def test_reads_after_reads_each_result_is_cut_at_most_once_and_the_newest_reads_
     assert older and min(len(m["content"]) for m in last[-3:]) > max(map(len, older))
 
 
-def test_a_turn_too_large_for_the_window_with_its_tools_is_answered_without_them(app, turn):
+def test_a_message_whose_files_pass_the_window_is_cut_when_it_comes_in_and_answered_with_its_tools(app, turn):
     app.model.window = 16384
     measured(app, context=16384)
     logs = [{"kind": "file", "name": f"log{k}.txt", "data": base64.b64encode(" ".join(
         f"line {n} of log {k}" for n in range(470)).encode()).decode()} for k in range(3)]
     done = turn("Where does it fail?", say("That log is long; the error is near the end."), attachments=logs)
-    # One last call, without the tool definitions, that fits the window with its answer's room.
+    # One call, with the tools, that fits the window with its answer's room: the message keeps its head and tail.
     (body,) = done.asked()
-    assert "tools" not in body and body["messages"][-1]["content"] == loop.ANSWER_NOW
-    assert tokens(body) + body["max_tokens"] <= 16384
+    sent = body["messages"][-1]["content"]
+    assert body["tools"] and tokens(body) + body["max_tokens"] <= 16384
+    assert "Where does it fail?" in sent and "line 469 of log 2" in sent and "line 235 of log 1" not in sent
     assert done.reply == "That log is long; the error is near the end."
 
 
