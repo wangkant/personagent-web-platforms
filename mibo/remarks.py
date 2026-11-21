@@ -246,9 +246,8 @@ def character(home: Path, values: dict) -> tuple[str, str, str]:
 class _Model(drafting._Client):
     """The person's model outside the service, its tokens tallied under the call's purpose."""
 
-    def _count_usage(self, model: str, resp) -> None:
+    def _count_usage(self, model: str, body: dict) -> None:
         try:
-            body = resp.json()
             book = UsageBook(self._usage_path)
             book.add(model, body.get("usage") if isinstance(body, dict) else None, time.time(), _call_purpose.get())
             book.flush(time.time())
@@ -272,8 +271,6 @@ async def write(home: Path, values: dict, due: dict, now: float, manner: str = "
                                           temperature=0.9)
     except Exception:
         text = ""
-    finally:
-        await client.close()
     return _clean(text, name) or canned(due, lang)
 
 

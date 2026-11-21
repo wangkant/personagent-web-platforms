@@ -54,24 +54,21 @@ async def _title(home: Path, values: dict, names: list[str]) -> None:
     if not values.get("LLM_API_KEY") or not values.get("LLM_BASE_URL") or not values.get("LLM_MODEL"):
         return
     client = _Client(values, usage_path(home, values))
-    try:
-        for skill in store.all_skills(home):
-            if skill.name not in names or skill.problems or skill.builtin:
-                continue
-            asked = json.dumps({"name": skill.name, "description": skill.description}, ensure_ascii=False)
-            try:
-                with purpose("tools"):
-                    raw = await client._call_llm(_TITLES, [{"role": "user", "content": asked}], client.model,
-                                                 max_tokens=600, disable_thinking=True,
-                                                 json_object=True)
-            except Exception as error:
-                logger.info("[Skills] no Chinese title for %s: %s", skill.name, type(error).__name__)
-                continue
-            made = salvage_json_object(strip_json_fences(raw or ""))
-            if isinstance(made, dict) and isinstance(made.get("title_zh"), str) and made["title_zh"].strip():
-                await asyncio.to_thread(store.keep_titles, home, skill, made)
-    finally:
-        await client.close()
+    for skill in store.all_skills(home):
+        if skill.name not in names or skill.problems or skill.builtin:
+            continue
+        asked = json.dumps({"name": skill.name, "description": skill.description}, ensure_ascii=False)
+        try:
+            with purpose("tools"):
+                raw = await client._call_llm(_TITLES, [{"role": "user", "content": asked}], client.model,
+                                             max_tokens=600, disable_thinking=True,
+                                             json_object=True)
+        except Exception as error:
+            logger.info("[Skills] no Chinese title for %s: %s", skill.name, type(error).__name__)
+            continue
+        made = salvage_json_object(strip_json_fences(raw or ""))
+        if isinstance(made, dict) and isinstance(made.get("title_zh"), str) and made["title_zh"].strip():
+            await asyncio.to_thread(store.keep_titles, home, skill, made)
 
 
 def mount(app, workspace, body) -> None:

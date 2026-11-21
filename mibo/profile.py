@@ -407,9 +407,8 @@ class _Model(drafting._Client):
     """The configured model, outside the service; keeps the usage the last answer reported."""
     usage: dict = {}
 
-    def _count_usage(self, model: str, resp) -> None:
+    def _count_usage(self, model: str, body: dict) -> None:
         try:
-            body = resp.json()
             self.usage = body["usage"] if isinstance(body, dict) and isinstance(body.get("usage"), dict) else {}
             book = UsageBook(self._usage_path)
             book.add(model, self.usage, time.time(), _call_purpose.get())
@@ -467,13 +466,10 @@ async def ask(runtime: Path, home: Path, values: dict, kind: str, system: str, u
               max_tokens: int, now: float) -> str:
     """One JSON call to the configured model, counted; tokens as reported, else characters / 4."""
     client = _Model(values, drafting.usage_path(Path(home), values))
-    try:
-        with purpose("recommend" if kind == "pick" else "other"):
-            answer = await client._call_llm(system, [{"role": "user", "content": user}], client.model,
-                                            max_tokens=max_tokens, disable_thinking=True,
-                                            temperature=0.4, json_object=True)
-    finally:
-        await client.close()
+    with purpose("recommend" if kind == "pick" else "other"):
+        answer = await client._call_llm(system, [{"role": "user", "content": user}], client.model,
+                                        max_tokens=max_tokens, disable_thinking=True,
+                                        temperature=0.4, json_object=True)
     usage = client.usage
     count(runtime, kind, usage.get("prompt_tokens") or (len(system) + len(user)) // 4,
           usage.get("completion_tokens") or len(answer or "") // 4, now)

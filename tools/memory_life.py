@@ -287,31 +287,18 @@ if _ctl:
             return (ctl / "tag.txt").read_text(encoding="utf-8").strip()
         except OSError:
             return ""
-    class _Answer:
-        status_code = 200
-        headers = {}
-        def __init__(self, body):
-            self._body = body
-            self.text = json.dumps(body, ensure_ascii=False)
-        def json(self):
-            return self._body
-        def raise_for_status(self):
-            return None
     def _serve():
         agent = loop = None
         while agent is None or loop is None:
             _real_sleep(0.5) if _clock else _time.sleep(0.5)
             agent, loop = _find()
+        import openai
         from mibo import llm
         real_count = agent._count_usage
-        def count(model, resp):
-            try:
-                body = resp.json()
-                _write("calls.jsonl", {"t": _time.time(), "purpose": llm._call_purpose.get(), "model": model,
-                                       "usage": body.get("usage")})
-            except Exception:
-                pass
-            return real_count(model, resp)
+        def count(model, body):
+            _write("calls.jsonl", {"t": _time.time(), "purpose": llm._call_purpose.get(), "model": model,
+                                   "usage": body.get("usage")})
+            return real_count(model, body)
         agent._count_usage = count
         # The recording to answer from: (tag, purpose) -> answers in their order.
         book = {}
@@ -324,7 +311,7 @@ if _ctl:
                     book.setdefault((row["tag"], row["purpose"]), []).append(row["body"])
         used = {}
         real_post = agent._post_chat
-        async def post(url, key, payload, *, timeout):
+        async def post(url, key, payload, *, timeout, retries=0):
             tag, why = _tag(), llm._call_purpose.get()
             asked = payload.get("messages") or []
             last = next((m.get("content") for m in reversed(asked) if m.get("role") == "user"), "")
@@ -339,14 +326,14 @@ if _ctl:
                 # Past the recorded ones: the last again.
                 body = answers[min(n, len(answers) - 1)]
                 _write("rec.jsonl", dict(row, status=200, body=body, replayed=True))
-                return _Answer(body)
-            resp = await real_post(url, key, payload, timeout=timeout)
+                return body
             try:
-                body = resp.json()
-            except Exception:
-                body = None
-            _write("rec.jsonl", dict(row, status=getattr(resp, "status_code", 0), body=body))
-            return resp
+                body = await real_post(url, key, payload, timeout=timeout, retries=retries)
+            except openai.APIStatusError as error:
+                _write("rec.jsonl", dict(row, status=error.status_code, body=None))
+                raise
+            _write("rec.jsonl", dict(row, status=200, body=body))
+            return body
         agent._post_chat = post
         real_apply = agent._apply_person_fold
         def apply(store, plan, lines, facts, plans, now):

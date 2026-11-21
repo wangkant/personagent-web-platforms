@@ -317,21 +317,17 @@ def _answer(body: dict) -> str:
 
 async def _post(caller, url: str, key: str, payload: dict) -> dict | None:
     """One call through the app's path; the body of a 200, else None."""
-    import httpx
+    import openai
     try:
-        resp = await caller._post_chat(url, key, payload, timeout=45)
-    except httpx.HTTPError as e:
+        body = await caller._post_chat(url, key, payload, timeout=45)
+    except openai.APIStatusError as e:
+        caller.__dict__.setdefault("_check_status", e.status_code)
+        caller.__dict__.setdefault("_check_text", e.response.text[:400])
+        return None
+    except openai.APIError as e:
         logger.info("[Agent] ability check call failed: %s", type(e).__name__)
         return None
-    if getattr(resp, "status_code", 0) != 200:
-        caller.__dict__.setdefault("_check_status", resp.status_code)
-        caller.__dict__.setdefault("_check_text", str(getattr(resp, "text", "") or "")[:400])
-        return None
-    try:
-        body = resp.json()
-    except ValueError:
-        return None
-    return body if isinstance(body, dict) and body.get("choices") else None
+    return body if body.get("choices") else None
 
 
 def _params_for(caller, url: str, model: str) -> tuple[str, ...]:
@@ -353,15 +349,14 @@ _CONTEXT_FIELDS = ("context_length", "max_model_len", "context_window", "max_con
 
 async def _context(url: str, key: str, model: str) -> int:
     """The model's context window in tokens as the host's own model list states it; 0 when it does not."""
-    import httpx
+    import openai
+
+    from . import transport
     try:
-        async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
-            resp = await client.get(url.rsplit("/chat/completions", 1)[0] + "/models",
-                                    headers={"Authorization": f"Bearer {key}"} if key else {})
-        rows = resp.json().get("data") if resp.status_code == 200 else []
-    except (httpx.HTTPError, ValueError, AttributeError):
+        rows = [r.to_dict() for r in (await transport.client(url, key).models.list(timeout=20)).data]
+    except openai.APIError:
         return 0
-    row = next((r for r in rows or [] if isinstance(r, dict) and r.get("id") == model), {})
+    row = next((r for r in rows if r.get("id") == model), {})
     found = [row.get(k) for k in _CONTEXT_FIELDS] + [(row.get("top_provider") or {}).get("context_length")]
     return next((int(v) for v in found if isinstance(v, int) and v > 0), 0)
 
@@ -476,9 +471,8 @@ async def check(home: Path, values: dict) -> dict:
     from .usage import UsageBook
 
     class Checker(drafting._Client):
-        def _count_usage(self, model: str, resp) -> None:
+        def _count_usage(self, model: str, body: dict) -> None:
             try:
-                body = resp.json()
                 book = UsageBook(self._usage_path)
                 book.add(model, body.get("usage") if isinstance(body, dict) else None, time.time(), "check")
                 book.flush(time.time())
@@ -495,11 +489,8 @@ async def check(home: Path, values: dict) -> dict:
     url = chat_completions_url(caller.base_url)
     model = caller.model
     add_recent(runtime, caller.base_url, model)
-    try:
-        with purpose("check"):
-            found = await _measure(caller, url, caller.api_key, model)
-    finally:
-        await caller.close()
+    with purpose("check"):
+        found = await _measure(caller, url, caller.api_key, model)
     learned = [[f, v] for (f, u, m), v in caller._api_quirks.items() if u == url and m == model]
     rec = {"url": url, "model": model, "at": time.time(), **found, "quirks": learned}
     if not any(found.get(n) for n in NAMES):

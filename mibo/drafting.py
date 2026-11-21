@@ -27,14 +27,11 @@ class _Client(ModelCalls):
         self.api_max_retries = 1
         self.llm_rate_limit_cooldown_s = 60
         self.llm_fallback_duration_s = 60
-        self._http_pool: dict = {}
         self._unreachable_until: dict = {}
-        self._fallback_until: dict = {}
         self._usage_path = usage_path
 
-    def _count_usage(self, model: str, resp) -> None:
+    def _count_usage(self, model: str, body: dict) -> None:
         try:
-            body = resp.json()
             book = UsageBook(self._usage_path)
             label = _call_purpose.get()
             book.add(model, body.get("usage") if isinstance(body, dict) else None, time.time(),
@@ -42,10 +39,6 @@ class _Client(ModelCalls):
             book.flush(time.time())
         except Exception:
             pass
-
-    async def close(self) -> None:
-        for client in self._http_pool.values():
-            await client.aclose()
 
 
 def usage_path(home: Path, values: dict) -> Path:

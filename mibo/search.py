@@ -270,7 +270,7 @@ class WebSearch:
         results = []
         if api:
             try:
-                async with self._http(timeout=20) as client:
+                async with httpx.AsyncClient(timeout=20) as client:
                     results = await SEARCH_APIS[api](client, key, query, max_results)
             except Exception as e:
                 logger.warning("[Agent] %s search failed (%d-char query): %s", api, len(query), e)

@@ -20,9 +20,10 @@ import logging
 import time
 from pathlib import Path
 
-import httpx
+import openai
 
-from . import usage
+from . import transport, usage
+from .endpoints import chat_completions_url
 from .storage import FileLock, atomic_write_text
 
 logger = logging.getLogger("agent")
@@ -163,13 +164,12 @@ async def prices_for(base: str, key: str) -> dict:
         return kept[1]
     found: dict = {}
     try:
-        async with httpx.AsyncClient(timeout=TIMEOUT_S * 2) as client:
-            answer = await client.get(base.rstrip("/") + "/models", headers={"Authorization": f"Bearer {key}"})
-        rows = answer.json().get("data") if answer.status_code == 200 else None
-    except (httpx.HTTPError, ValueError, AttributeError):
-        rows = None
-    for row in rows if isinstance(rows, list) else ():
-        pricing = row.get("pricing") if isinstance(row, dict) else None
+        rows = [r.to_dict() for r in (await transport.client(chat_completions_url(base), key).models.list(
+            timeout=TIMEOUT_S * 2)).data]
+    except openai.APIError:
+        rows = []
+    for row in rows:
+        pricing = row.get("pricing")
         if not isinstance(pricing, dict):
             continue
         try:
@@ -292,11 +292,10 @@ async def balance(values: dict, *, fresh: bool = False) -> dict | None:
         root = root.removesuffix("/v1")
     found = None
     try:
-        async with httpx.AsyncClient(timeout=TIMEOUT_S) as client:
-            answer = await client.get(root + path, headers={"Authorization": f"Bearer {key}"})
-        if answer.status_code == 200:
-            found = read(answer.json(), base)
-    except (httpx.HTTPError, ValueError, AttributeError) as e:
+        body = await transport.client(chat_completions_url(base), key).get(
+            root + path, cast_to=object, options={"timeout": TIMEOUT_S})
+        found = read(body, base)
+    except (openai.APIError, AttributeError) as e:
         logger.info("[Agent] balance not read: %s", type(e).__name__)
     if found is not None:
         found["at"] = time.time()

@@ -41,6 +41,7 @@ import threading
 import time
 import unicodedata
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Awaitable, Callable
 
 # The kinds code lets the reviewer see, per area; every other kind is the person's. "outward" is a press, an Enter
@@ -723,43 +724,33 @@ async def decide(area: str, request, action: dict, *, ask: ASK_MODEL, attended: 
     return verdict
 
 
-def endpoint(base_url: str, api_key: str, model: str, *, usage: dict | None = None, extra: dict | None = None,
-             max_tokens: int = 1500) -> ASK_MODEL:
-    """An ask function on an OpenAI-compatible endpoint, for a process without the agent's client (the app
-    window's, a script). Temperature 0 and hidden reasoning off, as the app's other short judging calls ask (a
-    reasoning model left on spent the whole answer budget thinking and gave no verdict, so every card came back);
-    no retries but for a field the endpoint refuses (a model with a fixed temperature, one that must reason), which
-    is changed as the agent's client does; `usage` gathers calls and tokens."""
-    import httpx
+def endpoint(base_url: str, api_key: str, model: str, *, usage: dict | None = None, json_mode: bool = False,
+             max_tokens: int = 1500, usage_path: Path | None = None) -> ASK_MODEL:
+    """An ask function on the person's model service, for a process without the agent (the app window's, a
+    script), through the app's own call path (llm.ModelCalls): temperature 0 and hidden reasoning off, as the app's
+    other short judging calls ask (a reasoning model left on spent the whole answer budget thinking and gave no
+    verdict, so every card came back), a field the endpoint refuses changed as every call does, and a busy service
+    asked once more. Spending goes to the tally at `usage_path` (the page's), or into `usage` (calls, tokens, cost)."""
+    from . import drafting
+    from .llm import purpose
 
-    from .endpoints import adapt_rejected_payload, chat_completions_url
-    from .llm import thinking_off
-
-    # The payload as the endpoint last took it, so a refused field is refused once.
-    shape = thinking_off({"model": model, "temperature": 0, "max_tokens": max_tokens, **(extra or {})}, base_url, None)
-    shape.pop("model")
-
-    async def ask(system: str, msgs: list[dict]) -> str:
-        payload = {"model": model, "messages": [{"role": "system", "content": system}, *msgs], **shape}
-        async with httpx.AsyncClient(timeout=TIMEOUT_S) as client:
-            # One try, and one more for each field an endpoint may refuse (thinking, reasoning, temperature).
-            for _ in range(4):
-                resp = await client.post(chat_completions_url(base_url), json=payload,
-                                         headers={"Authorization": f"Bearer {api_key}"})
-                if usage is not None:
-                    usage["calls"] = usage.get("calls", 0) + 1
-                if resp.status_code != 400 or not adapt_rejected_payload(payload, resp.text):
-                    break
-        shape.clear()
-        shape.update({k: v for k, v in payload.items() if k not in ("model", "messages")})
-        resp.raise_for_status()
-        data = resp.json()
-        if usage is not None:
-            got = data.get("usage") or {}
+    class Reviewer(drafting._Client):
+        def _count_usage(self, model: str, body: dict) -> None:
+            if usage is None:
+                return super()._count_usage(model, body)
+            got = body.get("usage") or {}
+            usage["calls"] = usage.get("calls", 0) + 1
             usage["prompt_tokens"] = usage.get("prompt_tokens", 0) + int(got.get("prompt_tokens") or 0)
             usage["completion_tokens"] = usage.get("completion_tokens", 0) + int(got.get("completion_tokens") or 0)
             # What the provider says the call cost, where it says (OpenRouter does).
             usage["cost"] = usage.get("cost", 0.0) + float(got.get("cost") or 0)
-        return str(((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "")
+
+    caller = Reviewer({"LLM_BASE_URL": base_url, "LLM_API_KEY": api_key, "LLM_MODEL": model}, usage_path)
+    caller.llm_timeout_s = TIMEOUT_S
+
+    async def ask(system: str, msgs: list[dict]) -> str:
+        with purpose("operate"):
+            return await caller._call_llm(system, msgs, model, max_tokens, disable_thinking=True, temperature=0,
+                                          json_object=json_mode)
 
     return ask

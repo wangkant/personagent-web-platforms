@@ -8,7 +8,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from .storage import num as _num
-from . import channels, embeddings, ranking
+from . import channels, embeddings, ranking, transport
 from .endpoints import embedding_endpoint
 from .textproc import (
     _focus_tokens,
@@ -129,10 +129,8 @@ class Retrieval:
             base_url=self.base_url, api_key=self.api_key,
             embedding_base_url=self.embedding_base_url,
             embedding_api_key=self.embedding_api_key)
-        async with self._http(timeout=embeddings.BATCH_TIMEOUT_S) as client:
-            return await asyncio.wait_for(
-                embeddings.fetch(client, url, key, self.embedding_model, texts),
-                timeout_s)
+        return await asyncio.wait_for(
+            embeddings.fetch(transport.client(url, key), self.embedding_model, texts), timeout_s)
 
     def _embedding_failed(self, exc: BaseException) -> None:
         self._embedding_retry_at = time.monotonic() + embeddings.RETRY_AFTER_S

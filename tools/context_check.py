@@ -68,7 +68,7 @@ async def room() -> list[dict]:
             self.llm_fallback_thinking = False
             self.llm_timeout_s, self.api_max_retries = 30.0, 0
             self.llm_rate_limit_cooldown_s = self.llm_fallback_duration_s = 60
-            self._http_pool, self._unreachable_until, self._fallback_until = {}, {}, {}
+            self._unreachable_until = {}
             self.memory_file = runtime / "memory.json"
 
     rows = []

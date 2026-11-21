@@ -16,7 +16,7 @@ from PIL import Image
 from harness.app import App, quiet_start
 from harness.model import drop, fail, say, text
 from harness.turn import run_turn
-from mibo import ingestion
+from mibo import transport
 
 VISION_KEY = "sk-vision-key"
 # Longer than any caption: a receipt read out line by line.
@@ -27,7 +27,7 @@ READING = "Receipt, Harbour Cafe. " + " ".join(f"Line {n}: oat latte 4.50" for n
 def reader(model, monkeypatch, tmp_path):
     """The app with a vision model at the scripted model's address; tries again with no wait between."""
     quiet_start(monkeypatch)
-    monkeypatch.setattr(ingestion, "VISION_BACKOFF_S", 0)
+    monkeypatch.setattr(transport, "WAIT_SCALE", 0)
     served = App(Path(os.environ["AGENT_HOME"]), model, PERSONA_BROWSER_PATH=str(tmp_path / "no-browser"),
                  LLM_MAX_RETRIES="0", VISION_MODEL="scripted-vision", VISION_API_KEY=VISION_KEY,
                  VISION_BASE_URL=model.url).open()

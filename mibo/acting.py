@@ -123,12 +123,12 @@ def asked(workspace) -> list[dict]:
 
 def reviewer(workspace):
     """The reviewer's one model call, on the person's own model service as the app's settings name it; in JSON
-    mode where the app's check measured the model keeps to it."""
-    from . import abilities
+    mode where the app's check measured the model keeps to it; counted in the page's tally."""
+    from . import abilities, drafting
     from .endpoints import chat_completions_url
     from .review import endpoint
     values = workspace.config()
     base, model = values.get("LLM_BASE_URL", ""), values.get("LLM_MODEL", "")
     json_mode = abilities.can(workspace.home / "runtime", chat_completions_url(base), model, "json") == "yes"
-    return endpoint(base, values.get("LLM_API_KEY", ""), model,
-                    extra={"response_format": {"type": "json_object"}} if json_mode else None)
+    return endpoint(base, values.get("LLM_API_KEY", ""), model, json_mode=json_mode,
+                    usage_path=drafting.usage_path(workspace.home, values))

@@ -19,7 +19,6 @@ WAITING = (
     "test_engine.py",
     "test_hybrid_retrieval.py",
     "test_life_endpoints.py",
-    "test_llm_calls.py",
     "test_mcp_tools.py",
     "test_memory_store.py",
     "test_page_chat_media.py",
@@ -32,7 +31,7 @@ WAITING = (
 # A name is about behaviour, not about when or why it was written: no round, fix, stage or date
 # (20261120, 1120) among its words.
 FORBIDDEN = re.compile(r"round\d*|fix|fixes|fixed|retired|legacy|old|s\d{1,2}|\d{8}|(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])")
-PRIVATE = {"_call_llm", "_chat_dm", "_reply_with_tools", "_http"}
+PRIVATE = {"_call_llm", "_chat_dm", "_reply_with_tools"}
 SLOW_CAP = 30
 
 

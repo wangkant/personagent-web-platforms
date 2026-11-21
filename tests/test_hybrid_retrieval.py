@@ -2,22 +2,20 @@
 outranks a word match, vectors are cached, and an unreachable endpoint is reported once. The lexical and
 recency ranking and the cache prune are in tests/parts/ranking/test_recall_ranking.py.
 
-The embedding path runs through a real agent, against an /embeddings endpoint served by
-httpx.MockTransport with hand-picked vectors. Nothing here reaches a network or needs a key.
+The embedding path runs through a real agent, against an /embeddings endpoint on 127.0.0.1 with hand-picked
+vectors. Nothing here reaches a network or needs a key.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-
-import httpx
 
 from mibo import ranking
 from mibo.agent import Agent
-from mibo.llm import _PooledHTTP
 
 from helpers import check, isolated_agent
 
@@ -59,37 +57,46 @@ def make_agent(tmp: Path, **settings) -> Agent:
 # Embeddings, against a stub endpoint
 # ---------------------------------------------------------------------------
 
-EMBEDDING = dict(embedding_model="stub-embed",
-                 embedding_base_url="http://embed.test/v1")
 FELINE = [1.0, 0.0, 0.0]
 OTHER = [0.0, 0.0, 1.0]
 QUERY = "my kitten threw up"
 
 
 class StubEndpoint:
-    """An OpenAI-style /embeddings endpoint: FELINE for any text naming a cat,
-    OTHER for the rest. Records every request."""
+    """An OpenAI-style /embeddings endpoint on 127.0.0.1: FELINE for any text naming a cat, OTHER for the rest.
+    Records every request."""
 
-    def __init__(self, *, status: int = 200, delay_s: float = 0.0):
-        self.status, self.delay_s = status, delay_s
+    def __init__(self, *, status: int = 200):
+        self.status = status
         self.requests: list[list[str]] = []
+        stub = self
 
-    async def __call__(self, request: httpx.Request) -> httpx.Response:
-        texts = json.loads(request.content)["input"]
-        self.requests.append(texts)
-        if self.delay_s:
-            await asyncio.sleep(self.delay_s)
-        if self.status != 200:
-            return httpx.Response(self.status, json={"error": "unavailable"})
-        return httpx.Response(200, json={"data": [
-            {"index": i, "embedding": FELINE if ("feline" in t or "kitten" in t) else OTHER}
-            for i, t in enumerate(texts)]})
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args) -> None:
+                pass
 
+            def do_POST(self) -> None:
+                texts = json.loads(self.rfile.read(int(self.headers["Content-Length"])))["input"]
+                stub.requests.append(texts)
+                body = {"error": "unavailable"} if stub.status != 200 else {"object": "list", "data": [
+                    {"object": "embedding", "index": i,
+                     "embedding": FELINE if ("feline" in t or "kitten" in t) else OTHER}
+                    for i, t in enumerate(texts)]}
+                raw = json.dumps(body).encode()
+                self.send_response(stub.status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
 
-def serve(agent: Agent, endpoint: StubEndpoint) -> httpx.AsyncClient:
-    client = httpx.AsyncClient(transport=httpx.MockTransport(endpoint))
-    agent._http = lambda **kw: _PooledHTTP(client)
-    return client
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.embedding = dict(embedding_model="stub-embed",
+                              embedding_base_url=f"http://127.0.0.1:{self.server.server_address[1]}/v1")
+
+    def close(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
 
 
 async def prepared(a: Agent, focus: str = QUERY) -> None:
@@ -100,9 +107,8 @@ async def prepared(a: Agent, focus: str = QUERY) -> None:
 
 
 async def test_vectors_are_cached_in_memory_and_on_disk(tmp: Path) -> None:
-    a = make_agent(tmp, **EMBEDDING)
     endpoint = StubEndpoint()
-    client = serve(a, endpoint)
+    a = make_agent(tmp, **endpoint.embedding)
     try:
         await prepared(a)
         check("first run: the query is embedded", endpoint.requests == [[QUERY]], repr(endpoint.requests))
@@ -111,23 +117,22 @@ async def test_vectors_are_cached_in_memory_and_on_disk(tmp: Path) -> None:
         await prepared(a)
         check("second run: no request at all", endpoint.requests == [], repr(endpoint.requests))
 
-        restarted = make_agent(tmp, **EMBEDDING)
-        restarted._http = a._http
+        restarted = make_agent(tmp, **endpoint.embedding)
         await prepared(restarted)
         check("after a restart: only the query, which is never written to disk",
               endpoint.requests == [[QUERY]], repr(endpoint.requests))
     finally:
-        await client.aclose()
+        endpoint.close()
 
 
 async def test_the_startup_probe_reports_an_unreachable_endpoint(tmp: Path, caplog) -> None:
     caplog.set_level(logging.INFO, logger="agent")
-    a = make_agent(tmp, **EMBEDDING)
-    client = serve(a, StubEndpoint(status=404))
+    endpoint = StubEndpoint(status=404)
+    a = make_agent(tmp, **endpoint.embedding)
     try:
         await a._probe_embeddings()
     finally:
-        await client.aclose()
+        endpoint.close()
     check("probe: a configured but unreachable endpoint is reported",
           any("embedding endpoint failed" in r.getMessage() and r.levelno == logging.WARNING
               for r in caplog.records))

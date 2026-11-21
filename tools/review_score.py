@@ -40,7 +40,7 @@ def read_env(folder: Path) -> dict:
 
 def patient(ask, answers: list):
     """The ask function with pauses on a turned-away call; keeps each raw answer for the table."""
-    import httpx
+    import openai
 
     async def call(system: str, msgs: list[dict]) -> str:
         for attempt in range(TRIES):
@@ -48,7 +48,7 @@ def patient(ask, answers: list):
                 text = await ask(system, msgs)
                 answers.append(text)
                 return text
-            except httpx.HTTPStatusError as error:
+            except openai.APIStatusError as error:
                 if error.response.status_code == 429 and "per-day" in error.response.text:
                     # The provider's daily quota: nothing more will answer today, so the case is not counted.
                     answers.append("[daily limit]")
@@ -56,7 +56,7 @@ def patient(ask, answers: list):
                 if error.response.status_code not in (408, 429, 500, 502, 503, 504) or attempt == TRIES - 1:
                     answers.append(f"[http {error.response.status_code}]")
                     raise
-            except (httpx.TransportError, asyncio.TimeoutError):
+            except (openai.APIConnectionError, asyncio.TimeoutError):
                 if attempt == TRIES - 1:
                     answers.append("[transport]")
                     raise

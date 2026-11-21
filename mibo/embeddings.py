@@ -45,17 +45,13 @@ def unit(values) -> array:
     return array("f", (x / norm for x in vec))
 
 
-async def fetch(client, url: str, api_key: str, model: str,
-                texts: list[str]) -> list[array]:
-    """Unit vectors for `texts`, in order, from one OpenAI-style request."""
-    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-    resp = await client.post(url, headers=headers, json={
-        "model": model, "input": [clip(t) for t in texts]})
-    resp.raise_for_status()
-    rows = sorted(resp.json()["data"], key=lambda row: row.get("index", 0))
+async def fetch(client, model: str, texts: list[str]) -> list[array]:
+    """Unit vectors for `texts`, in order, from one request through the SDK's client (transport.client)."""
+    answer = await client.embeddings.create(model=model, input=[clip(t) for t in texts], timeout=BATCH_TIMEOUT_S)
+    rows = sorted(answer.data, key=lambda row: row.index)
     if len(rows) != len(texts):
         raise ValueError(f"{len(texts)} texts sent, {len(rows)} vectors back")
-    return [unit(row["embedding"]) for row in rows]
+    return [unit(row.embedding) for row in rows]
 
 
 def _bytes(vec: array) -> bytes:

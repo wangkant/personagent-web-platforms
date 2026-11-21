@@ -182,11 +182,8 @@ class Agent(Turns, DirectMessages, MessageParsing, ReplyDecision, PromptBuilder,
 
     def _init_runtime_state(self) -> None:
         """The empty per-process state: locks, the chats' recent turns, caches."""
-        # Error-driven fallback, per model name, for every mode.
-        self._fallback_until: dict[str, float] = {}
-        # Armed only by throttling and outages, never by one refused request.
+        # Error-driven fallback, per model name: armed only by throttling and outages, never by one refused request.
         self._unreachable_until: dict[str, float] = {}
-        self._http_pool: dict = {}
         # Strong refs: asyncio only weak-refs running tasks.
         self._bg_tasks: set[asyncio.Task] = set()
 
@@ -397,7 +394,7 @@ class Agent(Turns, DirectMessages, MessageParsing, ReplyDecision, PromptBuilder,
             book.flush(time.time())
 
     async def aclose(self) -> None:
-        """Stop owned work, close transports, then persist final state."""
+        """Stop owned work, then persist final state."""
         timer = self.__dict__.pop("_recent_timer", None)
         if timer is not None:
             timer.cancel()
@@ -408,13 +405,6 @@ class Agent(Turns, DirectMessages, MessageParsing, ReplyDecision, PromptBuilder,
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
-        clients = list(self._http_pool.values())
-        self._http_pool.clear()
-        if clients:
-            await asyncio.gather(
-                *(client.aclose() for client in clients
-                  if not client.is_closed),
-                return_exceptions=True)
         self.flush_state()
 
     CORE_MEMORY_MAX_CHARS = 400

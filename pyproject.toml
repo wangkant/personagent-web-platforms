@@ -44,6 +44,9 @@ dependencies = [
     "websockets>=13,<18",
     "python-dotenv>=1.0,<2",
     "httpx>=0.27,<1",
+    # Every model call: the official SDK on the person's own endpoint (transport.py), whose client is httpx2.
+    "openai>=3.57,<4",
+    "httpx2>=2.12,<3",
     # Direct, not transitive: ingestion.py's SSRF guard imports httpcore._backends.auto.
     "httpcore>=1.0,<2",
     # Decodes the first frame of a GIF for vision endpoints that reject GIFs.

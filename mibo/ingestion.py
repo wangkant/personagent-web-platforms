@@ -23,6 +23,7 @@ from urllib.parse import urlencode, urlsplit
 
 import httpcore
 import httpx
+import openai
 from httpcore._backends.auto import AutoBackend
 
 from .config_env import env_int
@@ -35,10 +36,8 @@ VISION_MAX_IMAGE_BYTES = env_int("VISION_MAX_IMAGE_BYTES", 5_000_000, minimum=1)
 
 # A reading of a picture takes this many tokens at most: a screenshot's or a receipt's text, whole.
 VISION_READ_TOKENS = 1500
-# A busy vision model is asked this many times in all, waiting VISION_BACKOFF_S, then twice that, between.
-VISION_ATTEMPTS = 3
-VISION_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
-VISION_BACKOFF_S = 1.0
+# A busy vision model or a dropped connection is asked again this many times, by the SDK (transport.client).
+VISION_RETRIES = 2
 
 MAX_URL_LENGTH = 4096
 MAX_HTML_WIRE_BYTES = 128 * 1024
@@ -471,7 +470,7 @@ class ContentIngestion:
         cid: int = 0
         up_mid: int = 0
         try:
-            async with self._http(timeout=5) as client:
+            async with httpx.AsyncClient(timeout=5) as client:
                 r = await client.get(
                     "https://api.bilibili.com/x/web-interface/view",
                     params={"bvid": bvid},
@@ -508,7 +507,7 @@ class ContentIngestion:
         if self._wbi_keys[0] and now - self._wbi_keys_ts < 86400:
             return self._wbi_keys
         try:
-            async with self._http(timeout=5) as client:
+            async with httpx.AsyncClient(timeout=5) as client:
                 r = await client.get(
                     "https://api.bilibili.com/x/web-interface/nav",
                     headers={"User-Agent": "Mozilla/5.0"},
@@ -552,7 +551,7 @@ class ContentIngestion:
             img_key, sub_key,
         )
         try:
-            async with self._http(timeout=8) as client:
+            async with httpx.AsyncClient(timeout=8) as client:
                 r = await client.get(
                     "https://api.bilibili.com/x/web-interface/view/conclusion/get",
                     params=params,
@@ -723,7 +722,7 @@ class ContentIngestion:
     async def _fetch_oembed_youtube(self, url: str) -> str:
         """YouTube exposes a public oEmbed endpoint with no API key needed."""
         try:
-            async with self._http(timeout=5, follow_redirects=True, max_redirects=5) as c:
+            async with httpx.AsyncClient(timeout=5, follow_redirects=True, max_redirects=5) as c:
                 r = await c.get(
                     "https://www.youtube.com/oembed",
                     params={"url": url, "format": "json"},
@@ -844,12 +843,11 @@ class ContentIngestion:
             mime = "image/png"
         return f"data:{mime};base64,{base64.b64encode(img_bytes).decode()}"
 
-    async def _vision_post(self, url: str, data_url: str) -> tuple[httpx.Response | None, Exception | None]:
-        """Ask the vision model at `url` to read one picture; asked again, after VISION_BACKOFF_S and then twice
-        that, while it is busy (VISION_RETRY_STATUSES) or the connection fails. A 400 refusing a field is resent
-        at once in the spelling the endpoint takes, which `_post_chat` remembers as it does for a reply. The last
-        response and the last error; no response when every try raised, or when the endpoint refused the picture
-        itself, since what it said without it is no reading of it."""
+    async def _vision_post(self, url: str, data_url: str) -> dict | None:
+        """Ask the vision model at `url` to read one picture; asked again (VISION_RETRIES) while it is busy or the
+        connection fails. A 400 refusing a field is resent at once in the spelling the endpoint takes, which
+        `_post_chat` remembers as it does for a reply. The answer's body; None when the endpoint refused the
+        picture itself, since what it said without it is no reading of it."""
         payload = {
             "model": self.vision_model,
             "messages": [{
@@ -864,27 +862,12 @@ class ContentIngestion:
         }
         # Hidden reasoning off, and K2 at the one temperature it takes that way.
         self._thinking_off(payload, url, k2_temperature=True)
-        r = None
-        last_exc = None
-        for attempt in range(VISION_ATTEMPTS):
-            try:
-                r = await self._post_chat(url, self.vision_api_key, payload, timeout=30)
-            except Exception as e:
-                r, last_exc = None, e
-            else:
-                if r.status_code not in VISION_RETRY_STATUSES:
-                    break
-            if attempt < VISION_ATTEMPTS - 1:
-                await asyncio.sleep(VISION_BACKOFF_S * 2 ** attempt)
-        if not isinstance(payload["messages"][0]["content"], list):
-            return None, last_exc
-        return r, last_exc
+        body = await self._post_chat(url, self.vision_api_key, payload, timeout=30, retries=VISION_RETRIES)
+        return body if isinstance(payload["messages"][0]["content"], list) else None
 
     @staticmethod
-    def _vision_text(r: httpx.Response) -> str:
-        return (r.json().get("choices", [{}])[0]
-                .get("message", {})
-                .get("content", "") or "")
+    def _vision_text(body: dict) -> str:
+        return (body.get("choices") or [{}])[0].get("message", {}).get("content", "") or ""
 
     async def _describe_image_vision(self, url: str) -> str | None:
         """A picture read out by the OpenAI-compatible vision endpoint. None means the call failed and may
@@ -909,13 +892,14 @@ class ContentIngestion:
             if not data_url:
                 logger.info("[Agent] vision: skip GIF (first-frame extract failed)")
                 return ""
-            r, last_exc = await self._vision_post(endpoint, data_url)
-            if r is None or r.status_code != 200:
-                logger.warning("[Agent] vision HTTP %d: %s (exc=%s)",
-                               r.status_code if r else 0,
-                               (r.text if r else "")[:200], last_exc)
+            try:
+                body = await self._vision_post(endpoint, data_url)
+            except openai.APIError as e:
+                logger.warning("[Agent] vision call failed: %s", e)
                 return None
-            return self._accept_vision_caption(url, self._vision_text(r))
+            if body is None:
+                return None
+            return self._accept_vision_caption(url, self._vision_text(body))
         except Exception as e:
             logger.debug("[Agent] vision failed: %s: %s",
                          type(e).__name__, e)

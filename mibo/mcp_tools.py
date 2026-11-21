@@ -826,31 +826,28 @@ async def write_words(home: Path, values: dict, tools: list[dict]) -> int:
         return 0
     client = _Client(values, usage_path(home, values))
     done = 0
-    try:
-        for start in range(0, len(todo), WORDS_BATCH):
-            batch = todo[start:start + WORDS_BATCH]
-            asked = json.dumps([{"name": t["name"], "description": " — ".join(
-                x for x in (t["title"], t["description"][:WORDS_DESCRIPTION_CHARS]) if x)} for t in batch],
-                ensure_ascii=False)
-            try:
-                with purpose("tools"):
-                    raw = await client._call_llm(WORDS_PROMPT, [{"role": "user", "content": asked}], client.model,
-                                                 max_tokens=4000, disable_thinking=True,
-                                                 json_object=True)
-            except Exception as error:
-                logger.info("[Tools] no search words for %d tools: %s", len(batch), type(error).__name__)
-                continue
-            made = salvage_json_object(strip_json_fences(raw or "")) or {}
-            found = {}
-            for tool in batch:
-                text = made.get(tool["name"])
-                text = " ".join(text) if isinstance(text, list) else text
-                if isinstance(text, str) and text.strip():
-                    # Words to match, never shown or followed: letters, digits and CJK only.
-                    found[tool["fp"]] = " ".join(_WORD.findall(text))[:600]
-            if found:
-                keep_words(home, found)
-                done += len(found)
-    finally:
-        await client.close()
+    for start in range(0, len(todo), WORDS_BATCH):
+        batch = todo[start:start + WORDS_BATCH]
+        asked = json.dumps([{"name": t["name"], "description": " — ".join(
+            x for x in (t["title"], t["description"][:WORDS_DESCRIPTION_CHARS]) if x)} for t in batch],
+            ensure_ascii=False)
+        try:
+            with purpose("tools"):
+                raw = await client._call_llm(WORDS_PROMPT, [{"role": "user", "content": asked}], client.model,
+                                             max_tokens=4000, disable_thinking=True,
+                                             json_object=True)
+        except Exception as error:
+            logger.info("[Tools] no search words for %d tools: %s", len(batch), type(error).__name__)
+            continue
+        made = salvage_json_object(strip_json_fences(raw or "")) or {}
+        found = {}
+        for tool in batch:
+            text = made.get(tool["name"])
+            text = " ".join(text) if isinstance(text, list) else text
+            if isinstance(text, str) and text.strip():
+                # Words to match, never shown or followed: letters, digits and CJK only.
+                found[tool["fp"]] = " ".join(_WORD.findall(text))[:600]
+        if found:
+            keep_words(home, found)
+            done += len(found)
     return done
