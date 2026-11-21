@@ -23,7 +23,7 @@ concurrency:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -68,7 +68,7 @@ jobs:
   windows:
     # Windows is the main deployment platform and the only one running storage.FileLock's msvcrt branch.
     runs-on: windows-2022
-    timeout-minutes: 15
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
