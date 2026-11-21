@@ -725,6 +725,7 @@
     "compacting": "Resumindo…",
     "compactNone": "Ainda não há mensagens anteriores para resumir",
     "compactFailed": "Não foi possível escrever o resumo. Tente novamente mais tarde.",
+    "compactCut": "Não foi possível escrever o resumo; as mensagens anteriores foram retiradas do contexto. A busca em conversas anteriores ainda as encontra.",
     "clearContext": "Limpar contexto",
     "clearTitle": "Limpar o contexto desta conversa?",
     "clearText": "O modelo deixará de considerar as mensagens anteriores. O histórico da conversa e a memória não são afetados.",

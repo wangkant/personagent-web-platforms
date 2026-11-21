@@ -113,3 +113,46 @@ async def test_a_forget_takes_the_sentences_it_names_out_of_the_chats_checkpoint
     (row,) = db.at(tmp_path).read("SELECT body FROM page_messages WHERE kind = 'summary'")
     for text in (agent.dm_history[reader][0]["content"], json.loads(row[0])["text"]):
         assert "Lisbon" not in text and "green tea" in text and "Mood" in text
+
+
+def _page_chat(folder: Path, ident: str, conversation: str, mark: dict | None = None) -> None:
+    """A chat the page keeps, with `mark` as its summary row (the checkpoint dm.py keeps there)."""
+    with db.at(folder).write() as conn:
+        conn.execute("INSERT INTO page_chats VALUES (?,?,?,?,?)", (ident, conversation, "", "2026-11-21T08:00:00+00:00", 0))
+        if mark is not None:
+            conn.execute("INSERT INTO page_messages VALUES (?, 0, 'summary', ?)", (ident, json.dumps(mark)))
+
+
+def _mark(folder: Path, ident: str) -> dict:
+    rows = db.at(folder).read("SELECT body FROM page_messages WHERE chat = ? AND kind = 'summary'", (ident,))
+    return json.loads(rows[0][0]) if rows else {}
+
+
+async def test_a_forget_takes_its_words_out_of_the_checkpoint_of_a_chat_nothing_holds(tmp_path: Path) -> None:
+    agent = _character(tmp_path, "Mibo", "en")
+    _page_chat(tmp_path, "p1", CHAT)
+    # A chat of the page that holds no turns now (after a restart, past the recent window, its record pruned).
+    _page_chat(tmp_path, "p2", "c2", {"text": "Threads:\n- They moved to Lisbon. They like green tea.\nMood: calm",
+                                      "from": 1.0, "at": 1.0})
+    await _say(agent, "remember that I moved to Lisbon")
+    await _say(agent, "forget Lisbon")
+    mark = _mark(tmp_path, "p2")
+    assert "Lisbon" not in mark["text"] and "green tea" in mark["text"]
+    # Written anew, so the page draws the checkpoint's words again.
+    assert mark["at"] > 1.0
+
+
+async def test_a_forget_whose_words_span_sentences_leaves_none_of_them_in_the_checkpoint(tmp_path: Path) -> None:
+    agent = _character(tmp_path, "Mibo", "en")
+    reader = dm.chat_key(CHAT)[0]
+    # Each sentence holds a part of what they said; together they hold most of it.
+    mark = {"text": "Threads:\n- Sister Ana. She teaches violin. Lessons in Porto.\nMood: calm", "from": 1.0, "at": 1.0}
+    _page_chat(tmp_path, "p1", CHAT, mark)
+    now = time.time()
+    agent.dm_history[reader] = [{"role": CHECKPOINT, "content": mark["text"], "t": 1.0, "seq": 0},
+                                {"role": "user", "content": "My sister Ana teaches violin in Porto", "t": now, "seq": 1},
+                                {"role": "assistant", "content": "That sounds lovely.", "t": now, "seq": 2}]
+    await _say(agent, "forget that")
+    held = [row["content"] for row in agent.dm_history[reader] if row["role"] == CHECKPOINT]
+    for text in [*held, _mark(tmp_path, "p1").get("text", "")]:
+        assert not {"Ana", "violin", "Porto"} & set(text.replace(".", " ").split())

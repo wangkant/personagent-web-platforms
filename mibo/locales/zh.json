@@ -737,6 +737,7 @@
     "compacting": "正在归纳…",
     "compactNone": "暂无可归纳的较早对话",
     "compactFailed": "归纳未完成，请稍后重试。",
+    "compactCut": "未能生成摘要，较早的对话已移出上下文，仍可通过搜索历史对话查找。",
     "clearContext": "清空上下文",
     "clearTitle": "清空此对话的上下文？",
     "clearText": "清空后，模型将不再参考此前的对话，聊天记录与记忆不受影响。",

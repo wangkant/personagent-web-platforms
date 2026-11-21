@@ -88,17 +88,29 @@ def _at(stamp) -> float:
 _OF_CHAT = "SELECT id FROM page_chats WHERE conversation = ?"
 
 
+def _page_mark(runtime, conversation: str) -> dict:
+    """The page's summary row of the chat `conversation`: its checkpoint or the mark of a clear; {} without one."""
+    marks = db.at(runtime).read(f"SELECT body FROM page_messages WHERE kind = 'summary' AND chat IN ({_OF_CHAT})",
+                                (conversation,))
+    return json.loads(marks[0][0]) if marks else {}
+
+
+def _foldable(rows: list[dict], start: int) -> bool:
+    """Whether the turns before `start` can become the checkpoint: some beside the checkpoint, and a turn after."""
+    first = 1 if rows and rows[0].get("role") == context.CHECKPOINT else 0
+    return first < start < len(rows)
+
+
 def _page_turns(runtime, conversation: str) -> list[dict]:
     """The page's own saved copy of the chat `conversation` (welcome.PageChat, in the runtime database) as turns,
     for a page chat that has no recent window yet: its checkpoint first (the page's summary row), then the turns
     from where the checkpoint's verbatim turns began; [] if the page keeps no such chat."""
-    store = db.at(runtime)
-    marks = store.read(f"SELECT body FROM page_messages WHERE kind = 'summary' AND chat IN ({_OF_CHAT})",
-                       (conversation,))
-    mark = json.loads(marks[0][0]) if marks else {}
+    mark = _page_mark(runtime, conversation)
     since = float(mark.get("from") or 0.0)
-    grace = 0.0 if mark.get("cleared") else _HEARD_AFTER_S
+    # Nothing said before the last 清空上下文 comes back, whatever the grace.
+    after = max(since - _HEARD_AFTER_S, float(mark.get("floor") or 0.0))
     turns: list[dict] = []
+    store = db.at(runtime)
     for (body,) in store.read(f"SELECT body FROM page_messages WHERE kind = 'message' AND chat IN ({_OF_CHAT}) "
                               "ORDER BY seq", (conversation,)):
         message = json.loads(body)
@@ -107,7 +119,7 @@ def _page_turns(runtime, conversation: str) -> list[dict]:
             continue
         at = _at(message.get("at"))
         # What the checkpoint holds; a turn may come back with it, never go missing.
-        if at < since - grace:
+        if at < after:
             continue
         role, text = message.get("role"), message.get("text")
         if not isinstance(text, str):
@@ -214,7 +226,9 @@ class DirectMessages:
 
     def _rehydrate_page(self, user_id: str, pkey: str) -> None:
         """A page chat with no turns held reads the page's saved copy once: its checkpoint and the newest whole
-        turns after it within the history's share."""
+        turns after it within the history's share. The chat is woken first, so new turns are numbered after the
+        chat's record and the recent window wins over the page."""
+        self._wake(pkey)
         if user_id in self.dm_history:
             return
         done = self.__dict__.setdefault("_page_rehydrated", set())
@@ -263,11 +277,10 @@ class DirectMessages:
                 return
             # The next request with this history and a full turn context would pass the ceiling T.
             over = plan.limit - plan.available + held + plan.turn > plan.ceiling
-            kept = await self._compacted(user_id, rows, context.tail_from(rows, plan.tail / ratio), sent, plan,
+            done = await self._compacted(user_id, rows, context.tail_from(rows, plan.tail / ratio), sent, plan,
                                          now=over)
-            # A forget meanwhile replaced the turns: they stay as it left them.
-            if kept is not None and self.dm_history.get(user_id) is rows:
-                self.dm_history[user_id] = kept
+            if done is not None:
+                self.dm_history[user_id] = done[0]
                 self._recent_dirty.add(pkey)
                 self._maybe_flush_recent()
 
@@ -281,29 +294,35 @@ class DirectMessages:
             return False
         lookups.squeezed = True
         before = rows[:-1]
-        start = context.tail_from(before, fit.plan.tail / fit.ratio)
-        if start >= len(before):
-            return False
-        kept = await self._compacted(chat_key(lookups.conversation)[0], before, start, (system, tools), fit.plan,
+        done = await self._compacted(chat_key(lookups.conversation)[0], before,
+                                     context.tail_from(before, fit.plan.tail / fit.ratio), (system, tools), fit.plan,
                                      now=True)
-        if kept is None:
+        if done is None:
             return False
+        kept = done[0]
         convo[:len(history_messages(before))] = history_messages(kept)
         rows[:-1] = kept
         return fit(convo)
 
     async def _compacted(self, user_id: str, rows: list[dict], start: int, sent: tuple, plan: context.Budget, *,
-                         now: bool) -> list[dict] | None:
-        """`rows` with those before `start` made one checkpoint, the one before merged into it, and kept as the
-        page's summary row; None when there is nothing to fold or the summary failed and the turns can wait. A
-        failed summary, the second in a row or with `now`, leaves a cut without one: the turns go, and the old
-        checkpoint says which days went and that past-chat search finds them (the chat's record keeps them)."""
-        first = 1 if rows and rows[0].get("role") == context.CHECKPOINT else 0
-        if start <= first:
+                         now: bool) -> tuple[list[dict], bool] | None:
+        """(`rows` with those before `start` made one checkpoint, the one before merged into it, and kept as the
+        page's summary row; whether it was a cut without a summary). None when there is nothing to fold, when a
+        forget, a clear or another compaction changed the chat while the summary was written (what was read then
+        is not written back), or when the summary failed and the turns can wait. A failed summary, the second in a
+        row or with `now`, leaves a cut without one: the turns go, and the old checkpoint says which days went and
+        that past-chat search finds them (the chat's record keeps them)."""
+        if not _foldable(rows, start):
             return None
         span = rows[:start]
+        pkey = channels.dm_routing_key(user_id)
+        held, forgets = self.dm_history.get(user_id), self._memory_gen(pkey)
         summary = await self._summary(span, sent, plan)
+        if self.dm_history.get(user_id) is not held or self._memory_gen(pkey) != forgets:
+            logger.info("[Agent] the chat changed while its checkpoint was written; it was not kept")
+            return None
         fails = self.__dict__.setdefault("_compact_fails", {})
+        cut = summary is None
         if summary is None:
             fails[user_id] = fails.get(user_id, 0) + 1
             if fails[user_id] < _FAILS_BEFORE_CUT and not now:
@@ -313,8 +332,9 @@ class DirectMessages:
         head = {"role": context.CHECKPOINT, "content": summary, "t": float(rows[start].get("t") or time.time()),
                 "seq": 0}
         self._keep_checkpoint(user_id, head)
-        logger.info("[Agent] %d older turns of the chat condensed into its checkpoint", start - first)
-        return [head, *rows[start:]]
+        logger.info("[Agent] %d older turns of the chat condensed into its checkpoint",
+                    sum(r.get("role") != context.CHECKPOINT for r in span))
+        return [head, *rows[start:]], cut
 
     async def _summary(self, span: list[dict], sent: tuple, plan: context.Budget) -> str | None:
         """The checkpoint of `span`, written by the reply model on the same prefix as the chat's last request (its
@@ -370,12 +390,15 @@ class DirectMessages:
 
     def _keep_checkpoint(self, user_id: str, head: dict) -> None:
         """The checkpoint as the page's summary row of the chat (page_messages kind 'summary', seq 0, which the
-        page's own messages never take), replaced on each compaction; a 无痕对话 has no row on the page."""
-        body = json.dumps({"text": head["content"], "from": head["t"], "at": time.time()}, ensure_ascii=False)
+        page's own messages never take), replaced on each compaction with the floor of the last clear carried on;
+        a 无痕对话 has no row on the page."""
+        conversation = user_id.split(":", 1)[-1]
+        floor = _page_mark(self.memory_file.parent, conversation).get("floor")
+        body = json.dumps({"text": head["content"], "from": head["t"], "at": time.time(),
+                           **({"floor": floor} if floor else {})}, ensure_ascii=False)
         with db.at(self.memory_file.parent).write() as conn:
             conn.execute("INSERT OR REPLACE INTO page_messages(chat, seq, kind, body) "
-                         "SELECT id, 0, 'summary', ? FROM page_chats WHERE conversation = ?",
-                         (body, user_id.split(":", 1)[-1]))
+                         "SELECT id, 0, 'summary', ? FROM page_chats WHERE conversation = ?", (body, conversation))
 
     async def _dm_turn(self, user_id: str, pkey: str, text: str) -> None:
         """One turn of the model: the call under the turn's time budget, the
@@ -614,7 +637,7 @@ class DirectMessages:
         self._rehydrate_page(user_id, pkey)
         rows = self.dm_history.get(user_id) or []
         first = 1 if rows and rows[0].get("role") == context.CHECKPOINT else 0
-        out = {"known": False, "compactable": context.tail_from(rows, 0) > first, "held": bool(rows)}
+        out = {"known": False, "compactable": _foldable(rows, context.tail_from(rows, 0)), "held": bool(rows)}
         seen = vars(self).get("_chat_requests", {}).get(pkey)
         if not seen:
             return out
@@ -634,35 +657,37 @@ class DirectMessages:
 
     async def compact_now(self, conversation: str) -> dict:
         """立即归纳: the chat's turns before its newest exchange made one checkpoint now, on the prefix of its last
-        request (dsh's manual compaction, its retained tail none but the newest turn). {"compacted": bool} and
-        {"failed": True} when the summary was not written."""
+        request (dsh's manual compaction, its retained tail none but the newest turn). {"compacted": bool};
+        {"failed": True} when nothing was written, and {"cut": True} when the turns went without a summary (after
+        a failed one, `_compacted`)."""
         user_id, pkey = chat_key(conversation)
         async with self.turn_locks[pkey], self.locks[pkey]:
             self._rehydrate_page(user_id, pkey)
             rows = self.dm_history.get(user_id) or []
             start = context.tail_from(rows, 0)
-            if start <= (1 if rows and rows[0].get("role") == context.CHECKPOINT else 0):
+            if not _foldable(rows, start):
                 return {"compacted": False}
             seen = vars(self).get("_chat_requests", {}).get(pkey)
             sent = seen["sent"] if seen else (self._dm_system(), self._offered_tools())
-            kept = await self._compacted(user_id, rows, start, sent, self._history_plan(sent)[0], now=False)
-            if kept is None:
+            done = await self._compacted(user_id, rows, start, sent, self._history_plan(sent)[0], now=False)
+            if done is None:
                 return {"compacted": False, "failed": True}
-            self.dm_history[user_id] = kept
+            self.dm_history[user_id] = done[0]
             self._recent_dirty.add(pkey)
             self._maybe_flush_recent()
-            return {"compacted": True}
+            return {"compacted": True, **({"cut": True} if done[1] else {})}
 
     async def clear_context(self, conversation: str) -> dict:
         """清空上下文: the model no longer reads the chat's turns or checkpoint; the page's copy, the chat's record
         and the memory keep everything. The page's summary row becomes the clear's mark, so the turns before it
-        never come back on a restart. The mark ({"text", "from", "at", "cleared"})."""
+        never come back on a restart, nor after a later compaction, which carries its floor on. The mark ({"text",
+        "from", "at", "cleared", "floor"})."""
         user_id, pkey = chat_key(conversation)
         async with self.turn_locks[pkey], self.locks[pkey]:
             now = time.time()
             self.dm_history[user_id] = []
             vars(self).get("_compact_fails", {}).pop(user_id, None)
-            mark = {"text": "", "from": now, "at": now, "cleared": True}
+            mark = {"text": "", "from": now, "at": now, "cleared": True, "floor": now}
             with db.at(self.memory_file.parent).write() as conn:
                 conn.execute("INSERT OR REPLACE INTO page_messages(chat, seq, kind, body) "
                              "SELECT id, 0, 'summary', ? FROM page_chats WHERE conversation = ?",

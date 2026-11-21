@@ -966,7 +966,9 @@ class Workspace:
                 # Longer than the model reads at once: the character took its head and tail (dm._cut_message).
                 said["cut"] = True
             stopped = said.pop("stopping", "")
-            if stopped and not items:
+            # The cut's mark is no reply: a cut message that got no words waits to be sent again.
+            shown = [item for item in items if item.get("type") != "cut"]
+            if stopped and not shown:
                 # Stopped from the page: nothing came, and the message waits to be sent again.
                 self._unanswered(said, stopped, room)
                 return {"reply": "", "stopped": True, **room.view(said["seq"] - 1 if after is None else after)}
@@ -981,7 +983,7 @@ class Workspace:
                     raise ValueError(f"model_{problem}")
                 self._unanswered(said, "chat_failed", room)
                 raise RuntimeError("the model did not answer")
-            if not items:
+            if not shown:
                 # The character had no words for it: shown as not sent, to send again.
                 self._unanswered(said, "generic", room)
                 raise ValueError("generic")

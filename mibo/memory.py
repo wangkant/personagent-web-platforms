@@ -52,13 +52,15 @@ def _forget_query(content: str, spec: chatlangs.Spec) -> str:
 
 
 def _without_sentences(text: str, hit: Callable[[str], bool]) -> str:
-    """`text` without the sentences `hit` names, line by line, as person.forget leaves the talk summary."""
+    """`text` without the sentences `hit` names, line by line, as person.forget leaves the talk summary; "" when
+    what is left still holds it (spread over sentences that each hold a part), as it cannot be taken out alone."""
     lines = []
     for line in text.split("\n"):
         kept = "".join(p for p in re.split(r"(?<=[。！？；.!?;])", line) if not hit(p))
         if kept.strip() or not line.strip():
             lines.append(kept)
-    return "\n".join(lines).strip()
+    left = "\n".join(lines).strip()
+    return "" if hit(left) else left
 
 
 def today_runtime(agent):
@@ -339,8 +341,8 @@ class Memory:
         """Delete matching recent lines of this chat (the DM turns, their copy
         on disk, the log), so no later consolidation reads them again; with
         `cut`, a matching line keeps cut(its words) instead. The chat's
-        checkpoint loses the sentences that match, here and in the page's
-        summary row. How many lines changed."""
+        checkpoint loses the sentences that match, here and in the summary
+        row of every chat the page keeps. How many lines changed."""
         uid = channels.dm_user(conv)
 
         def keep(row) -> bool:
@@ -358,7 +360,8 @@ class Memory:
                     continue
                 removed += 1
                 if row.get("role") == CHECKPOINT:
-                    out.append({**row, "content": _without_sentences(row["content"], hit)})
+                    left = _without_sentences(row["content"], hit)
+                    out += [{**row, "content": left}] if left else []
                 elif cut is not None:
                     key = "text" if "text" in row else "content"
                     out.append({**row, key: cut(row[key])})
@@ -379,7 +382,7 @@ class Memory:
             snap["dm"] = filtered(snap.get("dm", []))
             if removed != before:
                 recent.put(conv, snap)
-        removed += self._page_checkpoint(conv, lambda text: _without_sentences(text, hit) if hit(text) else text)
+        removed += self._page_checkpoints(lambda text: _without_sentences(text, hit) if hit(text) else text)
         removed += self._log_forget(conv, lambda row: not keep(row) and (cut(row["text"]) if cut else True))
         if removed:
             dirty = getattr(self, "_recent_dirty", None)
@@ -434,32 +437,43 @@ class Memory:
             changed = self.chat_log.drop(conv) or changed
         except sqlite3.Error as e:
             logger.warning("[Agent] chat log not removed: %s", e)
-        changed = bool(self._page_checkpoint(conv, lambda text: "")) or changed
+        changed = bool(self._page_checkpoints(lambda text: "", channels.dm_user(conv).split(":", 1)[-1])) or changed
         self._final_copies()
         return changed
 
-    def _page_checkpoint(self, conv: str, change: Callable[[str], str]) -> int:
-        """The page's summary row of this chat (dm.py keeps the chat's checkpoint there) given change(its text),
-        or removed when that is empty, with no older copy left in the database; 1 when it changed, else 0."""
+    def _page_checkpoints(self, change: Callable[[str], str], conversation: str = "") -> int:
+        """The page's summary row of every chat (dm.py keeps a chat's checkpoint there), or of the chat
+        `conversation` alone, given change(its text) and written anew, so the page draws it again; one left empty
+        becomes the mark of the clear before it, or goes; no older copy is left in the database. How many changed."""
         store = db.at(self.memory_file.parent)
-        conversation = channels.dm_user(conv).split(":", 1)[-1]
-        rows = store.read("SELECT chat, body FROM page_messages WHERE kind = 'summary' AND chat IN "
-                          "(SELECT id FROM page_chats WHERE conversation = ?)", (conversation,))
-        if not rows:
-            return 0
-        ident, body = rows[0]
-        mark = json.loads(body)
-        text = change(mark["text"])
-        if text == mark["text"]:
+        rows = store.read("SELECT chat, body FROM page_messages WHERE kind = 'summary'"
+                          + (" AND chat IN (SELECT id FROM page_chats WHERE conversation = ?)" if conversation else ""),
+                          (conversation,) if conversation else ())
+        changed = []
+        for ident, body in rows:
+            mark = json.loads(body)
+            text = change(mark["text"])
+            if text == mark["text"]:
+                continue
+            if text:
+                mark = {**mark, "text": text, "at": time.time()}
+            elif mark.get("floor"):
+                # The clear before it stays, so no turn from before the clear comes back (dm._page_turns).
+                mark = {**mark, "text": "", "from": mark["floor"], "at": time.time(), "cleared": True}
+            else:
+                mark = None
+            changed.append((ident, mark))
+        if not changed:
             return 0
         with store.write() as conn:
-            if text:
-                conn.execute("UPDATE page_messages SET body = ? WHERE chat = ? AND seq = 0",
-                             (json.dumps({**mark, "text": text}, ensure_ascii=False), ident))
-            else:
-                conn.execute("DELETE FROM page_messages WHERE chat = ? AND seq = 0", (ident,))
+            for ident, mark in changed:
+                if mark:
+                    conn.execute("UPDATE page_messages SET body = ? WHERE chat = ? AND seq = 0",
+                                 (json.dumps(mark, ensure_ascii=False), ident))
+                else:
+                    conn.execute("DELETE FROM page_messages WHERE chat = ? AND seq = 0", (ident,))
         store.scrubbed()
-        return 1
+        return len(changed)
 
     async def forget_chats(self, conversation: str, keep: list[str]) -> int:
         """Forget the lines of the chat `conversation`, with nothing kept to

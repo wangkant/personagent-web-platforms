@@ -725,6 +725,7 @@
     "compacting": "Résumé en cours…",
     "compactNone": "Aucun message antérieur à résumer pour l'instant",
     "compactFailed": "Le résumé n'a pas pu être rédigé. Réessayez plus tard.",
+    "compactCut": "Le résumé n'a pas pu être rédigé ; les messages précédents ont été retirés du contexte. La recherche dans les anciennes conversations les retrouve toujours.",
     "clearContext": "Effacer le contexte",
     "clearTitle": "Effacer le contexte de cette discussion ?",
     "clearText": "Le modèle ne tiendra plus compte des messages précédents. L'historique et la mémoire restent intacts.",

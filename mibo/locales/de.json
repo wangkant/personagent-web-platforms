@@ -725,6 +725,7 @@
     "compacting": "Wird zusammengefasst…",
     "compactNone": "Noch keine früheren Nachrichten zum Zusammenfassen",
     "compactFailed": "Die Zusammenfassung konnte nicht erstellt werden. Versuchen Sie es später erneut.",
+    "compactCut": "Die Zusammenfassung konnte nicht erstellt werden; frühere Nachrichten wurden aus dem Kontext entfernt. Die Suche in früheren Chats findet sie weiterhin.",
     "clearContext": "Kontext leeren",
     "clearTitle": "Kontext dieses Chats leeren?",
     "clearText": "Das Modell berücksichtigt frühere Nachrichten danach nicht mehr. Chatverlauf und Gedächtnis bleiben erhalten.",

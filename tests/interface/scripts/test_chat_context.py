@@ -158,3 +158,26 @@ def test_a_model_whose_window_cannot_hold_the_setup_is_named_under_the_message(a
     assert "context window is too small to hold Mibo's basic setup" in note.inner_text()
     assert app.model.asked() == []
     assert page.errors == [] and page.refused == []
+
+
+def _flashed(page, words: str) -> None:
+    page.page.wait_for_function("words => [...document.querySelectorAll('.chat-hint')].some(n => "
+                                "n.textContent.includes(words))", arg=words)
+
+
+def test_summarize_now_after_a_failed_try_says_the_earlier_messages_went_without_a_summary(app, turn, browser):
+    app.post("/api/look/toured")
+    app.model.window = 65536
+    measured(app, context=65536)
+    app.model.script(fail(500), purpose="fold")
+    app.model.script(fail(500), fail(500), purpose="compact")
+    _talk(turn, 4)
+    page = _open(browser, app)
+    _menu(page)
+    page.page.locator(".mb-item", has_text="Summarize now").click()
+    _flashed(page, "The summary could not be written. Try again later.")
+    # The menu stays open; the second try cuts the earlier messages without a summary and says so.
+    page.page.locator(".mb-item:not([disabled])", has_text="Summarize now").click()
+    _flashed(page, "Searching past chats still finds them.")
+    page.page.locator(".chat-compacted").wait_for()
+    assert page.errors == [] and page.refused == []

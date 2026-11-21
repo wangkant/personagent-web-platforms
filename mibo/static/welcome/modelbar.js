@@ -358,7 +358,11 @@ window.paModelBar = (() => {
       const done = await ctx.api("chat/compact", { chat: env.chat }).catch(() => null);
       compacting = false;
       if (!done || done.failed) env.flash(w().compactFailed);
-      else if (done.compacted) await env.changed();
+      else if (done.compacted) {
+        // Cut without a summary (the second try after a failed one): said, as the context still shrank.
+        if (done.cut) env.flash(w().compactCut);
+        await env.changed();
+      }
       await readContext();
       if (open && view === "main") draw();
     }

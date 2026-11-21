@@ -726,6 +726,7 @@
     "compacting": "Summarizing…",
     "compactNone": "No earlier messages to summarize yet",
     "compactFailed": "The summary could not be written. Try again later.",
+    "compactCut": "The summary could not be written, so earlier messages were taken out of the context. Searching past chats still finds them.",
     "clearContext": "Clear context",
     "clearTitle": "Clear this chat's context?",
     "clearText": "The model will no longer refer to earlier messages. The chat history and memory are not affected.",

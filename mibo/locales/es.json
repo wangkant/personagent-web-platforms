@@ -725,6 +725,7 @@
     "compacting": "Resumiendo…",
     "compactNone": "Aún no hay mensajes anteriores para resumir",
     "compactFailed": "No se pudo escribir el resumen. Vuelva a intentarlo más tarde.",
+    "compactCut": "No se pudo escribir el resumen; los mensajes anteriores se quitaron del contexto. La búsqueda en chats anteriores aún los encuentra.",
     "clearContext": "Borrar contexto",
     "clearTitle": "¿Borrar el contexto de este chat?",
     "clearText": "El modelo dejará de tener en cuenta los mensajes anteriores. El historial del chat y la memoria no cambian.",

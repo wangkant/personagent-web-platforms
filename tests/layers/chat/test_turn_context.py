@@ -10,6 +10,7 @@ import json
 import os
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -17,8 +18,9 @@ from harness.app import App
 from harness.model import call, fail, say, tokens
 from harness.page import measured
 from harness.turn import run_turn
-from mibo import context, pastchats, person, turnctx
+from mibo import context, pastchats, person, today, turnctx
 from mibo.dm import chat_key
+from mibo.library import Item, Library
 from mibo.prompt import _CHECKPOINT_OPEN, _TURN_CONTEXT_OPEN
 
 # Things the person told it, each a line of the memory block.
@@ -164,3 +166,67 @@ def test_the_memory_block_takes_no_more_than_the_tokens_it_is_given(tmp_path, bu
     # Too little for even the block's frame: none at all; else what is placed is what the block says.
     kept = {row["id"]: row["text"] for row in store.facts()}
     assert bool(placed) == (budget >= 300) and all(kept[ident] in block for ident in placed)
+
+
+def _restart(app, model, tmp_path) -> App:
+    """The app opened again on the same home, without its recent window."""
+    app.close()
+    for found in app.home.rglob("recent.json"):
+        found.unlink()
+    return App(Path(os.environ["AGENT_HOME"]), model, PERSONA_BROWSER_PATH=str(tmp_path / "no-browser"),
+               LLM_MAX_RETRIES="0").open()
+
+
+def test_a_chat_with_no_question_after_its_checkpoint_has_nothing_to_condense(app, turn):
+    _setup(app, 65536)
+    turn("你好", say("你好呀。"))
+    agent = _agent(app)
+    # A plan's follow-up after a clear leaves a reply with no question before it (followup.py).
+    agent.dm_history[chat_key(app.workspace._main.conversation)[0]] = [
+        {"role": "assistant", "content": "周末去公园的计划还算数吗？", "t": time.time(), "seq": 9}]
+    assert app.get("/api/chat/context").json()["compactable"] is False
+    pressed = app.post("/api/chat/compact")
+    assert (pressed.status_code, pressed.json()) == (200, {"compacted": False})
+
+
+def test_a_compaction_after_a_clear_keeps_the_turns_before_the_clear_out_after_a_restart(app, turn, model, tmp_path):
+    _setup(app, 65536)
+    for n in range(3):
+        turn(f"清空前{n}：{ZH}", say(f"回答{n}"))
+    app.post("/api/chat/clear")
+    time.sleep(1.1)
+    for n in range(2):
+        turn(f"清空后{n}：{ZH}", say(f"后来{n}"))
+    assert app.post("/api/chat/compact").json()["compacted"]
+    again = _restart(app, model, tmp_path)
+    try:
+        (body,) = run_turn(again, "继续", say("好。")).asked()
+        assert "清空前" not in json.dumps(body["messages"], ensure_ascii=False)
+    finally:
+        again.close()
+
+
+def test_a_second_compact_now_after_a_failed_one_says_it_cut_the_turns_without_a_summary(app, turn):
+    app.model.window = 65536
+    measured(app, context=65536)
+    app.model.script(fail(500), purpose="fold")
+    app.model.script(fail(500), fail(500), purpose="compact")
+    for n in range(4):
+        turn(f"第{n}句：{ZH}", say(f"回答{n}"))
+    assert app.post("/api/chat/compact").json() == {"compacted": False, "failed": True}
+    assert app.post("/api/chat/compact").json() == {"compacted": True, "cut": True}
+    assert pastchats.NAME in app.get("/api/chat/history").json()["summary"]["text"]
+
+
+def test_the_day_block_takes_no_more_than_the_tokens_it_is_given_when_its_titles_carry_markup(tmp_path):
+    # Titles, addresses and excerpts with &, < and >, which the block escapes where it places them.
+    library = Library(tmp_path / "runtime")
+    now = time.time()
+    for n in range(30):
+        library.add(Item(url=f"https://lab.example/notes?a=1&b=2&n={n}", site="lab.example", kind="article",
+                         title=f"R&D <b>&</b> Q&A & <notes> {n}", description="A & B <i>&</i> " * 20,
+                         picture="cover.jpg", seen_at=int(now - 3600 - n)))
+    day = today.Day(SimpleNamespace(roam=SimpleNamespace(library=library), agent_lang="en"), "R&D Q&A notes", now)
+    assert day.found
+    for budget in range(int(day.least) + 20, 3000, 37):
+        assert context.text_tokens(day.fill(budget)) <= budget

@@ -7,16 +7,18 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 from pathlib import Path
 
 import pytest
 
 from harness.app import App
-from harness.model import call, fail, say, tokens
+from harness.model import call, fail, held, say, tokens
 from harness.page import measured
 from harness.turn import run_turn
 from mibo import chatlog, db, loop, pastchats
+from mibo.dm import chat_key
 from mibo.prompt import _CHECKPOINT_OPEN
 
 WINDOW = 16384
@@ -186,10 +188,126 @@ def test_a_request_still_past_the_window_after_its_history_is_compacted_is_answe
     assert tokens(last) + last["max_tokens"] <= WINDOW
 
 
-def test_an_overflow_refused_again_after_the_refit_fails_the_turn(app, turn):
-    measured(app, context=65536)
+def _agent(app):
+    return app.workspace.character.agent
+
+
+def _until(done, what: str, wait: float = 15.0) -> None:
+    for _ in range(int(wait / 0.02)):
+        if done():
+            return
+        time.sleep(0.02)
+    raise AssertionError(what)
+
+
+def _again(model, tmp_path) -> App:
+    return App(Path(os.environ["AGENT_HOME"]), model, PERSONA_BROWSER_PATH=str(tmp_path / "no-browser"),
+               LLM_MAX_RETRIES="0").open()
+
+
+MANGO = "Threads:\n- 他对芒果过敏，吃了会起疹子\n- 公园散步与银杏\nMood: 轻松"
+
+
+def test_a_forget_while_the_checkpoint_is_written_is_not_undone(app, turn):
+    _setup(app)
+    gate = threading.Event()
+    app.model.script(held(gate, say(MANGO)), *[_summary(n) for n in range(5)], purpose="compact")
+    agent, (user_id, pkey) = _agent(app), chat_key(app.workspace._main.conversation)
+    turn("我对芒果过敏，吃了会起疹子。" + _line(0, 12), say("记住了。" + _line(0, 12)))
+    for n in range(1, 12):
+        turn(_line(n, 12), say(_line(n, 12)))
+        try:
+            _until(lambda: app.model.asked("compact"), "", 0.5)
+            break
+        except AssertionError:
+            continue
+    # The checkpoint request waits for its answer; meanwhile the person has it forgotten.
+    assert turn("忘掉芒果").status == 200
+    gate.set()
+    _until(lambda: not agent.locks[pkey].locked(), "the compaction did not end")
+    kept = _history(app).get("summary") or {}
+    assert "芒果" not in kept.get("text", "")
+    assert "芒果" not in json.dumps(agent.dm_history.get(user_id), ensure_ascii=False)
+    after = turn("还记得吗？", say("记得。")).asked()[0]
+    assert "芒果" not in json.dumps(after["messages"], ensure_ascii=False)
+
+
+def test_a_forget_from_settings_while_compact_now_waits_is_not_undone(app, turn):
+    _setup(app, 65536)
+    chat = app.post("/api/chats", {}).json()["id"]
+    item = app.post("/api/person/add", {"text": "我对芒果过敏"}).json()["facts"][0]["id"]
+    turn("我对芒果过敏，吃了会起疹子。", say("记住了。"), conversation=chat)
+    for n in range(3):
+        turn(_line(n), say(_line(n)), conversation=chat)
+    gate = threading.Event()
+    app.model.script(held(gate, say(MANGO)), purpose="compact")
+    answers: dict = {}
+    pressed = threading.Thread(target=lambda: answers.update(
+        compact=app.post("/api/chat/compact", {"chat": chat}).json()), daemon=True)
+    pressed.start()
+    _until(lambda: app.model.asked("compact"), "立即归纳 asked for no checkpoint")
+    agent = _agent(app)
+    forgot = threading.Thread(target=lambda: answers.update(
+        forget=app.post("/api/person/forget_chats", {"id": item}).status_code), daemon=True)
+    forgot.start()
+    _until(lambda: agent.person_store.get(item) is None, "the forget did not run")
+    gate.set()
+    pressed.join(30)
+    forgot.join(30)
+    assert answers["forget"] == 200 and not answers["compact"].get("compacted")
+    kept = app.get(f"/api/chat/history?chat={chat}").json().get("summary") or {}
+    user_id = chat_key(app.workspace._chats[chat].conversation)[0]
+    assert "芒果" not in kept.get("text", "")
+    assert "芒果" not in json.dumps(agent.dm_history.get(user_id), ensure_ascii=False)
+
+
+def test_a_cut_message_that_gets_no_words_waits_to_be_sent_again(app, turn):
+    _setup(app)
+    done = turn("开头" + ZH * 150 + "结尾", say("PASS"))
+    theirs = [m for m in _history(app)["messages"] if m["role"] == "user"]
+    assert done.status != 200 and theirs[-1].get("failed") and theirs[-1].get("cut")
+
+
+def test_a_chat_read_before_its_first_turn_after_a_restart_keeps_every_turn_in_its_record(app, turn, model,
+                                                                                         tmp_path):
+    # A long chat at a small window: it comes back from the page with fewer turns than its record holds.
+    _setup(app)
+    app.model.script(*[_summary(n) for n in range(10)], purpose="compact")
+    for n in range(10):
+        turn(_line(n, 12), say(_line(n, 12)))
+    _kept(app)
+    app.close()
+    for found in app.home.rglob("recent.json"):
+        found.unlink()
+    again = _again(model, tmp_path)
+    try:
+        # The model menu reads the chat's context before anything is sent.
+        assert again.get("/api/chat/context").json()["held"]
+        assert run_turn(again, "新的一句", say("新的回答")).status == 200
+        conv = chat_key(again.workspace._main.conversation)[1]
+        logged = [row["text"] for row in chatlog.ChatLog(again.home / "runtime").read(conv)]
+        assert "新的一句" in logged and "新的回答" in logged
+    finally:
+        again.close()
+
+
+@pytest.mark.parametrize("window, before", [(16384, 0), (12288, 0), (12288, 2)])
+@pytest.mark.parametrize("thinks", [False, True])
+def test_an_overflow_refused_again_after_the_refit_at_a_small_window_makes_no_further_request(app, turn, window,
+                                                                                               before, thinks):
+    # Measured at 64k, so the turn offers every tool. Where the server's window still holds them the refit is sent
+    # with them; where it does not, the history before the message is compacted, and the turn's last word goes
+    # without them. Refused again: two reply requests, then the turn fails.
+    measured(app, context=65536, **({"thinking": "yes", "thinking_detail": {"param": "thinking"}} if thinks else {}))
     app.model.script(fail(500), purpose="fold")
-    over = fail(400, {"error": {"message": "This model's maximum context length is 32768 tokens. However, you "
+    app.model.script(_summary(0), purpose="compact")
+    for n in range(before):
+        turn(_line(n), say(_line(n)))
+    over = fail(400, {"error": {"message": f"This model's maximum context length is {window} tokens. However, you "
                                            "requested 70000 tokens.", "type": "invalid_request_error"}})
     done = turn("hello", over, over)
-    assert done.status != 200 and len(done.asked()) == 2
+    first, second = [r["body"] for r in done.requests if r.get("purpose") == "reply"]
+    assert done.status != 200 and first.get("tools")
+    assert second.get("tools") or second["messages"][-1]["content"] == loop.ANSWER_NOW
+    if window == 12288:
+        assert not second.get("tools")

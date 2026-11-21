@@ -11,7 +11,8 @@ A script is a list of rounds, one per request, taken first in, first out. A roun
     content_filter()              a reply the host's filter cut off
     hang()                        no answer until the test ends or the asker goes; the request's record gets
                                   "ended" when the asker closed the connection
-    drop()                        the connection closed with no answer
+    held(gate, round)             the round, answered once the test sets the threading.Event `gate`
+    drop()                       the connection closed with no answer
 
 Inner calls go to their own scripts by purpose, recognised from the constant each module sends first
 (review.POLICY, pagejudge.SYSTEM, consolidate's prompt, ingestion's vision prompt), or the
@@ -80,6 +81,11 @@ def content_filter() -> dict:
 
 def hang() -> dict:
     return {"hang": True}
+
+
+def held(gate: threading.Event, item) -> dict:
+    """`item`, answered only once the test sets `gate` (at most 30 seconds), for what runs while a call waits."""
+    return {**_step(item), "gate": gate}
 
 
 def drop() -> dict:
@@ -223,6 +229,8 @@ class ScriptedModel:
             if step is None:
                 self.unscripted.append(self.requests[-1])
                 return 500, {"error": {"message": f"unscripted {purpose} request"}}, {}
+        if step.get("gate"):
+            step["gate"].wait(30)
         if step.get("hang"):
             return 0, "hang", {}
         if step.get("drop"):

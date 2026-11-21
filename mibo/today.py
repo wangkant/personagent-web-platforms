@@ -421,6 +421,11 @@ class Day:
         self.focus_text, self.now = focus_text, now
         self.least = context.text_tokens(self.head + _DAY_CLOSE + fence_pages(""))
 
+    @staticmethod
+    def _placed(text: str) -> float:
+        """The tokens `text` takes as fence_pages places it, escaped."""
+        return context.text_tokens(fence_pages(text)) - context.text_tokens(fence_pages(""))
+
     def fill(self, budget: float) -> str:
         left = budget - self.least
         if left < 0:
@@ -438,7 +443,7 @@ class Day:
                 row += f'\nyou thought: "{_clip(item.why, 80)}"'
             words = excerpt(item, self.focus_text, self.lang)
             row += f"\n{words}" if words else ""
-            cost = context.text_tokens(row + "\n\n")
+            cost = self._placed(row + "\n\n")
             if cost > room:
                 continue
             rows.append(row)
@@ -453,9 +458,9 @@ class Day:
         for n, line in enumerate(drawn):
             more = f"(and {len(drawn) - n} more lines)"
             # A line fits when the count of the lines after it still would.
-            if context.text_tokens(line + "\n") + (context.text_tokens(more) if n + 1 < len(drawn) else 0) > left:
+            if self._placed(line + "\n") + (context.text_tokens(more) if n + 1 < len(drawn) else 0) > left:
                 kept += [more] if context.text_tokens(more) <= left else []
                 break
             kept.append(line)
-            left -= context.text_tokens(line + "\n")
+            left -= self._placed(line + "\n")
         return self.head + fence_pages("\n".join(kept)) + _DAY_CLOSE + reads
