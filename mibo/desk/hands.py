@@ -210,7 +210,7 @@ class Hands:
         except uia.Refused as e:
             return {"status": "failed", "line": str(e)}
         return {"status": "ok", "state": state, "controls": self.view.interactive, "program": self.program["name"],
-                "named": self.view.named, "drawn": self.view.drawn,
+                "named": self.view.named, "drawn": self.view.drawn, "unnamed": self.view.unnamed,
                 "others": [p["name"] for p in self.parts if p["key"] != g.key_of(self.program)]}
 
     def _read(self) -> str:
@@ -368,7 +368,8 @@ class Hands:
         def shown(i: int) -> str:
             return v.describe(i) + (f" in {quote(clip(v.nodes[i].where, 30))}" if v.nodes[i].where else "")
         if isinstance(ident, int) and ident in v.nodes:
-            if not name or same(v.nodes[ident]):
+            # A control with no name is meant by its id: whatever words come with it can only describe it.
+            if not name or same(v.nodes[ident]) or not v.nodes[ident].name:
                 return ident
             others = [i for i, n in v.nodes.items() if same(n)]
             raise uia.Refused(
@@ -391,12 +392,18 @@ class Hands:
         if hits:
             raise uia.Refused(f"[failed] {len(hits)} controls are named {quote(clip(name, 40))}: "
                               f"{', '.join(shown(i) for i in hits[:6])}. Nothing was done: add the id of the one meant")
+        if any(" ".join(w.split()).lower() == name.lower() for words in v.words.values() for w in words):
+            raise uia.Refused(f"[failed] {quote(clip(name, 40))} is text the window shows, not a control: there is "
+                              "nothing to press or fill there. It is what the window shows now: when it is what you "
+                              "meant to open, that is open; go on with the task")
         names = sorted({n.name for n in v.nodes.values() if n.name})
         near = [n for n in names if name.lower() in n.lower() or n.lower() in name.lower()][:3] or \
             difflib.get_close_matches(name, names, 3, 0.6)
         raise uia.Refused(f"[failed] no control is named {quote(clip(name, 40))} in the latest look"
                           + (f" (nearest: {', '.join(quote(clip(n, 40)) for n in near)})" if near else "")
-                          + "; nothing was done. Use a name exactly as the look prints it")
+                          + "; nothing was done. Use a name exactly as the look prints it"
+                          + (". These controls have no name and may be it, by how they look and where they are: "
+                             + "; ".join(v.unnamed[:4]) + "; name one by its id" if v.unnamed else ""))
 
     def _act(self, do: str, a: dict) -> dict:
         v = self.view
@@ -593,7 +600,7 @@ class Hands:
         before = (self._fingerprint(node), self._fingerprint(source))
         window = clip(win32.title_of(node.top if node else v.hwnd), 120)
         how = "confirmed by the person"
-        answer = None
+        answer = verdict = None
         if self.review is not None and acting.decide(self.modes.mode(), kind, "", "programs") == "review":
             verdict = self.review({"kind": kind, "where": f"{self.program['name']} — {window}",
                                    "target": files[:50] or ([name] if name else []), "text": text[:2000],
@@ -613,7 +620,9 @@ class Hands:
             card = {"id": secrets.token_urlsafe(8), "type": "desk_action", "kind": kind,
                     "program": self.program["name"], "exe": self.program["exe"], "window": window,
                     "target": f"{node.role} {quote(clip(name, 80))}" if node is not None else "",
-                    "text": text[:2000], "files": files[:50], "why": why[:200], "task": self.task, "picture": picture}
+                    "text": text[:2000], "files": files[:50], "why": why[:200], "task": self.task, "picture": picture,
+                    # Why the reviewer did not pass it, in one line.
+                    **({"review": verdict.line(self.lang)} if verdict is not None else {})}
             answer = self.ask(card)
         if answer is None:
             return {"status": "declined", "kind": kind,
@@ -780,7 +789,7 @@ class Hands:
         if self.sight is None:
             self.sight = see_act.Sight(
                 self._surface(), profile.profile(self.sees), task=self.task, lang=self.lang, who=self.who,
-                held=self.held,
+                held=self.held, review=self._by_sight,
                 ask=lambda card: self.ask({"program": self.program["name"], "exe": self.program["exe"], **card}))
         result = asyncio.run(remote.serve(self.sight, op, fields))
         if result.get("status") == "paused" or (op == "see_look" and self.held() == "paused"):
@@ -795,6 +804,15 @@ class Hands:
             self._log("see", str((fields.get("action") or {}).get("target") or "")[:80], str(result.get("status")),
                       str(result.get("line") or "")[:300])
         return result
+
+    async def _by_sight(self, kind: str, action: dict):
+        """The reviewer on an act by picture that acting.decide sends it, off the picture loop's thread; None when
+        the kind is the person's (a delete, paying, an account) or nobody reviews."""
+        from .. import acting
+        if self.review is None or acting.decide(self.modes.mode(), kind, "", "programs") != "review":
+            return None
+        return await asyncio.to_thread(self.review, {"kind": kind, **action,
+                                                     "where": f"{self.program['name']} — {action.get('where', '')}"})
 
     def _surface(self):
         """The window in use as picture mode captures and works it."""

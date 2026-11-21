@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Tech Wire</title>
+    <link>https://techwire.example/</link>
+    <item>
+      <title>A chip maker opens a plant</title>
+      <link>https://techwire.example/a/1</link>
+      <description>The plant employs two thousand people.</description>
+      <pubDate>2026-11-18 18:18:30  +0800</pubDate>
+    </item>
+    <item>
+      <title>A phone with a folding screen</title>
+      <link>https://techwire.example/a/2</link>
+      <description>It folds twice.</description>
+      <pubDate>2026-11-18
+T04:15:00
+Z</pubDate>
+    </item>
+  </channel>
+</rss>

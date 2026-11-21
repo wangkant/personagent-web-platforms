@@ -21,12 +21,11 @@ import logging
 import re
 import time
 import zipfile
-from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
-from . import pick, store
+from . import store
 from .. import reach
 from ..storage import atomic_write_text
 
@@ -535,10 +534,9 @@ async def install(home: Path, ident: str, unlicensed_ok: bool = False) -> str:
         added = await asyncio.to_thread(
             store.install_zip, home, zip_of(folder, files), "market", one["source"]["url"], "", one["source"]["commit"],
             {"id": ident, "commit": one["source"]["commit"], "hash": one["hash"], "at": time.time()})
-        # The catalog's titles, abouts and tags in both languages are its search words: no model call to make them.
+        # The catalog's Chinese title and about are the skill's own: no model call to make them.
         skill = next(s for s in store.all_skills(home) if s.folder.name == added[0])
-        store.keep_words(home, skill, {"title_zh": one["title"]["zh"], "description_zh": one["about"]["zh"],
-                                       "words": " ".join([*one["tags"], one["title"]["zh"], one["title"]["en"]])})
+        store.keep_titles(home, skill, {"title_zh": one["title"]["zh"], "description_zh": one["about"]["zh"]})
     logger.info("[Skills] %s installed from the market at %s", ident, one["source"]["commit"][:12])
     return added[0]
 
@@ -614,50 +612,6 @@ async def mark(home: Path, owner: str) -> bytes | None:
     place.parent.mkdir(parents=True, exist_ok=True)
     place.write_bytes(result.content)
     return result.content
-
-
-# --------------------------------------------------------------------- offers
-
-@dataclass
-class _Listed:
-    """A catalog entry read as a skill by the picker."""
-    name: str
-    description: str
-    words: str
-    title_zh: str
-    description_zh: str
-    entry: dict = field(repr=False, default_factory=dict)
-    asks: str = ""
-
-
-# An offer needs a far clearer fit than a skill the person installed: it interrupts the reply.
-OFFER_SCORE = 7.0
-OFFER_LEAD = 1.4
-_ASKED = re.compile(r"(技能|skill).{0,12}(找|有没有|推荐|安装|装|install|find|recommend|is there|any)"  # copy: voice
-                    r"|(找|有没有|推荐|安装|装|install|find|recommend|is there|any).{0,12}(技能|skill)", re.I)  # copy: voice
-_listed: dict[tuple, list] = {}
-
-
-def asked_for(said: str) -> bool:
-    return bool(_ASKED.search(said or ""))
-
-
-def offer_for(home: Path, said: str) -> dict | None:
-    """The one market entry a message plainly fits, when no skill the person has does: installable, of no high
-    risk, ready for this app, and not installed. Else None."""
-    data, _ = catalog(home)
-    key = (data["built_at"], len(data["skills"]))
-    if key not in _listed:
-        _listed.clear()
-        _listed[key] = [_Listed(e["name"], e["about"]["en"], " ".join([*e["tags"], e["title"]["en"]]),
-                                e["title"]["zh"], e["about"]["zh"], e) for e in data["skills"]
-                        if can_install(e, False) == "" and e["fit"] == "ready"]
-    have = store.usable(home)
-    taken = set(installed(home)) | {s.name for s in store.all_skills(home)}
-    best = pick.clear(pick.score([*have, *_listed[key]], said), OFFER_SCORE, OFFER_LEAD)
-    if not isinstance(best, _Listed) or best.entry["id"] in taken or best.name in taken:
-        return None
-    return best.entry
 
 
 # ---------------------------------------------------------- other hosts' skills

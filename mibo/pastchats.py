@@ -1,7 +1,7 @@
 """Their past chats in this app, searched, as Claude's chat search and ChatGPT's reference chat history do: the chat
 log (chatlog.py) of every page chat, by words (BM25 over the log's own tokens, ChatLog.search) and by the time they
-name (timewords.resolve). No index of its own: each search reads the log files, so a line or a chat forgotten
-(memory.py rewrites or drops its file) is gone from the next search."""
+name (timewords.resolve). No index of its own: each search reads the log's rows, so a line or a chat forgotten
+(memory.py deletes its rows) is gone from the next search."""
 from __future__ import annotations
 
 import asyncio
@@ -10,7 +10,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from . import channels, person, ranking, timewords
+from . import channels, db, person, ranking, timewords
 from .textproc import _focus_tokens
 
 NAME = "search_past_chats"
@@ -33,18 +33,10 @@ LINE_CHARS = 200
 LINKED = 4
 
 
-def page_chats(desktop: Path) -> dict[str, tuple[str, str]]:
-    """{conversation: (chat id, title)} of the chats the page lists (welcome.PageChat's files)."""
-    out = {}
-    for ident, path in [("main", desktop / "browser-chat.json"),
-                        *((p.stem, p) for p in sorted((desktop / "chats").glob("*.json")))]:
-        try:
-            saved = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if saved.get("conversation"):
-            out[str(saved["conversation"])] = (ident, str(saved.get("title") or ""))
-    return out
+def page_chats(runtime: Path) -> dict[str, tuple[str, str]]:
+    """{conversation: (chat id, title)} of the chats the page lists (welcome.PageChat's rows)."""
+    return {conv: (ident, title) for ident, conv, title in db.at(runtime).read(
+        "SELECT id, conversation, title FROM page_chats")}
 
 
 def _quote(row: dict) -> str:
@@ -58,20 +50,20 @@ def scope(agent, here: str) -> dict:
     event loop): the log, the page chats it holds lines of, and the lines of this chat still in view."""
     return {"log": agent.chat_log, "convs": sorted(agent._page_convs()), "here": here,
             "in_view": {r.get("seq") for r in agent.dm_history.get(channels.dm_user(here)) or []},
-            "tz": agent._prompt_tz(), "lang": agent.chat_lang, "desktop": agent.memory_file.parent / "desktop"}
+            "tz": agent._prompt_tz(), "lang": agent.chat_lang, "runtime": agent.memory_file.parent}
 
 
 def search(at: dict, query: str, when: str, hits: int = HITS) -> tuple[str, list[tuple[str, str, str]]]:
     """The best lines of their past page chats for `query` inside the time `when` names (else the newest lines of
     that time), the lines still in view left out: (what the model reads, the chats found as (chat id, ISO day,
     title) for the step under the reply). Only the chats the page lists: a chat they deleted is never searched.
-    `at` is `scope`'s; reads files only."""
+    `at` is `scope`'s; reads the database only."""
     log, tz, lang = at["log"], at["tz"], at["lang"]
     if not log.on:
         return "(no past chats are kept: the chat record is off)", []
     now = time.time()
     span = timewords.resolve(when, now, tz, [lang]) if when else None
-    chats = page_chats(at["desktop"])
+    chats = page_chats(at["runtime"])
     by_conv = {conv: log.read(conv) for conv in at["convs"] if conv.rsplit(":", 1)[-1] in chats}
     rows = [dict(row, conv=conv) for conv, lines in by_conv.items() for row in lines
             if not (conv == at["here"] and row["seq"] in at["in_view"])]

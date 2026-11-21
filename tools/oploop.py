@@ -5,7 +5,7 @@ something off also needs those words in the run's result.
 
     python tools/oploop.py --env <.env with LLM_API_KEY, LLM_BASE_URL> [--model deepseek/deepseek-v4-flash]
         [--tasks M05,M06] [--runs 1] [--tools yes|no] [--context N] [--cheapest] [--out <folder>] [--port 59665]
-        [--budget 0.03] [--tree <folder holding mibo>]
+        [--budget 0.03] [--tree <folder holding mibo>] [--review]
 
 The run is given the model as the app's check measured it (abilities.py): `--tools` is what that check found
 (yes: it called the check's tool by itself), and the context window is read from the host's own model list, as
@@ -13,7 +13,9 @@ the check reads it, so the run's ceiling, page and answer room are operate.budge
 runs it as the least able model (a context window the host does not state). A task of tasks.REAL starts on a real
 page a visitor reads signed out: it passes when its words are in the result and no card came. `--tree` runs another
 copy of the code (a snapshot from before a change). One line a run; <out>/results.jsonl keeps them with each run's
-steps. The key is never printed or written."""
+steps. `--review` puts what the gate holds to the app's reviewer (review.decide on the same model) before any
+card, as the app's automatic review does: each verdict is kept with the run, and `looks` counts the reviewer's calls
+and the cards together. The key is never printed or written."""
 from __future__ import annotations
 
 import argparse
@@ -39,7 +41,9 @@ def load(name: str, path: Path):
     return module
 
 
-async def one(browser, site: str, task: dict, model, able: dict, out: Path, operate, gate, tasks) -> dict:
+async def one(browser, site: str, task: dict, model, able: dict, out: Path, operate, gate, tasks,
+              reviewer=None) -> dict:
+    from mibo import review
     from mibo.web.tabs import PlaywrightTab
     real = task["start"].startswith("http")
     if not real:
@@ -59,7 +63,18 @@ async def one(browser, site: str, task: dict, model, able: dict, out: Path, oper
     async def ask_model(system: str, messages: list[dict]) -> str:
         return await model.ask(system, messages, calls)
 
-    hands = operate.Hands(tab, ask=ask, allowed=gate.Allowed(out / "allow"), attended=lambda: False, lang="zh")
+    verdicts: list[dict] = []
+
+    async def judge(action: dict):
+        # The person's own message of this task, as acting.asked gives the app's reviewer.
+        verdict = await review.decide("browser", [{"text": task["ask"], "at": time.time()}], action, ask=reviewer,
+                                      attended=True, lang="zh", tally=review.Tally())
+        verdicts.append({"kind": action.get("kind"), "decision": verdict.decision, "by": verdict.by,
+                         "reason": verdict.reason})
+        return verdict
+
+    hands = operate.Hands(tab, ask=ask, allowed=gate.Allowed(out / "allow"), attended=lambda: False, lang="zh",
+                          review=judge if reviewer is not None else None)
     began = time.monotonic()
     try:
         outcome = await asyncio.wait_for(operate.run(ask_model, hands, task["ask"], said=task["ask"], able=able), 600)
@@ -80,7 +95,8 @@ async def one(browser, site: str, task: dict, model, able: dict, out: Path, oper
             "why": verdict["why"][:200], "status": outcome.get("status"), "result": result[:300],
             "calls": len(calls), "in": sum(c["in"] for c in calls), "out": sum(c["out"] for c in calls),
             "cost": round(sum(c["cost"] for c in calls), 6), "seconds": round(seconds, 1),
-            "cards": cards, "steps": outcome.get("steps", [])}
+            "cards": cards, "verdicts": verdicts, "looks": len(cards) + len(verdicts),
+            "steps": outcome.get("steps", [])}
 
 
 async def main(argv: list[str]) -> int:
@@ -96,8 +112,10 @@ async def main(argv: list[str]) -> int:
     parser.add_argument("--out", default="")
     parser.add_argument("--port", type=int, default=59665)
     parser.add_argument("--budget", type=float, default=0.03, help="dollars; no new run past it")
+    parser.add_argument("--review", action="store_true", help="the app's reviewer before any card")
     args = parser.parse_args(argv)
     sys.path.insert(0, str(Path(args.tree).resolve()))
+    from mibo import review
     from mibo.web import gate, operate
     run = load("miniwob_run", HERE / "bench" / "miniwob" / "run.py")
     tasks = load("opsite_tasks", HERE / "opsite" / "tasks.py")
@@ -111,6 +129,8 @@ async def main(argv: list[str]) -> int:
         model.extra = {"provider": {"sort": "price"}}
     # The answer's room as search.py gives it for this model.
     model.answer = operate.budget(able)["answer"]
+    usage: dict = {}
+    reviewer = review.endpoint(env["LLM_BASE_URL"], env["LLM_API_KEY"], args.model, usage=usage) if args.review else None
     out = Path(args.out or tempfile.mkdtemp(prefix="oploop-")).resolve()
     out.mkdir(parents=True, exist_ok=True)
     site = f"http://127.0.0.1:{args.port}"
@@ -132,12 +152,17 @@ async def main(argv: list[str]) -> int:
                     if model.spent >= args.budget:
                         print(f"budget reached: {name} run {n + 1} not run", flush=True)
                         continue
-                    row = await one(browser, site, tasks.BY_ID[name], model, able, out, operate, gate, tasks)
+                    spent = usage.get("cost", 0.0)
+                    row = await one(browser, site, tasks.BY_ID[name], model, able, out, operate, gate, tasks, reviewer)
+                    # The reviewer's calls count in what the run cost.
+                    row["cost"] = round(row["cost"] + usage.get("cost", 0.0) - spent, 6)
+                    model.spent += usage.get("cost", 0.0) - spent
                     rows.append(row)
                     with (out / "results.jsonl").open("a", encoding="utf-8") as f:
                         f.write(json.dumps(row, ensure_ascii=False) + "\n")
                     print(f"{'OK ' if row['ok'] else 'no '} {name} {row['status']:<9} calls={row['calls']} "
-                          f"in={row['in']} {row['seconds']}s ${row['cost']:.4f}  {row['why'][:80]!r}", flush=True)
+                          f"cards={len(row['cards'])} reviews={len(row['verdicts'])} in={row['in']} {row['seconds']}s "
+                          f"${row['cost']:.4f}  {row['why'][:80]!r}", flush=True)
             await browser.close()
     finally:
         server.terminate()

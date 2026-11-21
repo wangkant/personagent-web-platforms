@@ -128,8 +128,8 @@ _KINDS = (
 def _their_tools(body: str) -> str:
     """For a skill written for another agent: one line naming the tools it mentions and this app's tools that do the
     same, as offered this turn. A name counts only where it reads as a tool (`Read`, the Read tool, Read(...))."""
-    from ..catalog import offered
-    here = {t["function"]["name"] for t in offered()}
+    from ..catalog import definitions
+    here = {t["function"]["name"] for t in definitions()}
     pairs = []
     for names, ours in _KINDS:
         named = [n for n in names if n != ours and re.search(rf"`{n}`|\b{n} tool\b|\b{n}\(", body)]

@@ -314,12 +314,12 @@ def _ask(home: Path, method: str, path: str, timeout: float = 60, **sent) -> dic
         return {}
 
 
-def read_signed_in(home: Path, url: str, start: int = 0) -> dict:
-    """`url` read with the person's session in the app's browser, out of sight, from character `start` of its
-    text: the same fields, or {"error": why} (browser.Reader.read)."""
+def read_signed_in(home: Path, url: str) -> dict:
+    """`url` read with the person's session in the app's browser, out of sight: the same fields with its whole
+    text, or {"error": why} (browser.Reader.read)."""
     if not shared(Path(home) / "runtime" / "desktop"):
         return {"error": "off"}
-    return _ask(home, "POST", "/api/browser/read", json={"url": url, "from": start}) or {"error": "no_app"}
+    return _ask(home, "POST", "/api/browser/read", json={"url": url}) or {"error": "no_app"}
 
 
 def recent_pages(home: Path, n: int = 20) -> list[dict]:

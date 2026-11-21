@@ -14,11 +14,13 @@ process tree.
 The person's mode for commands (acting.py) is read at every step: read only
 runs nothing that changes or starts anything; automatic review lets changes to
 files inside folders that may be changed go without a card, as the turn's
-checkpoint can put them back, and puts a program run or a step outside the
-granted folders to the reviewer (review.py) before any card. A card about a program run in a granted folder offers
+checkpoint can put them back, and puts a program run, a step outside the
+granted folders or a request that only fetches to the reviewer (review.py) before any card; the log row and the
+card carry the reviewer's decision and reason. A card about a program run in a granted folder offers
 本次对话内允许 and 对此程序在此文件夹始终允许 (a rule in shell.json that
-Settings lists and takes back), one about edits 本次对话内允许; a delete, the
-network or an install is asked each time, as OpenCode's and Codex's approvals.
+Settings lists and takes back), one about places outside 本次对话内允许 and 始终允许 for the folders that hold
+them (granted as Settings grants), one about edits 本次对话内允许; a delete, sending
+or an install is asked each time, as OpenCode's and Codex's approvals.
 """
 from __future__ import annotations
 
@@ -56,8 +58,19 @@ REVIEWED = ("program", "outside", "move_out")
 def _reviewed(act) -> bool:
     """A program run, a step outside the granted folders, or a web address opened for the person to see."""
     return act.kind in REVIEWED or (act.kind, act.what) == ("network", "browse")
+
+
+def _fetch(act) -> bool:
+    """A request that only fetches: no body, no upload, no form or sign-in, no address computed as it runs. Claude
+    Code's auto mode lets read-only HTTP requests through and Codex's reviewer judges network requests; here the
+    reviewer judges it on the person's words. Sending, uploading and what cannot be told ask each time."""
+    return (act.kind, act.what) == ("network", "net") and not act.sends and act.host not in ("", "?")
+
+
+# Folders an always-allow on one card may grant at most (a step through links on the Desktop reached five).
+ALWAYS_FOLDERS = 5
 # The step log's line for a step the read-only mode held.
-READ_MODE = {"zh": "当前为只读模式，未进行任何更改", "en": "Read only: nothing was changed"}
+READ_MODE ={"zh": "当前为只读模式，未进行任何更改", "en": "Read only: nothing was changed"}
 
 
 def _error(code: str, status: int = 400) -> JSONResponse:
@@ -123,6 +136,15 @@ class Shell:
             if all(any(under(norm(p), r) for r in writable) for p in paths):
                 return {"key": "edit", "paths": paths}
             return None
+        if all(a.kind == "outside" and a.paths for a in reasons):
+            # Places outside the granted folders (a link's target too): this conversation, or the folders that hold
+            # them granted for good, as Settings grants them (read only when the step only reads).
+            folders = list(dict.fromkeys(reading.folder_for(os.path.realpath(p)) for a in reasons for p in a.paths))
+            if "" in folders or len(folders) > ALWAYS_FOLDERS or any(
+                    self.grants.places.grantable(norm(f)) for f in folders):
+                return None
+            return {"key": "outside:" + "|".join(sorted(norm(f) for f in folders)), "folders": folders,
+                    "write": any(a.write for a in reasons)}
         root = self.grants.root_of(norm(cwd))
         if not root or len(exes) != 1 or len(runs) != len([a for a in read_.acts if a.kind == "program"]) or \
                 any(a.kind != "program" or a.args is None for a in reasons):
@@ -168,9 +190,11 @@ class Shell:
         return (roots[0] if roots else os.environ.get("USERPROFILE") or str(Path.home())), ""
 
     def log(self, command: str, cwd: str, read_: reading.Reading | None, verdict: reading.Verdict | None,
-            outcome: str, done: dict | None = None, said: dict | None = None, how: str = "") -> None:
+            outcome: str, done: dict | None = None, said: dict | None = None, how: str = "",
+            review: dict | None = None) -> None:
         self.grants.log({
             "command": command, "cwd": cwd, "outcome": outcome, **({"how": how} if how else {}),
+            **({"review": review} if review else {}),
             "kinds": sorted({a.kind for a in read_.acts}) if read_ else [],
             "action": verdict.action if verdict else "", "said": said or {},
             "why": [a.why for a in verdict.reasons][:6] if verdict else [],
@@ -299,25 +323,31 @@ class Shell:
             self.last = cwd
         scope = self._scope(read_, verdict, cwd) if verdict.action == "ask" else None
         context["how"] = self._passed(scope, mode, conversation)
+        passed = None
         if verdict.action == "ask" and not context["how"] and mode == "auto" and all(
-                _reviewed(a) for a in verdict.reasons):
-            # A program run, a step outside the granted folders, or a page opened for them: the reviewer first, on
-            # the person's own words of this turn. A delete, the network, an install and what cannot be told ask
-            # each time.
+                _reviewed(a) or _fetch(a) for a in verdict.reasons):
+            # A program run, a step outside the granted folders, a page opened for them or a request that only
+            # fetches: the reviewer first, on the person's own words of this turn. A delete, sending or uploading,
+            # an install and what cannot be told ask each time.
             from .. import acting, review
             passed = await review.decide("commands", await asyncio.to_thread(acting.asked, self.workspace), {
-                "kind": "command", "where": cwd, "text": command, "effects": [a.why for a in verdict.reasons][:6]},
+                "kind": "command", "where": cwd, "text": command, "effects": [a.why for a in verdict.reasons][:6],
+                "only_reads": all(a.kind == "read" and not a.write for a in read_.acts)},
                 ask=acting.reviewer(self.workspace), attended=True, lang=self.workspace.config().get("AGENT_LANG", "zh"))
+            # The reviewer's decision and reason go with the log row, so a card that came can be read from it.
+            context["review"] = {"decision": passed.decision, "by": passed.by, "reason": passed.reason}
             if passed.decision == "go":
                 context["how"] = "review"
             elif passed.decision == "refuse":
-                self.log(command, cwd, read_, verdict, "refused", said=asked_said, how="review")
+                self.log(command, cwd, read_, verdict, "refused", said=asked_said, how="review",
+                         review=context["review"])
                 return {"status": "refused", "said": asked_said, "why": {"zh": passed.reason, "en": passed.reason},
                         "reasons": [passed.reason], "declined": passed.declined()}, context
         if verdict.action == "ask" and not context["how"]:
-            # 本次 always; 本次对话内允许 for a program or for edits; 始终允许 for a program in this folder. Never for a
-            # delete, the network or an install, which are asked each time.
-            choices = ["once"] + (["chat"] if scope else []) + (["always"] if scope and scope.get("program") else [])
+            # 本次 always; 本次对话内允许 for a program, for edits or for places outside; 始终允许 for a program in this
+            # folder or for the folders outside. Never for a delete, sending or an install, which are asked each time.
+            choices = ["once"] + (["chat"] if scope else []) + (
+                ["always"] if scope and (scope.get("program") or scope.get("folders")) else [])
             asked = {"type": "command", "command": words.visible(command), "cwd": words.visible(cwd), "choices": choices,
                      "where": {lang: words.folder_name(cwd, lang) for lang in ("zh", "en")},
                      **{lang: {"title": asked_said[lang],
@@ -332,6 +362,13 @@ class Shell:
             if any(a.kind == "unknown" for a in verdict.reasons):
                 # What it does cannot be told first: the person may ask for another way instead of reading it.
                 asked["other_way"] = True
+            if passed is not None:
+                # Why the reviewer did not pass it, in one line (chat.js draws it under the title).
+                for lang in ("zh", "en"):
+                    asked[lang]["review"] = passed.line(lang)
+            if scope and scope.get("folders"):
+                for lang in ("zh", "en"):
+                    asked[lang].update(words.always_folders(scope["folders"], scope["write"], lang))
             # A command that names a file in a skill's folder says which skill it comes from (skills/store.py).
             from ..skills.store import FROM_SKILL, skill_in
             skill = await asyncio.to_thread(skill_in, command, self.home)
@@ -342,7 +379,7 @@ class Shell:
             yes = await self.ask(asked, conversation)
             if yes not in (True, "chat", "always"):
                 status = {False: "declined", None: "unanswered", "other": "other_way"}[yes]
-                self.log(command, cwd, read_, verdict, status, said=asked_said)
+                self.log(command, cwd, read_, verdict, status, said=asked_said, review=context.get("review"))
                 return {"status": status, "said": asked_said,
                         "asked": {lang: asked[lang]["lines"] for lang in ("zh", "en")}}, context
             # What the card showed must still be what runs.
@@ -355,6 +392,10 @@ class Shell:
                 return {"status": "changed", "said": asked_said}, context
             if yes == "chat":
                 self.session.setdefault(conversation, set()).add(scope["key"])
+            elif yes == "always" and scope.get("folders"):
+                for place in scope["folders"]:
+                    self.grants.add(place, read_only=not scope["write"])
+                    self.grants.log({"granted": place, "outcome": "granted_on_card"})
             elif yes == "always":
                 self.grants.allow(scope["program"], scope["shown"], scope["root"])
                 self.grants.log({"granted": scope["shown"], "outcome": "rule_added", "folder": scope["root"]})
@@ -384,7 +425,7 @@ class Shell:
                 self.running = None
             changes = await asyncio.to_thread(self._kept, kept, moves, done["recycled"])
             self.log(command, context["cwd"], context["read"], context["verdict"], "ran", done, said=context["said"],
-                     how=context["how"])
+                     how=context["how"], review=context.get("review"))
             return {"status": "done", "said": context["said"], "asked": context["how"] in PRESSED, "how": context["how"],
                     "cwd": context["cwd"], "changes": changes, **done}
 
@@ -466,7 +507,7 @@ class Shell:
             changes = await asyncio.to_thread(self._kept, kept, moves, job["paths"] if job["op"] == "delete" else [])
             self.log(command, context["cwd"], context["read"], context["verdict"], "ran",
                      {"code": 0, "out": out, "seconds": 0, "timed_out": False, "stopped": False},
-                     said=job.get("said") or context["said"], how=context["how"])
+                     said=job.get("said") or context["said"], how=context["how"], review=context.get("review"))
             return {"status": "done", "out": out, "said": job.get("said") or context["said"],
                     "asked": context["how"] in PRESSED, "how": context["how"], "cwd": context["cwd"], "changes": changes}
 
@@ -533,6 +574,10 @@ class Shell:
                 if os.path.exists(target) and os.path.normcase(target) != os.path.normcase(src):
                     raise ValueError(f"{target} is already there; nothing is replaced this way. Choose another name, or "
                                      "delete that one first with delete_files.")
+                # Two moves landing on one name: the second would replace the first (shutil.move copies over a file).
+                if any(os.path.normcase(m["to"]) == os.path.normcase(target) for m in moves):
+                    raise ValueError(f"Two of the moves land on {target}, so one would replace the other; nothing was "
+                                     "moved. To move them into a folder, end `to` with \\.")
                 moves.append({"from": src, "to": target, "folder": dest if into and not os.path.isdir(dest) else (
                     "" if os.path.isdir(os.path.dirname(target)) else os.path.dirname(target))})
             if not moves:

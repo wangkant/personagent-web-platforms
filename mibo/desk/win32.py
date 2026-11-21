@@ -217,6 +217,25 @@ def window_at(x: int, y: int) -> int:
     return top_of(user32.WindowFromPoint(w.POINT(x, y)) or 0)
 
 
+# The window a Chromium-drawn page lives in (Electron, WebView2, CEF, Chrome and Edge), and the object id Chromium
+# answers as a screen reader's probe (legacy_render_widget_host_win.cc, kIdScreenReaderHoneyPot).
+CHROMIUM_PAGE = "Chrome_RenderWidgetHostHWND"
+WM_GETOBJECT, SCREEN_READER_PROBE = 0x003D, 1
+
+
+def chromium_pages(hwnd: int) -> list[int]:
+    """The windows inside `hwnd` that hold a Chromium-drawn page."""
+    return [h for h in child_windows(hwnd) if class_of(h) == CHROMIUM_PAGE]
+
+
+def probe_page(hwnd: int) -> None:
+    """Chromium's screen-reader probe, as assistive tools send it: WM_GETOBJECT with its probe id. Answered 0; it
+    tells the page a client reads it, so the page sends its tree once one of its names is read."""
+    done = ctypes.c_size_t()
+    user32.SendMessageTimeoutW(hwnd, WM_GETOBJECT, 0, ctypes.c_void_p(SCREEN_READER_PROBE), 0x0002, 1000,
+                               ctypes.byref(done))
+
+
 user32.MonitorFromWindow.argtypes = [HWND, DWORD]
 user32.MonitorFromWindow.restype = w.HMONITOR
 user32.GetDpiForWindow.argtypes = [HWND]

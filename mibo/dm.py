@@ -9,10 +9,11 @@ import logging
 import time
 
 from . import channels
+from . import db
 from . import person
 from . import today
-from .llm import purpose
-from .loop import ANSWER_NOW, ANSWER_TOKENS, ChatLookups, stopped_reply
+from .llm import FROM_BUDGET, purpose
+from .loop import ANSWER_NOW, ChatLookups, stopped_reply
 from .messages import turn_pictures
 from .decision import PASS, SEND
 from .schedule_tool import run_of
@@ -66,19 +67,16 @@ def _trimmed_history(history: list[dict]) -> list[dict]:
     return history[-_DM_HISTORY_KEEP:] if len(history) > _DM_HISTORY_MAX else history
 
 
-def _page_turns(path, conversation: str) -> list[dict]:
-    """The page's own saved copy of its chat (browser-chat.json) as turns,
-    for a page chat that has no recent window yet; [] if it is another chat."""
-    try:
-        saved = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
-    if not isinstance(saved, dict) or str(saved.get("conversation") or "") != conversation:
-        return []
+def _page_turns(runtime, conversation: str) -> list[dict]:
+    """The page's own saved copy of the chat `conversation` (welcome.PageChat, in the runtime database) as turns,
+    for a page chat that has no recent window yet; [] if the page keeps no such chat."""
     turns: list[dict] = []
-    for message in saved.get("messages") or []:
+    for (body,) in db.at(runtime).read(
+            "SELECT body FROM page_messages WHERE kind = 'message' AND chat IN "
+            "(SELECT id FROM page_chats WHERE conversation = ?) ORDER BY seq", (conversation,)):
+        message = json.loads(body)
         # A message that was never answered is shown to the person, not a turn the character had.
-        if not isinstance(message, dict) or message.get("failed"):
+        if message.get("failed"):
             continue
         role, text = message.get("role"), message.get("text")
         if not isinstance(text, str):
@@ -199,8 +197,7 @@ class DirectMessages:
         if pkey in done:
             return
         done.add(pkey)
-        turns = _page_turns(self.memory_file.parent / "desktop" / "browser-chat.json",
-                            user_id.split(":", 1)[-1])
+        turns = _page_turns(self.memory_file.parent, user_id.split(":", 1)[-1])
         for turn in turns:
             turn["t"], turn["seq"] = 0.0, self._next_seq(pkey)
         if turns:
@@ -371,5 +368,5 @@ class DirectMessages:
             if out_of_time:
                 messages = _with_found(messages, _done_so_far(lookups) + "\n" + ANSWER_NOW)
             with purpose("reply"):
-                return await self._call_llm(system, messages, self.llm_dm_model, max_tokens=ANSWER_TOKENS[0])
+                return await self._call_llm(system, messages, self.llm_dm_model, max_tokens=FROM_BUDGET)
         return await self._reply(system, messages, self.llm_dm_model, lookups, said=self._last_user_text(history))

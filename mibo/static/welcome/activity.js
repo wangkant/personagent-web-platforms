@@ -2,8 +2,8 @@
 // What the character did for a reply, as one component for every kind of step. While it works: one quiet live
 // line where the typing dots are. When done: one sentence above the reply saying what happened, with the time
 // taken, that opens to a timeline (a line a step: its icon, a plain title, the detail that matters, the raw
-// key presses and commands behind 详细信息); and under the reply the sources as small site chips that open to
-// their titles. Steps come as chat.js stores them ({ tool, what, out, cmd, status, ... }, welcome.py `_entry`);
+// key presses and commands behind 详细信息); and under the reply the sources as small site chips, each opening
+// its page, with one button for the list of all of them. Steps come as chat.js stores them ({ tool, what, out, cmd, status, ... }, welcome.py `_entry`);
 // a kind not known here shows by its own words.
 window.paActivity = (() => {
   const SVG = "http://www.w3.org/2000/svg";
@@ -249,30 +249,51 @@ window.paActivity = (() => {
     return both;
   }
 
-  // Under the reply: the sites it drew on, as chips; open, the pages with their titles.
+  // Under the reply: the sites it drew on, a chip each that opens the site's first page in the app's browser
+  // (opts.link, as every link in the chat does); when the pages are more than the chips, one button at the end
+  // of the row opens the list of them all, with their titles.
+  let lists = 0;
   function sources(list, opts = {}) {
     if (!list?.length) return null;
-    const w = paI18n.words("activity");
-    const node = el("details", "act-src");
-    const head = el("summary", "act-src-head");
-    const hosts = [...new Set(list.map((s) => hostOf(s.url)).filter(Boolean))];
-    for (const host of hosts.slice(0, 4)) {
-      const chip = el("span", "act-chip");
-      chip.append(siteMark(host, opts), el("span", "act-chip-host", host));
-      head.append(chip);
-    }
-    if (hosts.length > 4) head.append(el("span", "act-chip act-chip-more", `+${hosts.length - 4}`));
-    head.setAttribute("aria-label", paI18n.t("activity.sources", { count: list.length }));
-    const rows = el("ol", "act-src-list");
+    const node = el("div", "act-src");
+    const row = el("div", "act-src-row");
+    const firsts = new Map();
     for (const source of list) {
-      const row = el("li");
+      const host = hostOf(source.url);
+      if (host && !firsts.has(host)) firsts.set(host, source);
+    }
+    const chips = [...firsts].slice(0, 4);
+    for (const [host, source] of chips) {
+      const chip = link(source.url, "act-chip", opts);
+      const name = paI18n.t("activity.sourceOpen", { host, title: source.title || source.site || source.url });
+      chip.setAttribute("aria-label", name);
+      chip.title = name;
+      chip.append(siteMark(host, opts), el("span", "act-chip-host", host));
+      row.append(chip);
+    }
+    node.append(row);
+    if (list.length <= chips.length) return node;
+    const rows = el("ol", "act-src-list");
+    rows.id = `act-src-list-${++lists}`;
+    rows.hidden = true;
+    for (const source of list) {
+      const item = el("li");
       const page = link(source.url, "act-page", opts);
       page.append(siteMark(hostOf(source.url), opts), el("span", "act-page-title", source.title || source.site || source.url),
         el("span", "act-page-host", hostOf(source.url)));
-      row.append(page);
-      rows.append(row);
+      item.append(page);
+      rows.append(item);
     }
-    node.append(head, rows);
+    const all = el("button", "act-chip act-chip-more", paI18n.t("activity.sources", { count: list.length }));
+    all.type = "button";
+    all.setAttribute("aria-expanded", "false");
+    all.setAttribute("aria-controls", rows.id);
+    all.addEventListener("click", () => {
+      rows.hidden = !rows.hidden;
+      all.setAttribute("aria-expanded", String(!rows.hidden));
+    });
+    row.append(all);
+    node.append(rows);
     return node;
   }
 

@@ -30,7 +30,9 @@
       "tests/floors/asked/test_paying_deleting_account_and_access.py::test_a_reviewer_that_would_pass_anything_is_never_asked_about_a_floor_act",
       "tests/floors/asked/test_paying_deleting_account_and_access.py::test_in_another_program_paying_deleting_settings_and_opening_ask_and_editing_stays_free",
       "tests/floors/asked/test_commands_and_tools_ask.py::test_a_delete_an_install_or_a_push_asks_every_time_and_on_no_nothing_happens",
-      "tests/floors/asked/test_commands_and_tools_ask.py::test_an_mcp_tool_marked_destructive_asks_every_time_and_on_no_the_server_gets_no_call"
+      "tests/floors/asked/test_commands_and_tools_ask.py::test_an_mcp_tool_marked_destructive_asks_every_time_and_on_no_the_server_gets_no_call",
+      "tests/floors/asked/test_sensitive_windows_ask.py::test_a_sensitive_windows_picture_asks_every_time_with_no_always",
+      "tests/floors/asked/test_answered_on_the_card.py::test_a_floor_card_left_waiting_is_never_answered_by_words_in_the_chat"
     ],
     "injection": [
       "tests/floors/injection/test_memory_gate.py::test_the_memory_gate_refuses_instructions_and_keeps_facts",
@@ -50,7 +52,10 @@
       "tests/floors/grants/test_what_is_granted.py::test_the_programs_on_the_never_list_are_never_operated",
       "tests/test_mcp_tools.py::test_a_local_program_starts_only_once_allowed_and_each_call_asks"
     ],
-    "private": [],
+    "private": [
+      "tests/floors/private/test_forget_leaves_no_bytes.py::test_a_forget_leaves_the_words_in_no_byte_of_the_database",
+      "tests/floors/private/test_forget_leaves_no_bytes.py::test_a_private_chat_leaves_no_byte_once_it_is_closed"
+    ],
     "boundary": [
       "tests/floors/boundary/test_local_routes.py::test_the_page_loads_without_the_token_and_every_api_route_refuses_without_it",
       "tests/floors/boundary/test_local_routes.py::test_every_api_route_refuses_a_foreign_origin_host_or_proxy_even_with_the_token",
@@ -82,7 +87,8 @@
       "tests/floors/boundary/test_safe_fetch.py::test_a_body_past_the_wire_cap_is_refused",
       "tests/floors/boundary/test_safe_fetch.py::test_a_body_that_unpacks_past_the_decoded_cap_is_refused",
       "tests/floors/boundary/test_safe_fetch.py::test_links_in_a_message_to_inside_addresses_are_never_fetched",
-      "tests/parts/finds/test_walks.py::test_internal_addresses_are_refused_by_rule"
+      "tests/parts/finds/test_walks.py::test_internal_addresses_are_refused_by_rule",
+      "tests/floors/boundary/test_listening.py::test_a_turn_that_searches_the_web_binds_nothing_past_loopback"
     ],
     "honesty": [
       "tests/floors/honesty/test_honesty.py::test_the_chat_prompt_never_instructs_denial_and_an_admission_is_said",

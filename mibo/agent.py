@@ -141,6 +141,7 @@ class Agent(Turns, DirectMessages, MessageParsing, ReplyDecision, PromptBuilder,
         self.llm_dm_model = s.llm_dm_model
         self.api_max_retries = s.api_max_retries
         self.llm_timeout_s = s.llm_timeout_s
+        self.context_window = s.context_window
         self.llm_fallback_duration_s = s.llm_fallback_duration_s
         self.llm_rate_limit_cooldown_s = s.llm_rate_limit_cooldown_s
 
@@ -366,9 +367,8 @@ class Agent(Turns, DirectMessages, MessageParsing, ReplyDecision, PromptBuilder,
 
     @property
     def embedding_cache(self) -> embeddings_mod.EmbeddingCache:
-        """Retrieval's vectors, beside memory.json."""
-        return self._sidecar("_embedding_cache", embeddings_mod.EmbeddingCache,
-                             self.memory_file.with_name("embeddings.jsonl"))
+        """Retrieval's vectors, in the database beside memory.json."""
+        return self._sidecar("_embedding_cache", embeddings_mod.EmbeddingCache, self.memory_file.parent)
 
     def _spawn(self, coro) -> asyncio.Task:
         """Launch a background task, held until it finishes; a crash is logged."""

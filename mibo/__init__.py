@@ -28,4 +28,9 @@ Read-only seed datasets ship with the package (paths.seed_file); everything
 the agent keeps at runtime goes to <home>/runtime/ (paths.ROOT is the home).
 """
 
+from mibo import consoles
+
 __version__ = "0.1.0"
+
+# Started without a console (pythonw, a packaged shell): what it starts opens no console window.
+consoles.hush()

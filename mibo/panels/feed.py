@@ -32,7 +32,7 @@ from urllib.parse import parse_qsl, urlsplit
 
 from fastapi import Request
 
-from .. import activity, browsed, langs, life, profile, situation, subjects
+from .. import activity, browsed, langs, life, paths, profile, situation, subjects
 from .. import taste as model
 from ..library import DISMISSED, KEPT, Item, Library
 from ..sources import weights
@@ -95,6 +95,8 @@ SOURCE = 1.0
 SOURCE_HIDDEN = 12.0
 # At most this many things from one source in any this many in a row.
 SOURCE_CAP, PAGE_WINDOW = 3, LIMIT
+# An earlier find's title in a reason, at most this many characters.
+REASON_TITLE = 32
 
 # The topics offered on the first run, with their names and the words that find them in a title,
 # an excerpt or a site's name (subjects.py holds them, each with the finer subjects under it). A topic the
@@ -511,14 +513,15 @@ on_card: dict[str, dict] = {}
 
 def remember(runtime: Path, item: Item, action: str, now: Optional[float] = None, *, surface: str = "",
              rank: Optional[int] = None, play_s: float = 0.0, slot: str = "", end: str = "",
-             shown_s: float = 0.0, said: Optional[dict] = None) -> bool:
+             shown_s: float = 0.0, said: Optional[dict] = None, line: str = "") -> bool:
     """Keep one reaction with the model's snapshot of the thing at that moment, where it was shown
     (`surface`: card, list, chat or first), at which `rank` and in which `slot` (model, explore or character,
     as the ranking served it when the page does not say), and what it says of the item's source; one that
     changes nothing is not kept again, and a "play" or "read" (`play_s` its seconds) only when it ran longer
     than any before; an "end" (`end`, `shown_s`) once. `said`: what the person said of it in the chat
-    ({"about", "words"}), which the model counts as more than a plain skip. Every showing also goes to
-    shown.jsonl, and any reaction but a showing asks the model to refit soon. Whether it was kept."""
+    ({"about", "words"}), which the model counts as more than a plain skip. A showing keeps what its reason
+    rests on ("why", recommend.facts; `line` the character's sentence as it brought the thing) and also goes to
+    shown.jsonl; any reaction but a showing asks the model to refit soon. Whether it was kept."""
     path = Path(runtime) / TASTE_FILE
     shaped = shape(item, {})
     at = round(life.clock() if now is None else now, 3)
@@ -549,6 +552,10 @@ def remember(runtime: Path, item: Item, action: str, now: Optional[float] = None
         # A find that opened to a wall says nothing more of the person's taste.
         if done or mark and mark["walled"]:
             return False
+        if action == "seen":
+            from .. import recommend
+            extra["why"] = recommend.facts(item, extra["f"], slot, surface, there.get("t", ""), line,
+                                           model.history(events))
         events.append([at, item.id, action, shaped["site"] if shaped else item.site,
                        shaped["kind"] if shaped else "text", extra])
         _save(path, events, load_topics(path))
@@ -680,26 +687,58 @@ class Feed:
     def page(self, limit: int, before: str, kept: bool) -> dict:
         """One page of `shown` (`kept`: of the liked) for the app's 推荐记录, each thing as the main chat draws
         it, at the time it was shown or liked: with the chip and the topic it had in the chat or on the pet's
-        card, else with those it would have now, and its place for the list's reactions."""
+        card, else with those it would have now, its place for the list's reactions, and the sentence of why it
+        was shown (`reason`): what its showing kept (recommend.facts), or for one shown before that was kept,
+        the same read from its showing's event, the ranking's terms in shown.jsonl, the character's line in
+        the chat and the person's history until then."""
         from .. import recommend
         runtime, events = self.ws._runtime(), self._events()
-        got = shown(self.ws._library(), events, kept, limit, before)
-        chat = {m["card"]["id"]: m["card"] for m in self.ws._main.shared()}
+        library = self.ws._library()
+        got = shown(library, events, kept, limit, before)
+        chat = {m["card"]["id"]: m for m in self.ws._main.shared()}
         leans = profile.load(runtime, False)["leans"]
-        lang = profile.character(self.ws.home, self.ws.config())[2]
+        name, _, lang = profile.character(self.ws.home, self.ws.config())
         why = recommend.Why(runtime, load_topics(self._path()), events, life.clock(), lang)
+        # Each thing's showing: its first "seen", else its first event (a page opened in the app's browser).
+        showing: dict[str, list] = {}
+        for event in events:
+            if event[1] not in showing or event[2] == "seen" and showing[event[1]][2] != "seen":
+                showing[event[1]] = event
+        tops = {}
+        for row in reversed(paths.read_jsonl([runtime / model.SHOWN_FILE])):
+            tops[row.get("id")] = row.get("top") or []
+
+        def title_of(ident: str) -> str:
+            found = library.get(ident)
+            title = " ".join(found.title.split()) if found else ""
+            return title if len(title) <= REASON_TITLE else title[:REASON_TITLE - 1] + "…"
+
         cards = []
         for at, rank, item in got["rows"]:
             card = life.said(item).get("card")
             if card is None:
                 continue
-            had = chat.get(item.id) or on_card.get(item.id) or {}
-            now = why.of(shape(item, {}), item)
+            shaped = shape(item, {})
+            message = chat.get(item.id, {})
+            had = message.get("card") or on_card.get(item.id) or {}
+            now = why.of(shaped, item)
             topic = had.get("topic") or now["topic"]
             chip = had.get("why") or now["why"]
             if chip and chip.get("key"):
                 chip = {**chip, "lean": leans.get(chip["key"])}
+            event = showing.get(item.id)
+            extra = event[5] if event and len(event) > 5 else {}
+            said = extra.get("why")
+            if said is None:
+                snap = extra.get("f") or {}
+                # The chat's line, unless it is only the title the message falls back to.
+                line = message.get("text") or ""
+                line = "" if item.title.startswith(line.rstrip("…")) else line
+                said = recommend.facts(item, snap, extra.get("p", ""), extra.get("s", ""),
+                                       recommend.term_of(tops.get(item.id, []), bool(snap.get("guess"))), line,
+                                       model.history(events, event[0] - 0.001) if event else {})
             card.update(why=chip, topic=topic, rank=rank, slot=had.get("slot", ""), surface="list",
+                        reason=why.told(said, item, shaped, name, title_of),
                         at=datetime.fromtimestamp(at).astimezone().isoformat(timespec="seconds"))
             cards.append(card)
         return {"items": cards, "next": got["next"]}
@@ -792,7 +831,7 @@ class Feed:
         played = 0.0 if action == "end" else float(seconds)
         kept = await asyncio.to_thread(remember, self.ws._runtime(), item, action, surface=surface, rank=rank,
                                        play_s=played, slot=slot, end=end, shown_s=float(seconds) - played,
-                                       said=said)
+                                       said=said, line=on_card.get(item.id, {}).get("line", ""))
         await asyncio.to_thread(self._paced, item.id, action, surface, end)
         if action == "seen" and surface == "card":
             self.ws.chooser.shown(item.id)

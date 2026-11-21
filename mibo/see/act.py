@@ -19,8 +19,12 @@ unsorted, and the fixed line says unsorted needs the person. So:
   click and drag by looking in this window for this task (the lease). The
   lease ends with the task, and does not follow the character to another
   window or another site.
-- Typing text and Enter (and any key that may send) by sight ask every time,
-  lease or not, with the text and a ring on the picture.
+- Typing text into the window is free, as typing into a field is when the
+  window is read by names; a password, payment detail or code is never typed.
+  Enter and any key that may send are the kind outward: in automatic review
+  the reviewer judges them on the person's own words with the text typed, and
+  a card with the text and a ring on the picture comes only when it does not
+  pass. A spot the structure names with an effect outside goes the same way.
 - Scrolling is free, as it is in both loops.
 - A spot the structure names keeps its own rules inside a lease: a "Delete"
   button still asks.
@@ -448,11 +452,15 @@ class Sight:
     answered); it may be a coroutine. `held()` says why to stop now ("" to go on): the stop, the take over,
     the person using the window. Nothing the model writes counts as the person's answer."""
 
-    def __init__(self, surface, profile, *, ask: Callable[[dict], Any], task: str, lang: str = "zh",
-                 who: str = "Mibo", held: Callable[[], str] = lambda: ""):
+    def __init__(self, surface, profile, *, ask: Callable[[dict], Any], review: Callable[[str, dict], Any], task: str,
+                 lang: str = "zh", who: str = "Mibo", held: Callable[[], str] = lambda: ""):
         self.surface = surface
         self.profile = profile
         self.ask = ask
+        # The reviewer on one act (awaited: review.decide's Verdict), or None for a kind that is the person's.
+        self.review = review
+        # The text typed last, which an Enter would send.
+        self.typed = ""
         self.task = " ".join(str(task).split())[:300]
         self.lang = lang
         self.who = who
@@ -506,8 +514,12 @@ class Sight:
             if hit and hit.get("known"):
                 kind, why = await self.surface.gate("drag" if do == "drag" else "click", hit)
                 if kind:
+                    verdict = await self._reviewed(kind, {"target": [hit["what"]], "page_says": hit["what"]})
+                    if verdict is not None and verdict.decision != "ask":
+                        return self._verdict(verdict, kind)
                     answer = await self._card({"type": "see_action", "kind": kind, "why": why,
-                                               "target": hit["what"], "picture": self._picture(at)})
+                                               "target": hit["what"], "picture": self._picture(at),
+                                               **self._why(verdict)})
                     if not (answer and answer.get("yes")):
                         return "declined", (f"[declined] the person {'said no to' if answer else 'did not answer'} "
                                             f"{kind} ({hit['what']}); nothing was done")
@@ -522,12 +534,13 @@ class Sight:
                                         "nothing was done")
                 self.lease = self.surface.place()
         if do == "type":
-            answer = await self._card({"type": "see_type", "text": a["text"][:2000], "picture": self._picture(at),
-                                       "said": words.say(words.TYPE, self.lang, who=self.who, window=name,
-                                                         text=a["text"][:60])})
-            if not (answer and answer.get("yes")):
-                return "declined", "[declined] the person did not let the text be typed; nothing was typed"
-            return "", "typing, confirmed by the person"
+            from ..review import CARD_DIGITS, SECRET_TEXT, _luhn
+            if SECRET_TEXT.search(a["text"]) or any(_luhn(re.sub(r"\D", "", m)) for m in CARD_DIGITS.findall(a["text"])):
+                return "refused", ("[refused] the text looks like a password, code, key or card number; the person "
+                                   "types it themselves")
+            # Typing into the window is free; what an Enter sends goes to the reviewer with it.
+            self.typed = a["text"][:2000]
+            return "", "typing into the window"
         if do == "key":
             focus = await self.surface.focused()
             kind, why = "", ""
@@ -536,9 +549,13 @@ class Sight:
             elif focus.get("known") and a["key"] in ("Enter", "Space"):
                 kind, why = await self.surface.gate("enter" if a["key"] == "Enter" else "click", focus)
             if kind or SENDING_KEYS.match(a["key"]):
+                verdict = await self._reviewed(kind or "submit", {"target": [], "text": self.typed,
+                                                                  "page_says": a["key"]})
+                if verdict is not None and verdict.decision != "ask":
+                    return self._verdict(verdict, kind or "submit")
                 answer = await self._card({"type": "see_key", "key": a["key"], "kind": kind or "submit",
                                            "why": why or "a key that may send, pressed by sight",
-                                           "picture": self._picture(None),
+                                           "picture": self._picture(None), "text": self.typed, **self._why(verdict),
                                            "said": words.say(words.KEY, self.lang, who=self.who, window=name,
                                                              key=a["key"])})
                 if not (answer and answer.get("yes")):
@@ -552,6 +569,22 @@ class Sight:
                     return "declined", "[declined] the person did not allow working by sight here; nothing was done"
                 self.lease = self.surface.place()
         return "", "moving about"
+
+    async def _reviewed(self, kind: str, action: dict):
+        """The reviewer's verdict on an act of `kind` in this window, or None when the kind is the person's."""
+        return await self.review(kind, {"where": self.surface.name, **action})
+
+    @staticmethod
+    def _verdict(verdict, kind: str) -> tuple[str, str]:
+        """What a pass or a refusal by the reviewer makes of the act: ("", line) to go on, or a declined line."""
+        if verdict.decision == "go":
+            return "", f"{kind}, passed by the app's review: {verdict.reason}"
+        return "declined", f"[declined] {kind}, nothing was done. {verdict.declined()}" + (
+            "; turned down three times in a row: stop and hand the task back" if verdict.stop else "")
+
+    def _why(self, verdict) -> dict:
+        """The card's line on why the reviewer did not pass it."""
+        return {"review": verdict.line(self.lang)} if verdict is not None else {}
 
     async def act(self, a: dict) -> dict:
         """One action read by ask.read: {"status", "line"}; status ok, failed, declined, refused, handover (the

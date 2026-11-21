@@ -12,16 +12,11 @@ import json
 import re
 from html import unescape
 from itertools import zip_longest
-from xml.etree import ElementTree
 
 import httpx
 
-from .base import (PER_SOURCE, Find, Source, feed_source, find, get_json, get_text, local_to, parse_feed,
+from .base import (PER_SOURCE, Find, Source, feed_source, find, get_json, get_text, local_to, read_feed,
                    written_in)
-
-_ATOM = "{http://www.w3.org/2005/Atom}"
-_MEDIA = "{http://search.yahoo.com/mrss/}"
-_YT = "{http://www.youtube.com/xml/schemas/2015}"
 
 
 def _https(url: str) -> str:
@@ -35,35 +30,15 @@ def _from_ms(ms: int) -> str:
 
 # ---------------------------------------------------------------- YouTube
 
-def _youtube_feed(text: str) -> list[Find]:
-    """A channel's Atom feed. Its cover and description sit inside media:group,
-    where parse_feed does not look."""
-    found = []
-    for entry in ElementTree.fromstring(text.encode("utf-8")).iter(f"{_ATOM}entry"):
-        ident = entry.findtext(f"{_YT}videoId", "")
-        link = entry.find(f"{_ATOM}link")
-        url = link.get("href") if link is not None else f"https://www.youtube.com/watch?v={ident}"
-        # Shorts crowd the channel feeds; the full videos are what is worth bringing.
-        if "/shorts/" in url:
-            continue
-        group = entry.find(f"{_MEDIA}group")
-        found.append(find(url,
-                          entry.findtext(f"{_ATOM}title", ""), site="YouTube",
-                          text=group.findtext(f"{_MEDIA}description", "") if group is not None else "",
-                          author=entry.findtext(f"{_ATOM}author/{_ATOM}name", ""),
-                          published=entry.findtext(f"{_ATOM}published", ""),
-                          picture=f"https://i.ytimg.com/vi/{ident}/hqdefault.jpg" if ident else ""))
-    return found
-
-
 def _youtube(key: str, name: tuple[str, str], about: tuple[str, str], channels: tuple[str, ...],
              default: str = "") -> Source:
     """A few channels on one interest, taken in turn so one busy channel does not fill the list."""
     async def fetch(http: httpx.AsyncClient) -> list[Find]:
-        answers = await asyncio.gather(*(get_text(http, "https://www.youtube.com/feeds/videos.xml",
-                                                  channel_id=channel) for channel in channels),
+        answers = await asyncio.gather(*(read_feed(http, "https://www.youtube.com/feeds/videos.xml", site="YouTube",
+                                                   channel_id=channel) for channel in channels),
                                        return_exceptions=True)
-        feeds = [_youtube_feed(text) for text in answers if isinstance(text, str)]
+        # Shorts crowd the channel feeds; the full videos are what is worth bringing.
+        feeds = [[f for f in found if "/shorts/" not in f.item.url] for found in answers if isinstance(found, list)]
         if not feeds:
             raise answers[0]
         mixed = [f for row in zip_longest(*feeds) for f in row if f is not None]
@@ -231,7 +206,6 @@ async def _art_institute(http: httpx.AsyncClient) -> list[Find]:
 
 # ---------------------------------------------------------------- feeds that need a touch
 
-_MAILBOX = re.compile(r"^\S+@\S+\s+\((.+)\)$")
 # Behance's feed writes each character it cannot encode as "?", so a title can open with "?? ".
 _LOST = re.compile(r"(?:^|\s)\?{2,}(?=\s|$)")
 # Douban's review feeds end each title with the work's name, which the text already gives.
@@ -242,17 +216,14 @@ _EMBEDDED = "<内嵌内容，请前往机核查看>"
 
 def _tidy_feed(key: str, name: tuple[str, str], about: tuple[str, str], url: str, site: str,
                default: str = "") -> Source:
-    """A feed whose entries need tidying: an author written as "mail@host (Name)", a tracking
-    query on every link, NPR's img src="undefined" when a story has no picture, and the
-    marks Behance, Douban and Gcores leave in titles and text."""
+    """A feed whose entries need tidying: a tracking query on every link, NPR's
+    img src="undefined" when a story has no picture, and the marks Behance, Douban
+    and Gcores leave in titles and text."""
     async def fetch(http: httpx.AsyncClient) -> list[Find]:
-        found = parse_feed(await get_text(http, url), url, site=site)[:PER_SOURCE]
+        found = (await read_feed(http, url, site=site))[:PER_SOURCE]
         for f in found:
             f.item.title = _REVIEWED.sub("", _LOST.sub("", f.item.title)).strip()
             f.item.description = " ".join(f.item.description.replace(_EMBEDDED, " ").split())
-            mailbox = _MAILBOX.match(f.item.author)
-            if mailbox:
-                f.item.author = mailbox.group(1)
             if "?utm_" in f.item.url or "?source=rss" in f.item.url:
                 f.item.url = f.item.url.split("?", 1)[0]
             if f.picture.endswith("/undefined"):
@@ -266,7 +237,7 @@ async def _itch(http: httpx.AsyncClient) -> list[Find]:
     """itch.io's featured games. The feed packs price, genre and platforms into the
     title as "[...]" tags; they read better as the line under it."""
     url = "https://itch.io/feed/featured.xml"
-    found = parse_feed(await get_text(http, url), url, site="itch.io")[:PER_SOURCE]
+    found = (await read_feed(http, url, site="itch.io"))[:PER_SOURCE]
     for f in found:
         title, _, tags = f.item.title.partition(" [")
         if tags:

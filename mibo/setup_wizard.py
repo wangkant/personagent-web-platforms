@@ -289,15 +289,13 @@ def secure_home(home: Path) -> None:
         # Narrowed already, here or by its user; redoing it rewrites every file below.
         return
     whoami = subprocess.run(["whoami", "/user", "/fo", "csv", "/nh"], capture_output=True, text=True,
-                            errors="replace", stdin=subprocess.DEVNULL,
-                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                            errors="replace", stdin=subprocess.DEVNULL)
     sid = whoami.stdout.strip().rsplit(",", 1)[-1].strip('"')
     # What a profile folder grants: the user, SYSTEM and Administrators.
     grants = [f"*{who}:(OI)(CI)F" for who in (sid, "S-1-5-18", "S-1-5-32-544")]
     # A drive with no permissions to set (FAT, exFAT) refuses; nothing to narrow there.
     subprocess.run(["icacls", str(home), "/inheritance:r", "/grant:r", *grants],
-                   capture_output=True, stdin=subprocess.DEVNULL,
-                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                   capture_output=True, stdin=subprocess.DEVNULL)
 
 
 def _acl_protected(path: Path) -> bool:

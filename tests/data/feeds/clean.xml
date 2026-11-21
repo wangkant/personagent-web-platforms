@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>Harbour Notes</title>
+    <link>https://harbour.example/</link>
+    <description>Stories from the harbour</description>
+    <item>
+      <title>The lighthouse gets a new lamp</title>
+      <link>https://harbour.example/lighthouse</link>
+      <description>A short note about the lamp.</description>
+      <content:encoded><![CDATA[<p>After forty years the lighthouse on the north pier has a new lamp.</p>]]></content:encoded>
+      <author>keeper@harbournotes.org (Ada Keeper)</author>
+      <pubDate>Wed, 18 Nov 2026 09:30:00 +0100</pubDate>
+      <media:content url="https://img.harbour.example/lamp.jpg" medium="image" width="1200" height="800"/>
+      <media:thumbnail url="https://img.harbour.example/lamp-small.jpg"/>
+    </item>
+    <item>
+      <title>Ferry times change in winter</title>
+      <link>/ferry</link>
+      <description><![CDATA[<p>The winter timetable starts on 1 December.</p><img src="/img/ferry.png" alt="The ferry">]]></description>
+      <pubDate>Tue, 17 Nov 2026 18:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

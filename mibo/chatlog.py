@@ -1,43 +1,32 @@
-"""The chat log (runtime/log/): per chat, an append-only record of the lines
-the character took in and sent, with the recent window's row shape and
-sequence numbers. The ground truth notes cite and the review checks them
-against. Kept MEMORY_LOG_DAYS days; never copied, never shared across chats.
-No model call here."""
+"""The chat log: per chat, a record of the lines the character took in and sent, with the recent window's row
+shape and sequence numbers, kept as rows of the runtime database (db.py). The ground truth notes cite and the
+review checks them against. Kept MEMORY_LOG_DAYS days; never copied, never shared across chats, never in a
+backup. No model call here."""
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
-import os
+import sqlite3
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Iterable, Optional
 
-from . import ranking
-from .storage import LockUnavailable, append_lock, atomic_write_text
+from . import db, ranking
 from .textproc import _focus_tokens
 
-__all__ = ["ChatLog", "LockUnavailable", "clean_row", "file_name", "merge_refs", "quote",
-           "refs_of"]
+__all__ = ["ChatLog", "clean_row", "merge_refs", "quote", "refs_of", "row_args"]
 
 logger = logging.getLogger("agent")
 
 DAY_S = 86400.0
 #: A second bound beside the days: a chat's newest lines kept.
 MAX_LINES = 5000
-#: How long a write waits for another writer before trying next time.
-LOCK_WAIT_S = 2.0
 #: The most lines one search returns.
 SEARCH_MAX = 20
 TEXT_MAX = 2000
 #: The log lines a note cites, at most.
 REFS_MAX = 6
-
-
-def file_name(conv: str) -> str:
-    """A chat key never names a path: its hash does."""
-    return hashlib.sha256(str(conv).encode("utf-8")).hexdigest()[:32] + ".jsonl"
+COLUMNS = "seq, t, t1, user_id, name, text, self, gone, mid"
 
 
 def _num(value, kind=float):
@@ -84,69 +73,59 @@ def clean_row(row) -> Optional[dict]:
     return out
 
 
+def row_args(conv: str, row: dict) -> tuple:
+    """A clean row as the chatlog table's columns."""
+    return (conv, row["seq"], row["t"], row.get("t1"), row["user_id"], row["name"], row["text"],
+            int(bool(row.get("self"))), int(bool(row.get("gone"))), row.get("mid"))
+
+
+def _row(values: tuple) -> dict:
+    """A table row as the row shape clean_row gives."""
+    seq, t, t1, user_id, name, text, mine, gone, mid = values
+    out = {"seq": seq, "t": t, "user_id": user_id, "name": name, "text": text}
+    if t1:
+        out["t1"] = t1
+    if mine:
+        out["self"] = True
+    if gone:
+        out["gone"] = True
+    if mid:
+        out["mid"] = mid
+    return out
+
+
 def _end(row: dict) -> float:
     return row.get("t1") or row["t"]
 
 
-def _dump(rows: Iterable[dict]) -> str:
-    return "".join(json.dumps(r, ensure_ascii=False, separators=(",", ":")) + "\n"
-                   for r in rows)
-
-
 class ChatLog:
-    """One file per chat in `folder`; each row one line of JSON. A row read
-    twice with one seq is a line that grew (a merge): the later wins. A
-    `gone` row only holds the place of a forgotten newest line, so it is
-    not logged again."""
+    """The chatlog table of the runtime's database: one row per (chat, seq). A row taken again with its seq is a
+    line that grew (a merge) and replaces the one before. A `gone` row only holds the place of a forgotten newest
+    line, so it is not logged again."""
 
-    def __init__(self, folder: Path, days: float = 30, max_lines: int = MAX_LINES):
-        self.folder = Path(folder)
+    def __init__(self, runtime: Path, days: float = 30, max_lines: int = MAX_LINES):
+        self.runtime = Path(runtime)
+        self.db = db.at(self.runtime)
         self.days = float(days or 0)
         self.max_lines = int(max_lines)
-        #: {conv: (newest seq logged, its text's length)}
-        self._marks: dict[str, tuple[int, int]] = {}
 
     @property
     def on(self) -> bool:
         return self.days > 0
 
-    def path(self, conv: str) -> Path:
-        return self.folder / file_name(conv)
-
     # ---- reading --------------------------------------------------------------
-
-    def _read_path(self, path: Path) -> list[dict]:
-        """Every row of a file in seq order, place-holders too; a damaged
-        line (a write cut short) is skipped."""
-        try:
-            blob = path.read_bytes()
-        except FileNotFoundError:
-            return []
-        except OSError as e:
-            logger.warning("[Agent] chat log read failed: %s", e)
-            return []
-        by_seq: dict[int, dict] = {}
-        for raw in blob.split(b"\n"):
-            if not raw.strip():
-                continue
-            try:
-                row = clean_row(json.loads(raw.decode("utf-8")))
-            except (UnicodeDecodeError, ValueError):
-                continue
-            if row is not None:
-                by_seq[row["seq"]] = row
-        return [by_seq[s] for s in sorted(by_seq)]
 
     def read(self, conv: str) -> list[dict]:
         """The chat's lines in seq order."""
-        return [r for r in self._read_path(self.path(conv)) if not r.get("gone")]
+        return [_row(r) for r in self.db.read(
+            f"SELECT {COLUMNS} FROM chatlog WHERE conv = ? AND gone = 0 ORDER BY seq", (conv,))]
 
     def lines(self, conv: str, seqs: Iterable[int]) -> list[dict]:
         want = {_num(s, int) for s in seqs}
         return [row for row in self.read(conv) if row["seq"] in want]
 
     def last_seq(self, conv: str) -> int:
-        return self._mark(conv)[0]
+        return self.db.read("SELECT max(seq) FROM chatlog WHERE conv = ?", (conv,))[0][0] or 0
 
     def search(self, conv: str, words: str = "", *,
                since: float = 0.0, until: float = 0.0, limit: int = SEARCH_MAX,
@@ -182,178 +161,99 @@ class ChatLog:
                        first_at=rows[0]["t"] if rows else 0.0,
                        last_at=_end(rows[-1]) if rows else 0.0)
         else:
-            out["chats"] = len(self._files())
+            out["chats"] = self.db.read("SELECT count(DISTINCT conv) FROM chatlog")[0][0]
         return out
 
     # ---- writing --------------------------------------------------------------
 
-    def _mark(self, conv: str) -> tuple[int, int]:
-        if conv not in self._marks:
-            rows = self._read_path(self.path(conv))
-            last = rows[-1] if rows else None
-            # A forgotten line's place takes no grown copy of it either.
-            self._marks[conv] = (0, 0) if last is None else (
-                last["seq"], TEXT_MAX + 1 if last.get("gone") else len(last["text"]))
-        return self._marks[conv]
-
     def take(self, conv: str, rows: Iterable[dict]) -> int:
-        """Append the rows not logged yet, and a grown copy of the newest one
+        """Add the rows not logged yet, and a grown copy of the newest one
         logged; returns how many were taken. Never raises."""
         if not self.on:
             return 0
         try:
-            seq, size = self._mark(conv)
-            fresh = []
-            for row in sorted(filter(None, map(clean_row, rows)), key=lambda r: r["seq"]):
-                if row["seq"] > seq or (row["seq"] == seq and len(row["text"]) > size):
-                    fresh.append(row)
-                    seq, size = row["seq"], len(row["text"])
-            if not fresh:
-                return 0
-            # A line without a time (a page chat read back) cannot be dated,
-            # and one older than the kept days would only be pruned again.
-            cutoff = time.time() - self.days * DAY_S
-            self._append(conv, [r for r in fresh if r["t"] > 0 and _end(r) >= cutoff])
-            self._marks[conv] = (seq, size)
+            with self.db.write() as conn:
+                last = conn.execute("SELECT seq, length(text), gone FROM chatlog WHERE conv = ? "
+                                    "ORDER BY seq DESC LIMIT 1", (conv,)).fetchone()
+                # A forgotten line's place takes no grown copy of it either.
+                seq, size = (0, 0) if last is None else (last[0], TEXT_MAX + 1 if last[2] else last[1])
+                fresh = []
+                for row in sorted(filter(None, map(clean_row, rows)), key=lambda r: r["seq"]):
+                    if row["seq"] > seq or (row["seq"] == seq and len(row["text"]) > size):
+                        fresh.append(row)
+                        seq, size = row["seq"], len(row["text"])
+                # A line without a time (a page chat read back) cannot be dated,
+                # and one older than the kept days would only be pruned again.
+                cutoff = time.time() - self.days * DAY_S
+                conn.executemany("INSERT OR REPLACE INTO chatlog VALUES (?,?,?,?,?,?,?,?,?,?)",
+                                 [row_args(conv, r) for r in fresh if r["t"] > 0 and _end(r) >= cutoff])
             return len(fresh)
-        except (OSError, LockUnavailable) as e:
-            # The mark did not move: tried again on the next write.
+        except sqlite3.Error as e:
             logger.warning("[Agent] chat log append failed: %s", e)
             return 0
-
-    def _append(self, conv: str, rows: list[dict]) -> None:
-        if not rows:
-            return
-        path = self.path(conv)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        payload = _dump(rows).encode("utf-8")
-        with append_lock(path, timeout=LOCK_WAIT_S):
-            fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_APPEND
-                         | getattr(os, "O_BINARY", 0), 0o600)
-            try:
-                if os.fstat(fd).st_size:
-                    os.lseek(fd, -1, os.SEEK_END)
-                    if os.read(fd, 1) != b"\n":
-                        # After a write cut short: its fragment is skipped on read.
-                        payload = b"\n" + payload
-                view = memoryview(payload)
-                while view:
-                    view = view[os.write(fd, view):]
-                os.fsync(fd)
-            finally:
-                os.close(fd)
-
-    def _replace(self, path: Path, rows: list[dict], kept: list[dict]) -> None:
-        """Write `kept` in place of `rows`; a gone newest line leaves its place."""
-        if rows and (not kept or kept[-1]["seq"] < rows[-1]["seq"]):
-            last = rows[-1]
-            kept = kept + [{"seq": last["seq"], "t": last["t"], "user_id": "",
-                            "name": "", "text": "", "gone": True}]
-        atomic_write_text(path, _dump(kept))
 
     def forget(self, conv: str, gone: Callable[[dict], object]) -> int:
         """Remove the lines `gone` is true for; a line it returns words for
         keeps its place with those words. How many changed."""
-        path = self.path(conv)
-        if not path.is_file():
-            return 0
-        with append_lock(path, timeout=LOCK_WAIT_S):
-            rows = self._read_path(path)
-            kept, changed = [], 0
+        with self.db.write() as conn:
+            rows = [_row(r) for r in conn.execute(
+                f"SELECT {COLUMNS} FROM chatlog WHERE conv = ? ORDER BY seq", (conv,)).fetchall()]
+            changed = 0
             for row in rows:
                 verdict = not row.get("gone") and gone(row)
-                changed += bool(verdict)
                 if not verdict:
-                    kept.append(row)
-                elif isinstance(verdict, str):
-                    kept.append({**row, "text": verdict})
-            if not changed:
-                return 0
-            self._replace(path, rows, kept)
-        self._marks.pop(conv, None)
+                    continue
+                changed += 1
+                if isinstance(verdict, str):
+                    conn.execute("UPDATE chatlog SET text = ? WHERE conv = ? AND seq = ?",
+                                 (verdict, conv, row["seq"]))
+                elif row is rows[-1]:
+                    # A gone newest line leaves its place.
+                    conn.execute("UPDATE chatlog SET t1 = NULL, user_id = '', name = '', text = '', self = 0, "
+                                 "gone = 1, mid = NULL WHERE conv = ? AND seq = ?", (conv, row["seq"]))
+                else:
+                    conn.execute("DELETE FROM chatlog WHERE conv = ? AND seq = ?", (conv, row["seq"]))
+        if changed:
+            self.db.scrubbed()
         return changed
 
     def drop(self, conv: str) -> bool:
-        """Forget this chat: its file goes."""
-        path = self.path(conv)
-        self._marks.pop(conv, None)
-        try:
-            with append_lock(path, timeout=LOCK_WAIT_S):
-                path.unlink()
-        except FileNotFoundError:
-            return False
-        finally:
-            self._marks.pop(conv, None)
-            try:
-                path.with_name(f".{path.name}.append.lock").unlink()
-            except OSError:
-                pass
-        return True
-
-    def _files(self) -> list[Path]:
-        try:
-            return sorted(self.folder.glob("*.jsonl"))
-        except OSError:
-            return []
+        """Forget this chat: its lines go."""
+        with self.db.write() as conn:
+            gone = conn.execute("DELETE FROM chatlog WHERE conv = ?", (conv,)).rowcount
+        self.db.scrubbed()
+        return gone > 0
 
     def private_chats(self, platform: str) -> set[str]:
-        """The one-to-one chats of `platform` that have a log, told from the
-        speaker ids in their own lines (a file's name is only a hash)."""
-        found = set()
-        for path in self._files():
-            for row in self._read_path(path):
-                uid = str(row.get("user_id") or "")
-                if uid.startswith(platform + ":"):
-                    conv = "private:" + uid
-                    if file_name(conv) == path.name:
-                        found.add(conv)
-                    break
-        return found
+        """The one-to-one chats of `platform` that have a log."""
+        prefix = f"private:{platform}:"
+        return {conv for (conv,) in self.db.read(
+            "SELECT DISTINCT conv FROM chatlog WHERE substr(conv, 1, ?) = ?", (len(prefix), prefix))}
 
     def clear(self) -> int:
-        """Every chat's log goes (the log turned off, a reset)."""
-        gone = 0
-        for path in self._files():
-            try:
-                path.unlink()
-                gone += 1
-            except OSError as e:
-                logger.warning("[Agent] chat log not removed: %s", e)
-        self._marks.clear()
-        return gone
+        """Every chat's log goes (the log turned off, a reset); how many chats had one."""
+        with self.db.write() as conn:
+            chats = conn.execute("SELECT count(DISTINCT conv) FROM chatlog").fetchone()[0]
+            conn.execute("DELETE FROM chatlog")
+        self.db.scrubbed()
+        return chats
 
     def prune(self, now: Optional[float] = None) -> int:
         """Drop lines older than the kept days and past the per-chat cap;
         returns how many went."""
         now = time.time() if now is None else now
-        cutoff = now - self.days * DAY_S
-        gone = 0
-
-        def keep(rows: list[dict]) -> list[dict]:
-            return [r for r in rows if _end(r) >= cutoff][-self.max_lines:]
-
-        for path in self._files():
-            rows = self._read_path(path)
-            if len(keep(rows)) == len(rows):
-                continue
-            try:
-                with append_lock(path, timeout=LOCK_WAIT_S):
-                    rows = self._read_path(path)
-                    kept = keep(rows)
-                    if kept:
-                        atomic_write_text(path, _dump(kept))
-                    else:
-                        path.unlink()
-                if not kept:
-                    # The lock of a log that is gone would otherwise stay for good.
-                    path.with_name(f".{path.name}.append.lock").unlink(missing_ok=True)
-                gone += sum(1 for r in rows if not r.get("gone")) - sum(
-                    1 for r in kept if not r.get("gone"))
-            except (OSError, LockUnavailable) as e:
-                logger.warning("[Agent] chat log prune failed: %s", e)
-        # Marks of files that went are read again; the window keeps seq ahead.
-        self._marks.clear()
-        return gone
+        count = "SELECT count(*) FROM chatlog WHERE gone = 0"
+        try:
+            with self.db.write() as conn:
+                before = conn.execute(count).fetchone()[0]
+                conn.execute("DELETE FROM chatlog WHERE coalesce(t1, t) < ?", (now - self.days * DAY_S,))
+                conn.execute("DELETE FROM chatlog WHERE (conv, seq) IN (SELECT conv, seq FROM (SELECT conv, seq, "
+                             "row_number() OVER (PARTITION BY conv ORDER BY seq DESC) AS n FROM chatlog) "
+                             "WHERE n > ?)", (self.max_lines,))
+                return before - conn.execute(count).fetchone()[0]
+        except sqlite3.Error as e:
+            logger.warning("[Agent] chat log prune failed: %s", e)
+            return 0
 
 
 def quote(row: dict, tz=None) -> str:

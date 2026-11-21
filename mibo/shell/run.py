@@ -192,7 +192,7 @@ class Spare:
         process = subprocess.Popen(
             [POWERSHELL, "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
             cwd=os.environ.get("SystemRoot") or None, env=environment(), stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         return process, _Job(process)
 
     def warm(self) -> None:

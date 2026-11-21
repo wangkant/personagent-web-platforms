@@ -26,6 +26,13 @@ Code taken from other projects, under the licences they were released with:
   (mozilla/readability), unchanged: Apache License, Version 2.0 (see LICENSE),
   Copyright (c) 2010 Arc90 Inc, Copyright (c) 2010-2026 Mozilla and
   Contributors.
+- `mibo/static/welcome/markdown-it.umd.min.js` is the browser build of
+  markdown-it 15.0.3 (markdown-it/markdown-it), unchanged, sha256
+  391f2aa638e75e6c7859d0a5c5650ef0956722a45998f17e05b83bc655778e1e: MIT
+  License, Copyright (c) 2014 Vitaly Puzrin, Alex Kocharin. It bundles
+  linkify-it, mdurl, uc.micro and punycode.js (MIT) and entities (BSD
+  2-Clause, Copyright (c) Felix Boehm); every one of these notices is in
+  `mibo/static/welcome/markdown-it.LICENSE.txt`.
 - `mibo/web/pageops.py` is ported from browser-use's
   `browser_use/ax.py`: MIT License, Copyright (c) 2024 Gregor Zunic.
 - Some guidance sentences in `mibo/web/operate.py` are copied from
@@ -82,3 +89,8 @@ SOFTWARE.
 - `mibo/static/welcome/providermarks.js` holds the model services' marks from
   `@lobehub/icons-static-svg` 1.104.0 (lobehub/lobe-icons): MIT License. Each mark is the
   trademark of its owner and is shown only to name that service.
+
+Libraries Mibo installs keep their own licences, which pip installs beside them.
+The feeds in `mibo/sources/` are read by feedparser (kurtmckee/feedparser): BSD
+2-Clause License, Copyright (C) 2010-2025 Kurt McKee, Copyright (C) 2002-2008
+Mark Pilgrim. It brings feedparser-sgmllib: Python Software Foundation License.

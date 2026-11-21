@@ -5,7 +5,6 @@ license: Apache-2.0
 metadata:
   mibo-title-zh: 每周阅读回顾
   mibo-description-zh: 将过去一周在应用内浏览器中阅读和观看的内容归纳为几个主题，并挑出一篇值得重读的内容。
-  mibo-words: 本周 这周 这一周 一周 每周 上周 回顾 读了 读过 看了 看过 阅读 浏览 week weekly digest review summary reading watched
 ---
 
 # A week of reading

@@ -164,8 +164,12 @@ async def use(agent, args: dict, lookups) -> str:
         lookups.pictures.append(outcome["picture"])
     steps = "\n".join(f"- {line}" for line in outcome.get("steps", [])[-10:] if line)
     # The result and the steps carry words read off the window: fenced as data, as a page's words are.
+    # When it asks: what it saw there that has no name, for the question to say.
+    seen = "\n".join(f"- {line}" for line in outcome.get("seen") or [])
     shown = "\n".join(part for part in (f"Result: {outcome['result']}" if outcome.get("result") else "",
-                                        f"Steps:\n{steps}" if steps else "") if part)
+                                        f"Steps:\n{steps}" if steps else "",
+                                        f"Controls with no name in the window, by how they look and where they "
+                                        f"are:\n{seen}" if seen else "") if part)
     return (f"Task in {named}: {_SAID.get(status, status)}\n"
             + (f"Why (the app's words): {why}\n" if why else "")
             + (operate.fence(shown) + "\n" if shown else "")

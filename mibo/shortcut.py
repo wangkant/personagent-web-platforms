@@ -122,8 +122,7 @@ def _powershell(source: str) -> tuple[str, str]:
         done = subprocess.run(
             ["powershell", "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
              "-EncodedCommand", encoded],
-            capture_output=True, timeout=60, stdin=subprocess.DEVNULL,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            capture_output=True, timeout=60, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.TimeoutExpired) as error:
         return "", str(error)
     out = done.stdout.decode("utf-8", errors="replace")

@@ -16,12 +16,16 @@ Inner calls go to their own scripts by purpose, recognised from the constant eac
 (review.POLICY, pagejudge.SYSTEM, consolidate's prompt, ingestion's vision prompt, mcp_tools.WORDS_PROMPT), never
 from prose. A request
 with max_tokens 1 is the endpoint probe a character makes when it starts, answered "ok" unless the test
-scripts "probe". Every request is recorded, with its key apart from its headers."""
+scripts "probe". Every request is recorded, with its key apart from its headers.
+
+Each answer reports a deterministic prompt count (`tokens`) as usage.prompt_tokens. With a `window` set, a request
+whose count and max_tokens pass it is answered 400 with the window stated, as vLLM and OpenAI word it."""
 from __future__ import annotations
 
 import hashlib
 import itertools
 import json
+import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -109,6 +113,24 @@ def purpose_of(body: dict) -> str:
     return "reply"
 
 
+def tokens(body: dict) -> int:
+    """The stand-in's own count of a request: a CJK character one token, three other characters one, four a
+    message, the tool definitions by their JSON length over three."""
+    def count(text: str) -> int:
+        wide = len(_WIDE.findall(text))
+        return wide + (len(text) - wide) // 3
+    total = 0
+    for message in body.get("messages") or []:
+        content = message.get("content") or ""
+        total += 4 + count(content if isinstance(content, str) else json.dumps(content, ensure_ascii=False))
+        if message.get("tool_calls"):
+            total += count(json.dumps(message["tool_calls"], ensure_ascii=False))
+    return total + (len(json.dumps(body["tools"], ensure_ascii=False)) // 3 if body.get("tools") else 0)
+
+
+_WIDE = re.compile("[⺀-鿿가-힯＀-￯]")
+
+
 class Unscripted(AssertionError):
     """The app asked the model something no script covers."""
 
@@ -120,6 +142,8 @@ class ScriptedModel:
         self.scripts: dict[str, list[dict]] = {p: [] for p in PURPOSES}
         self.requests: list[dict] = []
         self.unscripted: list[dict] = []
+        # The context window in tokens; 0 takes any request.
+        self.window = 0
         self._ids = itertools.count(1)
         self._lock = threading.Lock()
         self._released = threading.Event()
@@ -141,6 +165,7 @@ class ScriptedModel:
                 rounds.clear()
             self.requests.clear()
             self.unscripted.clear()
+            self.window = 0
         self._released = threading.Event()
 
     def script(self, *rounds, purpose: str = "reply") -> ScriptedModel:
@@ -176,6 +201,14 @@ class ScriptedModel:
     def _answer(self, body: dict) -> tuple[int, dict | None]:
         """(status, body) for one chat request; no body for a hang that was let go."""
         purpose = purpose_of(body)
+        asked = tokens(body)
+        room = body.get("max_tokens") or body.get("max_completion_tokens") or 0
+        if self.window and asked + room > self.window:
+            with self._lock:
+                self.requests[-1]["purpose"] = purpose
+            return 400, {"error": {"message": f"This model's maximum context length is {self.window} tokens. However, "
+                                              f"you requested {asked + room} tokens ({asked} in the messages, {room} "
+                                              f"in the completion).", "type": "invalid_request_error"}}
         with self._lock:
             self.requests[-1]["purpose"] = purpose
             rounds = self.scripts[purpose]
@@ -204,7 +237,7 @@ class ScriptedModel:
         finish = step.get("finish") or ("tool_calls" if step.get("calls") else "stop")
         return 200, {"id": f"chatcmpl-{len(self.requests)}", "object": "chat.completion", "model": MODEL,
                      "choices": [{"index": 0, "finish_reason": finish, "message": message}],
-                     "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}}
+                     "usage": {"prompt_tokens": asked, "completion_tokens": 5, "total_tokens": asked + 5}}
 
     def _handler(self):
         model = self

@@ -987,12 +987,12 @@
       grid.replaceChildren(...rows.map(cardOf));
     }
 
-    // Beyond the chosen list: the official registry, by name, for a Latin word of two letters or more.
+    // Beyond the chosen list: the official registry, by name, for a Latin word of three letters or more (its least).
     let asked = "";
     async function searchRegistry() {
       const q = query.text;
       asked = q;
-      if (q.length < 2 || !/^[\x20-\x7e]+$/.test(q)) return registry.replaceChildren();
+      if (q.trim().length < 3 || !/^[\x20-\x7e]+$/.test(q)) return registry.replaceChildren();
       registry.replaceChildren(el("h4", "skm-card-title", t.registryTitle), el("p", "setup-help", t.registryLoading));
       try {
         const rows = (await ctx.api(`mcp/market/search?q=${encodeURIComponent(q)}`)).servers;

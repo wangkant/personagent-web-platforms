@@ -13,7 +13,7 @@ from harness import attacks
 from harness.home import holding, restarted
 from harness.model import call, say
 from harness.turn import run_turn
-from mibo import person
+from mibo import db, person
 
 ROWS = [param.values[0] for param in attacks.load("secrets")]
 
@@ -72,8 +72,11 @@ def test_secrets_said_in_a_chat_are_kept_nowhere_but_in_their_masked_form(app):
     # The masked forms are what the chat record, recent.json and the page's copy keep.
     masked = holding(app.home, [m for row in ROWS for m in row.get("masked") or []])
     missing = {(m, place) for m, files in masked.items()
-               for place in ("runtime/log/", "runtime/recent.json", "runtime/desktop/browser-chat.json")
+               for place in ("runtime/mibo.db", "runtime/recent.json")
                if not any(f.startswith(place) for f in files)}
+    store = db.at(app.home / "runtime")
+    missing |= {(m, table) for m in masked for table, column in (("chatlog", "text"), ("page_messages", "body"))
+                if not store.read(f"SELECT 1 FROM {table} WHERE instr({column}, ?)", (m,))}
     assert missing == set(), "a masked form is missing from where the chat is kept"
 
 
@@ -81,8 +84,8 @@ def test_a_number_already_in_the_chat_record_never_comes_back_from_a_search(app)
     card = next(row for row in ROWS if row["id"] == "card")
     run_turn(app, card["said"], say("好的。"))  # copy: voice
     # A line of the record that holds the number as said, however it came to be written so.
-    for log in (app.home / "runtime" / "log").glob("*.jsonl"):
-        log.write_bytes(log.read_bytes().replace(card["masked"][0].encode(), card["raw"][1].encode()))
+    with db.at(app.home / "runtime").write() as conn:
+        conn.execute("UPDATE chatlog SET text = replace(text, ?, ?)", (card["masked"][0], card["raw"][1]))
     assert holding(app.home, card["raw"])[card["raw"][1]]
     found = recall(app)[card["id"]]
     assert not any(w in found for w in card["raw"]) and card["masked"][0] in found, found

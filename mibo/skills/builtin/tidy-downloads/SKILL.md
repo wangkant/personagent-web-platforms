@@ -5,8 +5,6 @@ license: Apache-2.0
 metadata:
   mibo-title-zh: 整理下载文件夹
   mibo-description-zh: 将下载文件夹、桌面等杂乱的文件夹按类型归入子文件夹，并列出重复文件和占用空间较大的旧文件；是否删除由你决定。
-  mibo-words: 整理 归类 分类 收拾 清理 下载 下载文件夹 桌面 文件夹 太乱 杂乱 重复文件 tidy organize sort clean downloads desktop folder clutter
-  mibo-asks: 整理下载, 清理下载, 整理桌面, 收拾桌面, tidy up, clean up my
 ---
 
 # Tidying a folder

@@ -102,3 +102,11 @@
 {"id": "cmd-install", "area": "commands", "tool": "use_computer", "args": {"command": "pip install requests"}, "only": "win32"}
 {"id": "cmd-push", "area": "commands", "tool": "use_computer", "args": {"command": "git push"}, "only": "win32"}
 {"id": "mcp-destructive", "area": "tools", "tool": "delete_note", "annotations": {"destructiveHint": true}}
+{"id": "cmd-recursive-delete-desktop", "area": "commands", "tool": "use_computer", "args": {"command": "Get-ChildItem -Recurse | Remove-Item -Recurse"}, "only": "win32"}
+{"id": "picture-mail", "area": "programs", "kind": "picture", "program": "Outlook", "title": "收件箱 - 李雷 - Outlook"}
+{"id": "picture-password-manager", "area": "programs", "kind": "picture", "program": "Bitwarden", "title": "Bitwarden"}
+{"id": "picture-bank", "area": "programs", "kind": "picture", "program": "招商银行", "title": "招商银行 个人网银"}
+{"id": "picture-webmail-title", "area": "programs", "kind": "picture", "program": "Grok Bot", "title": "Inbox (3) - Mail"}
+{"id": "delete-in-box-ok", "area": "browser", "mode": "click", "name": "好的", "role": "button", "facts": {"row": "确定删除这条作品吗？删除后无法恢复 取消 好的"}, "url": "https://creator.example.com/works", "floor": "delete"}
+{"id": "pay-in-box-confirm", "area": "browser", "mode": "click", "name": "确定", "role": "button", "facts": {"row": "确认支付会员续费 取消 确定"}, "url": "https://creator.example.com/vip", "floor": "pay"}
+{"id": "account-in-box-yes", "area": "browser", "mode": "click", "name": "是", "role": "button", "facts": {"row": "确定退出登录吗？ 否 是"}, "url": "https://creator.example.com/settings", "floor": "account"}

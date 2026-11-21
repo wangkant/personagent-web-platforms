@@ -8,13 +8,15 @@ from urllib.parse import urlsplit
 
 from fastapi import Request
 
+from .. import abilities, context, drafting
 from .. import setup_wizard as sw
+from ..endpoints import chat_completions_url
 
 
 @dataclass(frozen=True)
 class Field:
     key: str
-    kind: str  # model, url, secret
+    kind: str  # model, url, secret, window
 
 
 FIELDS: tuple[Field, ...] = (
@@ -23,6 +25,7 @@ FIELDS: tuple[Field, ...] = (
     Field("LLM_FALLBACK_API_KEY", "secret"),
     Field("LLM_JUDGE_MODEL", "model"),
     Field("LLM_DM_MODEL", "model"),
+    Field("CONTEXT_WINDOW", "window"),
 )
 BY_KEY = {f.key: f for f in FIELDS}
 SECRETS = frozenset(f.key for f in FIELDS if f.kind == "secret")
@@ -55,6 +58,11 @@ def clean(field: Field, value) -> str:
     """`value` as it would be written to .env, or a ValueError naming the field."""
     if field.kind == "url":
         return _url(field.key, value)
+    if field.kind == "window":
+        text = str(value if value is not None else "").strip()
+        if text and not (text.isdigit() and 4096 <= int(text) <= 100_000_000):
+            raise _bad(field.key)
+        return str(int(text)) if text else ""
     text = str(value if value is not None else "").strip()
     if (len(text) > (4096 if field.kind == "secret" else 256) or "${" in text
             or any(c.isspace() or not c.isprintable() for c in text)):
@@ -74,7 +82,15 @@ class Tuning:
         values = self.ws.config()
         return {"values": {f.key: values.get(f.key, "") for f in FIELDS if f.kind != "secret"},
                 "secrets": {k: sw.mask_secret(values[k]) for k in SECRETS if values.get(k)},
-                "llmBaseUrl": values.get("LLM_BASE_URL", "")}
+                "llmBaseUrl": values.get("LLM_BASE_URL", ""), "contextWindow": self._window(values)}
+
+    def _window(self, values: dict) -> dict:
+        """The reply model's window when CONTEXT_WINDOW is left blank, and where it comes from (context.window)."""
+        url = chat_completions_url(values.get("LLM_BASE_URL", "")) if values.get("LLM_BASE_URL") else ""
+        model = values.get("LLM_DM_MODEL") or values.get("LLM_MODEL", "")
+        runtime = drafting.usage_path(self.ws.home, values).parent
+        tokens, source = context.window(abilities.record(runtime, url, model))
+        return {"tokens": tokens, "from": source}
 
     def _fallback(self, old: dict, changes: dict, typed_key: str) -> None:
         """Keep the backup model's key with its address and check the model answers."""

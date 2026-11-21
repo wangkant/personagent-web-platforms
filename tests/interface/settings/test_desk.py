@@ -5,19 +5,23 @@ from __future__ import annotations
 import io
 import json
 import os
+import sqlite3
+import time
 import zipfile
 
 import pytest
 from dotenv import dotenv_values
 
 from harness.app import TOKEN
-from mibo import i18n, shortcut
+from mibo import chatlog, db, i18n, shortcut
 from mibo import setup_wizard as sw
 from mibo import welcome
 from mibo.panels import desk
 
 HEADERS = {welcome.TOKEN_HEADER: TOKEN}
 KEY = "sk-desk-secret-0123456789"
+SAID = "said only in the chat record"
+CONV = "private:browser:desk"
 MCP_KEY = "ghp-desk-secret-0123456789"
 
 
@@ -61,14 +65,29 @@ def seed(home):
     (runtime / "desktop" / "webview" / "Cookies").write_text("site sign-in", encoding="utf-8")
     (runtime / "desktop" / "app.log").write_text("log line\n", encoding="utf-8")
     (runtime / "desktop" / "welcome.json").write_text('{"url": "x"}', encoding="utf-8")
-    (runtime / "desktop" / "browser-chat.json").write_text('{"history": []}', encoding="utf-8")
+    # The page's copy of a chat and the chat record, where the app keeps them (runtime/mibo.db).
+    _page_chat(runtime, "tea at four")
+    chatlog.ChatLog(runtime).take(CONV, [{"seq": 1, "t": time.time(), "user_id": "browser:desk", "text": SAID}])
     (runtime / "desktop" / "app.json").write_text('{"toured": true}', encoding="utf-8")
     (runtime / "memory.json").write_text('{"a": "likes tea"}', encoding="utf-8")
     (runtime / "dashboard.token").write_text("dash-token", encoding="utf-8")
-    (runtime / "log").mkdir()
-    (runtime / "log" / "x.jsonl").write_text("{}", encoding="utf-8")
     (home / "data").mkdir()
     (home / "data" / "examples.en.jsonl").write_text("", encoding="utf-8")
+
+
+def _page_chat(runtime, text: str) -> None:
+    chat = welcome.PageChat(db.at(runtime))
+    chat.append([{"role": "user", "text": text}])
+    chat.save()
+
+
+def _page_texts(path) -> list[str]:
+    """The page's messages a database file holds."""
+    conn = sqlite3.connect(path)
+    try:
+        return [json.loads(body)["text"] for (body,) in conn.execute("SELECT body FROM page_messages ORDER BY seq")]
+    finally:
+        conn.close()
 
 
 def post(client, path, payload=None):
@@ -164,10 +183,14 @@ def test_a_backup_holds_the_home_but_no_keys_logs_sign_ins_or_chat_record(client
     archive = zipfile.ZipFile(path)
     names = set(archive.namelist())
     assert {desk.MANIFEST, ".env", "persona.txt", "mcp.json", "skills/notes/SKILL.md", "runtime/memory.json",
-            "runtime/desktop/browser-chat.json", "runtime/desktop/app.json", "data/examples.en.jsonl"} <= names
+            "runtime/mibo.db", "runtime/desktop/app.json", "data/examples.en.jsonl"} <= names
     for left in ("runtime/desktop/app.log", "runtime/desktop/welcome.json",
-                 "runtime/desktop/webview/Cookies", "runtime/log/x.jsonl"):
+                 "runtime/desktop/webview/Cookies", "runtime/mibo.db-wal", "runtime/mibo.db-shm"):
         assert left not in names, left
+    # The database whole, through SQLite's backup API: the page's chats, and not one byte of the chat record.
+    copy = places / "copy.db"
+    copy.write_bytes(archive.read("runtime/mibo.db"))
+    assert _page_texts(copy) == ["tea at four"] and SAID.encode() not in copy.read_bytes()
     env = archive.read(".env").decode("utf-8")
     assert KEY not in env and MCP_KEY not in env and "LLM_MODEL=m" in env and "LLM_API_KEY=" in env
     assert json.loads(archive.read(desk.MANIFEST))["secrets"] is False
@@ -201,6 +224,7 @@ def test_a_restore_is_done_by_the_next_start_and_keeps_the_keys_here(client, wor
     home = workspace.home
     name = post(client, "/backup", {"to": "desktop"}).json()["name"]
     (home / "runtime" / "memory.json").write_text('{"b": "later"}', encoding="utf-8")
+    _page_chat(home / "runtime", "said after the backup")
     (home / "skills" / "later").mkdir()
     (home / "skills" / "later" / "SKILL.md").write_text("later", encoding="utf-8")
     answer = post(client, "/restore", {"place": "desktop", "name": name})
@@ -214,7 +238,9 @@ def test_a_restore_is_done_by_the_next_start_and_keeps_the_keys_here(client, wor
     values = dotenv_values(home / ".env")
     assert values["LLM_API_KEY"] == KEY and values["MIBO_MCP_GITHUB_TOKEN"] == MCP_KEY
     assert (home / "runtime" / "desktop" / "webview" / "Cookies").exists()
-    assert (home / "runtime" / "log" / "x.jsonl").exists()
+    # The page's chats as the backup has them; the chat record, never in a backup, as it was.
+    assert _page_texts(home / "runtime" / "mibo.db") == ["tea at four"]
+    assert [r["text"] for r in chatlog.ChatLog(home / "runtime").read(CONV)] == [SAID]
     assert not (home / "runtime" / "desktop" / "pending.json").exists()
     # The home as it was just before is kept in a backup of its own, and it is the present, not the backup.
     safety = list((home / "backups").glob("mibo-backup-*-before-restore.zip"))
@@ -262,7 +288,7 @@ def test_a_reset_backs_up_first_when_asked_then_leaves_only_the_backups(client, 
     assert (home / ".env").exists(), "nothing is deleted before the next start"
     desk.apply_pending(home)
     assert (home / "backups" / "mibo-backup-kept.zip").exists() and (home / "runtime" / "desktop" / "app.log").exists()
-    for gone in (".env", "persona.txt", "mcp.json", "skills", "data", "runtime/memory.json", "runtime/log",
+    for gone in (".env", "persona.txt", "mcp.json", "skills", "data", "runtime/memory.json", "runtime/mibo.db",
                  "runtime/desktop/webview", "runtime/desktop/app.json", "runtime/desktop/pending.json"):
         assert not (home / gone).exists(), gone
 

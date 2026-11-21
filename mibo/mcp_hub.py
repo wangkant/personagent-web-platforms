@@ -75,8 +75,6 @@ RELIST_S = 3.0
 #: What a card asks, for the notification when the app window is not in front.
 CARD_WHAT = {"mcp_start": ("启动「{server}」", "Start “{server}”"), "mcp_tool": ("使用工具「{tool}」", "Use the tool “{tool}”"),
              "mcp_ask": ("「{server}」请求填写信息", "“{server}” asks for information")}
-#: With this many tools or fewer in all, the model is handed them directly; above it, a search.
-DIRECT_TOOLS = 12
 #: Failures that need the person before a start is worth trying again.
 NEEDS_PERSON = ("not_found", "missing_value", "oauth", "elevated", "http")
 #: How a sign-in the person started can end without one, as the page names it ("failed" otherwise).
@@ -432,25 +430,16 @@ class Hub:
         return [r for r in self.runners.values() if r.state == "connected" and r.tools]
 
     def offer(self) -> dict:
-        """What the reply model is offered this turn: one line per server, and the tools themselves when
-        there are few; nothing at all when no server is connected or waiting."""
-        lines, direct = [], []
-        total = sum(len(r.tools) for r in self.connected())
+        """What the reply model is told of the servers: `names`, every server not switched off (fixed while the
+        configuration is), and `servers`, how each connected or waiting one stands now (find_tools' result)."""
+        lines = []
         for runner in self.runners.values():
             if runner.state == "connected" and runner.tools:
                 lines.append({"name": runner.name, "about": runner.about or _sample(runner.tools),
                               "tools": len(runner.tools)})
             elif runner.state in ("waiting", "starting") and not runner.spec.get("disabled"):
                 lines.append({"name": runner.name, "about": "", "tools": 0, "state": runner.state})
-        if 0 < total <= DIRECT_TOOLS:
-            names: set = set()
-            for runner in self.connected():
-                for tool in runner.tools:
-                    if self.grants.mode(runner.name, tool)[0] == mt.NEVER:
-                        continue
-                    direct.append({"fn": _function_name(runner.name, tool["name"], names), "server": runner.name,
-                                   **_shown(tool)})
-        return {"servers": lines, "total": total, "direct": direct if total <= DIRECT_TOOLS else []}
+        return {"names": [r.name for r in self.runners.values() if not r.spec.get("disabled")], "servers": lines}
 
     def find(self, query: str, server: str = "", k: int = 5) -> dict:
         """The few tools matching a search, with their parameters; a server's whole list when only a server
@@ -540,10 +529,14 @@ class Hub:
                 how = "review" if passed.decision == "go" else how
             if mode == mt.AUTO and how == mt.AUTO:
                 card = self._tool_card(runner, tool, arguments, changed)
+                if passed is not None:
+                    # Why the reviewer did not pass it, in one line (toolcard.js draws it).
+                    card["review"] = passed.line(str(self.workspace.config().get("AGENT_LANG") or "zh"))
                 answer = await self.ask(card, conversation)
                 if answer in (None, "no"):
                     status = "declined" if answer == "no" else "unanswered"
-                    self._log(server, tool_name, arguments, status)
+                    self._log(server, tool_name, arguments, status, "review" if passed is not None else "",
+                              passed.reason if passed is not None else "")
                     return {"status": status}
                 how = answer
                 if card["read_default"]:
@@ -753,19 +746,6 @@ def _shown(tool: dict) -> dict:
             "description": tool["description"][:mt.OFFER_DESCRIPTION_CHARS],
             "parameters": mt.offer_schema(tool["inputSchema"]) or {"type": "object", "properties": {}},
             "readonly": tool["hints"].get("readOnlyHint") is True}
-
-
-def _function_name(server: str, tool: str, taken: set) -> str:
-    """A function name every vendor takes (letters, digits, _ and -, at most 64), of our own making:
-    mcp__<server>__<tool>, cut and made unique when it has to be."""
-    import hashlib
-    srv, fn = (re.sub(r"[^A-Za-z0-9_-]", "_", s) for s in (server, tool))
-    name = f"mcp__{srv}__{fn}"
-    if len(name) > 64 or name in taken:
-        tail = hashlib.sha256(f"{server}/{tool}".encode()).hexdigest()[:6]
-        name = f"mcp__{srv[:20]}__{fn[:30]}_{tail}"
-    taken.add(name)
-    return name
 
 
 def _masked(url: str) -> str:

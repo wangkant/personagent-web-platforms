@@ -190,7 +190,8 @@ class Reader:
         topics = feed.load_topics(self.runtime / feed.TASTE_FILE) if topics is None else topics
         self.topics, self.avoid, self.likes = ([t.casefold() for t in words] for words in (
             topics, profile.avoided(self.runtime), profile.liked(self.runtime)))
-        sources = catalog.all_sources(catalog.load_choice(self.runtime)["own"])
+        # Every source this home knows, by key: the 推荐记录 list names a find's source by it (recommend.Why).
+        self.sources = sources = catalog.all_sources(catalog.load_choice(self.runtime)["own"])
         self.langs = {k: s.lang for k, s in sources.items()}
         self.brings = {k: subjects.of("", " ".join((*s.name, *s.about))) for k, s in sources.items()}
         self.brought = self.lately(feed._load(self.runtime / feed.TASTE_FILE) if events is None else events)
@@ -718,7 +719,7 @@ class Ranker:
             served.pop(shaped["id"], None)
             served[shaped["id"]] = {"r": rank, "p": slot, "s": round(info["s"], 4),
                                     "lift": round(info["s"] - info["mean"], 4),
-                                    "top": [[k, round(v, 3)] for k, v in top]}
+                                    "top": [[k, round(v, 3)] for k, v in top], "t": info["term"]}
             while len(served) > SERVED_MAX:
                 served.pop(next(iter(served)))
 

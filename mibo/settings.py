@@ -98,6 +98,9 @@ class AgentSettings:
     #: as a whole gets one and a half of it (``turns._TURN_BUDGET_CALLS``).
     llm_timeout_s: float = _env(
         lambda env: env_float("LLM_TIMEOUT_S", 120.0, minimum=1.0, env=env))
+    #: The main model's context window in tokens, for a model whose host does not list it; 0 = what the host
+    #: lists, else what an overflow error stated, else 32768 assumed (context.window).
+    context_window: int = 0
 
     # ---- identity ---------------------------------------------------------
     persona_name: str = ""
@@ -208,6 +211,8 @@ class AgentSettings:
             persona_name=_str("PERSONA_NAME"),
             persona_avatar=_str("PERSONA_AVATAR"),
             llm_dm_model=_str("LLM_DM_MODEL"),
+            context_window=env_int("CONTEXT_WINDOW", declared["context_window"], minimum=4096,
+                                   maximum=100_000_000, env=env),
             memory_file=_str("MEMORY_FILE", declared["memory_file"]),
             memory_max_per_conversation=env_int(
                 "MEMORY_MAX_PER_CONVERSATION",

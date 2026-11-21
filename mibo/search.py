@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import re
 import time
+import types
 from html import unescape
 from urllib.parse import urlsplit
 
@@ -39,6 +41,19 @@ _DDG_BACKENDS = "yahoo, startpage, mojeek, duckduckgo"
 # {"api": "brave" | "tavily", "key": "..."}. Without one the keyless engines above answer.
 SEARCH_KEY = "web_search"
 _TAG = re.compile(r"<[^>]+>")
+
+
+def _ddgs():
+    """ddgs's DDGS, its HTTP client resolving names through the system's resolver (primp's documented
+    dns_resolver="system"). primp's own resolver, on by default in its wheels, sends each lookup from a UDP socket
+    bound on every address, and on Windows that brings the firewall's prompt asking whether Python may take
+    connections from the network. ddgs makes its primp clients itself and takes no resolver, so the name it makes
+    them by is given the option."""
+    import primp
+    from ddgs import DDGS, http_client
+    http_client.primp = types.SimpleNamespace(**{**vars(primp),
+                                                 "Client": functools.partial(primp.Client, dns_resolver="system")})
+    return DDGS
 
 
 async def _brave(client: httpx.AsyncClient, key: str, query: str, count: int) -> list[dict]:
@@ -99,9 +114,13 @@ TOOLS = [
         "name": "read_page",
         "description": (
             "Read one public web page and get its main text: a link they sent, a page they ask "
-            "about, or a search result whose snippet is not enough."),
+            "about, or a search result whose snippet is not enough. A page too long to give whole comes as its "
+            "outline and the lines that match their question; read on with section or look_for."),
         "parameters": {"type": "object", "properties": {
-            "url": {"type": "string", "description": "the page's full http(s) address"}},
+            "url": {"type": "string", "description": "the page's full http(s) address"},
+            "section": {"type": "integer", "description": "a long page's section to read whole, by its number in "
+                                                          "the outline a read of it gave"},
+            "look_for": {"type": "string", "description": "words to find in a long page, besides their question"}},
             "required": ["url"]}}},
     {"type": "function", "function": {
         "name": "note_reaction",
@@ -148,8 +167,9 @@ TOOLS = [
             "read_page."),
         "parameters": {"type": "object", "properties": {
             "url": {"type": "string", "description": "the full http(s) address, such as the site's home page"},
-            "from": {"type": "integer", "description": "to read on in a long page: the character the last read "
-                                                       "of it ended at"}},
+            "section": {"type": "integer", "description": "a long page's section to read whole, by its number in "
+                                                          "the outline a read of it gave"},
+            "look_for": {"type": "string", "description": "words to find in a long page, besides their question"}},
             "required": ["url"]}}},
     {"type": "function", "function": {
         "name": "pages_they_read",
@@ -178,9 +198,9 @@ TOOLS = [
 from .web import connect as _connect  # noqa: E402
 
 
-# Search rows and page text one call hands the model; a longer page is cut there and the cut is said.
+# Search rows one call hands the model. A page's words go through web/pagetext.py: whole when they fit the reply
+# model's room, else its outline and the lines that match.
 _ROWS_A_SEARCH = 6
-_PAGE_CHARS = 20_000
 # What a read with the person's session can answer instead of a page.
 _SESSION_ERRORS = {
     "off": "(they turned off letting you use their browsing; say so)",
@@ -203,6 +223,9 @@ _ERRAND_SAID = {
     "done": "done",
     "failed": "it did not work out",
     "declined": "they declined on the card, so nothing was sent or changed",
+    "waiting": "it waits for their yes on a card about one act (the result names it), and nothing of that act was "
+               "pressed: tell them what it waits on, and that the card is still there to press or they can answer "
+               "you here",
     "handover": "handed back to them",
     "asked": "it needs something from them",
     "paused": "they took over the page, so it paused; they can say 继续 to go on",
@@ -215,19 +238,27 @@ _ERRAND_SAID = {
     "acting_off": "they set the app's browser so that you do not act there (the mode by the chat box); say so, and "
                   "do not do it another way",
 }
-def _page_words(page: dict) -> str:
-    """A page from the app's browser as the model reads it: title, address, then its text or its rows."""
+def _page_words(page: dict, question: str, room: int, args: dict) -> str:
+    """A page from the app's browser as the model reads it: title, address, then its rows, or its text through
+    web/pagetext.py (whole when it fits `room` tokens, else the section `args` names or the outline and the lines
+    that match `question` and `args`' look_for), with a note of what was given."""
+    from .web import pagetext
     rows = page.get("rows") or []
     listed = "\n".join(f"{n}. " + " | ".join(str(row.get(k)) for k in ("title", "author", "time") if row.get(k))
                        + (f" ({row['link']})" if row.get("link") else "")
                        for n, row in enumerate(rows[:30], 1))
-    body = listed or "\n\n".join(t for t in (page.get("description"), page.get("text")) if t)
-    # A long page comes a part at a time: which part this is, and where the next one starts.
-    start, end = page.get("from", 0), page.get("from", 0) + len(page.get("text") or "")
-    part = ("" if listed or not page.get("of") else
-            f"\n\n(characters {start + 1} to {end} of the page's {page['of']}"
-            + (f"; the rest was not read: call again with from={end} to read on)" if end < page["of"] else "; its end)"))
-    return f"{page.get('title', '')}\n{page['url']}\n\n{body[:_PAGE_CHARS]}{part}"
+    if listed:
+        return f"{page.get('title', '')}\n{page['url']}\n\n{listed}"
+    body = "\n\n".join(t for t in (page.get("description"), page.get("text")) if t)
+    given, note = pagetext.give(body, question, room, *_part(args))
+    return f"{page.get('title', '')}\n{page['url']}\n\n{given}\n\n({note})"
+
+
+def _part(args: dict) -> tuple[int, str]:
+    """The section a page tool's call asks for (-1 for none) and the words it looks for."""
+    part = args.get("section")
+    return (part if isinstance(part, int) and not isinstance(part, bool) and part >= 0 else -1,
+            " ".join(str(args.get("look_for") or "").split())[:200])
 
 
 class WebSearch:
@@ -259,7 +290,7 @@ class WebSearch:
         """DuckDuckGo's (ddgs) results, or [] on any failure. Its engines often answer nothing at random
         (measured 2026-11-19: 8 of 15 queries at the first try, 15 of 15 within three tries), so an empty
         answer is asked again: the engines in the other order, then ddgs's own pick in no region."""
-        from ddgs import DDGS
+        DDGS = _ddgs()
         region = _DDG_REGIONS.get(getattr(self, "chat_lang", ""), "wt-wt")
         if region in ("cn-zh", "tw-tzh", "jp-jp", "kr-kr") and not re.search(
                 r"[぀-ヿ㐀-鿿가-힯]", query):
@@ -316,10 +347,9 @@ class WebSearch:
             logger.info("[Agent] read_page %s -> %d chars", site_name(final), len(text))
             lookups.source(title or site_name(final), final, read=True)
             today.read_in_chat(self, final, title, text, time.time())
-            if len(text) > _PAGE_CHARS:
-                text = (f"{text[:_PAGE_CHARS]}\n[cut here: the page goes on for {len(text) - _PAGE_CHARS} more "
-                        "characters that were not read]")
-            return fence_pages(f"{title}\n{final}\n\n{text}")
+            from .web import pagetext
+            given, note = pagetext.give(text, lookups.said, self._page_room(), *_part(args))
+            return fence_pages(f"{title}\n{final}\n\n{given}\n\n({note})")
         if name == "note_reaction":
             return self._note_reaction(args, lookups)
         if name == "bring_find":
@@ -345,8 +375,7 @@ class WebSearch:
             if not signin.chose(home / "runtime" / "desktop", url, "task"):
                 return "(they turned off your reading this site on your own; ask them, do not read it another way)"
             lookups.doing("read", site_name(url))
-            start = args.get("from") if isinstance(args.get("from"), int) and args.get("from") > 0 else 0
-            page = await asyncio.to_thread(browsed.read_signed_in, home, url, start)
+            page = await asyncio.to_thread(browsed.read_signed_in, home, url)
             if page.get("error") in (*signin.WAITED, "wall") and not schedule_tool.run_of():
                 # A sign-in first: the page comes to the pane, they sign in, and it is read again.
                 page = await signin.read_after(home, url, lookups.said, page)
@@ -354,7 +383,7 @@ class WebSearch:
                 logger.info("[Agent] read_with_their_session %s -> %s", site_name(url), page["error"])
                 return _SESSION_ERRORS.get(page["error"], f"(not read: {page['error']})")
             lookups.source(page.get("title") or site_name(page["url"]), page["url"], read=True)
-            return fence_pages(_page_words(page))
+            return fence_pages(_page_words(page, lookups.said, self._page_room(), args))
         if name == "pages_they_read":
             lookups.doing("pages")
             rows = await asyncio.to_thread(browsed.recent_pages, home, max(1, min(int(args.get("n") or 15), 30)))
@@ -422,8 +451,9 @@ class WebSearch:
 
         class Pane:
             async def begin(self, task: str) -> dict:
+                # Going on keeps the pane's run: its steps, and the person's answers to its acts.
                 return await asyncio.to_thread(remote._post, "begin", 40, task=task, start=start, lang=lang,
-                                               go_on=bool(before))
+                                               go_on=bool(last))
             look, act, step, end, picture = remote.look, remote.act, remote.step, remote.end, remote.picture
 
             async def sign_in(self, wall: str) -> dict:
@@ -439,7 +469,9 @@ class WebSearch:
                 # Stopped from the chat: the pane hears it now, not at the end of a step that never comes.
                 threading.Thread(target=remote._post, args=("end", 10), kwargs={"status": "stopped", "note": ""},
                                  daemon=True).start()
-        vars(self)["_errand"] = {"task": task, "steps": outcome.get("steps", [])[-8:], "at": time.time()}
+        # With how it ended, for what they say next beside the page (loop._beside_page).
+        vars(self)["_errand"] = {"task": task, "steps": outcome.get("steps", [])[-8:], "at": time.time(),
+                                 "status": outcome["status"], "result": str(outcome.get("result") or "")[:300]}
         # Under the reply, the steps as the column beside the page showed them, the last that fit.
         lines, shown = [], (await asyncio.to_thread(remote._post, "steps", 10)).get("steps") or []
         over = ""
@@ -454,7 +486,7 @@ class WebSearch:
             lines.pop(0)
         lookups.trace.append({"tool": "operate", "what": task[:80], "out": "\n".join(lines), "status": outcome["status"],
                               "confirmed": "\n".join(step["text"] for step in shown if step.get("card"))})
-        if outcome["status"] in ("stopped", "paused", "declined"):
+        if outcome["status"] in ("stopped", "paused", "declined", "waiting"):
             lookups.errand_held = outcome["status"]
         logger.info("[Agent] use_browser -> %s after %d model calls", outcome["status"], outcome.get("calls", 0))
         return outcome
@@ -519,6 +551,14 @@ class WebSearch:
                 "this one, by its title: a sentence of your own on why it is for them. Do not search for "
                 "or name anything else, and no link.\n"
                 + fence_pages(f"{facts}\n{' '.join((item.description or item.text).split())[:400]}"))
+
+    def _page_room(self) -> int:
+        """Tokens of page one tool result may carry (web/pagetext.room), from the reply model as the app's check
+        measured it."""
+        from . import abilities
+        from .web import operate, pagetext
+        able = abilities.record(today.runtime_of(self), self._endpoint_for(self.llm_dm_model)[0], self.llm_dm_model)
+        return pagetext.room(able, operate.budget(able)["answer"])
 
     async def _read_for_chat(self, url: str, said: str = "") -> tuple[str, str, str] | None:
         """(title, readable text, final address) of a public page (web/fetch.py): fetched plainly, and read

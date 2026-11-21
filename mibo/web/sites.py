@@ -22,6 +22,7 @@ with Protego for the group of AGENT before the one for every robot.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import random
@@ -413,8 +414,10 @@ async def read_entry(runtime: Path, tab: Tab, entry: dict, words: str = "", *, s
         return reading.Page(url, wall="error", evidence=" ".join(str(exc).split())[:EVIDENCE_MAX])
     from ..sources.base import parse_feed
     try:
-        finds = parse_feed(str(text or ""), url)
-    except ElementTree.ParseError:
+        # The tab has decoded the document already, whatever encoding it declares.
+        finds = await asyncio.to_thread(parse_feed, str(text or "").encode(), url,
+                                        content_type="application/xml; charset=utf-8")
+    except ValueError:
         return reading.Page(tab.url, wall="error", evidence="not a feed")
     rows = [{"link": f.item.url, "title": f.item.title, "author": f.item.author, "time": f.item.published,
              "text": f.item.description[:300], "picture": f.picture} for f in finds]

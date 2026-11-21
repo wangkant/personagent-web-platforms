@@ -25,15 +25,20 @@ whose reading is send, comment, like (and follow) or post may also be let
 through by the person's 始终允许 for that reading on one site (`Allowed`,
 revocable in Settings).
 
-Every other press is pressed, and a card or the reviewer comes only if a
-request that is not a GET really leaves on it (operate.Hands holds it),
-whatever the control's name: a 好的 that deletes asks as a 提交 does, as Gemini
-and Claude in Chrome confirm at the point of risk. A form sent by GET is
-"watch", the same; so are a right click, a drag from one control onto another
-and a keyboard shortcut (`chord`); a chord that ends in Enter or Space is that
-key, and one that uses the clipboard is refused. The readings stay because a
-press may send nothing a request shows (a message over a socket, a like sent
-by GET), so such a press still goes to the reviewer before it is pressed.
+What is judged is the act and what it does for the person, as Claude in Chrome,
+ChatGPT agent and Gemini's computer use stop for sending, posting, buying,
+deleting and account changes and never for the requests a page makes around a
+click: by its name, by its place (a confirm in a box that asks about paying,
+deleting or the account is that act: a 好的 that deletes asks as 删除 does),
+by the form it submits and by what was typed in the run. Every other press is
+pressed, and the page's own traffic counts only where it carries the act
+(operate.Hands): what this run typed, attached or chose, what the press saves
+to the page's own site, and a DELETE; its traffic to other hosts (monitoring,
+beacons) never does. So are a drag from one control onto another and a keyboard shortcut
+(`chord`), which submit as a form does; a right click only opens a menu. A
+chord that ends in Enter or Space is that key, and one that uses the clipboard
+is refused. The readings go to the reviewer before the press because a press
+may send nothing a request shows (a message over a socket, a like sent by GET).
 
 `classify` sorts one action by what the page says of its target: its
 accessible name, role and the form facts pageops.FACTS_JS reads. The
@@ -93,6 +98,8 @@ CONSENT_PATH = re.compile(r"oauth|authori[sz]e|consent", re.I)
 # A confirm next to an amount pays: the floor's own rule, never a reading.
 GENERIC_CONFIRM = re.compile(r"^(?:confirm|ok|okay|continue|next|proceed|agree|submit|yes|确认|确定|继续|下一步)"
                              r"(?:\b|$)", re.I)
+# Ours: words that answer a box's question; such a press is the act the box asks about.
+AFFIRM = re.compile(r"^(?:confirm|ok|okay|yes|sure|continue|确认|确定|好的|好|是|是的|继续)(?:\b|$)", re.I)
 DELETE_CLASSES = re.compile(r"(^|[\s_-])(delete|remove|destroy|trash|discard)([\s_-]|$)", re.I)
 ACCOUNT_WORDS = _words(["sign out", "log out", "logout", "signout", "change password", "update password",
                         "save settings", "save changes", "update profile", "block", "report", "mute"],
@@ -229,6 +236,11 @@ def _by_name(name: str, facts: dict, url: str) -> tuple[str, str] | None:
         return "delete", f"the name {name!r} is destructive vocabulary"
     if ACCOUNT_WORDS.search(name):
         return "account", f"the name {name!r} changes the account"
+    # A confirm is the act its box asks about (the item it sits in, as FACTS_JS reads it).
+    row = " ".join(str(facts.get("row") or "").split())
+    placed = _by_name(row, {}, url) if row and AFFIRM.match(name.strip()) else None
+    if placed:
+        return placed[0], f"{name!r} answers a box that asks about it ({row[:60]!r}): {placed[1]}"
     return None
 
 

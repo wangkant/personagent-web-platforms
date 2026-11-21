@@ -162,6 +162,19 @@ async def test_a_clean_entry_installs_its_files_and_nothing_in_them_runs(tmp_pat
     assert not marker.exists()
 
 
+async def test_a_skill_from_the_market_is_listed_with_the_catalogs_chinese_title(tmp_path, monkeypatch) -> None:
+    one = market.entry(_entry(_skill()))
+    monkeypatch.setattr(market, "by_id", lambda home, ident: one)
+
+    async def fetched(home, entry):
+        return _skill()
+
+    monkeypatch.setattr(market, "fetch", fetched)
+    await market.install(tmp_path, one["id"])
+    listed = next(s for s in store.all_skills(tmp_path) if s.name == "tidy-notes")
+    assert listed.title_zh == "整理笔记"
+
+
 def test_a_skill_file_that_does_not_read_is_noted_not_raised(tmp_path: Path) -> None:
     def problems(folder: str, text: str) -> tuple[list, list]:
         place = tmp_path / folder

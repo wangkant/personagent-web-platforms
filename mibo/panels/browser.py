@@ -12,7 +12,9 @@ And the character operating the pane for the person (web/operate.py): the
 service's loop sends its steps to /api/browser/op, where `Operating` keeps the
 run's Hands, every action through the gate; a card for an action with an effect
 outside waits at /api/browser/confirm, which only the app window's own page
-can answer (its window key), never the service. The kinds the person let
+can answer (its window key), never the service; one card at a time, and a card
+whose time ran out stays answerable after the run ends waiting on it (`left`),
+its answer kept for the errand the person goes on with (`kept`). The kinds the person let
 through per site are listed and revoked at /api/browser/allowed, and the
 person's mode for the pane (acting.py) is read and set at /api/browser/acting;
 a run begins with its plan, on a card only when the start address is the
@@ -105,6 +107,11 @@ class Operating:
         self.lang = "zh"
         # The card answered last in this run, for the chat's one line about it: {"id", "yes", "said"}.
         self.answered: dict | None = None
+        # The answers to this errand's acts (operate.Hands.kept), kept while the person goes on with it; the card
+        # a run ended waiting on, still answerable; one card at a time.
+        self.kept: dict = {}
+        self.left: dict | None = None
+        self.one = asyncio.Lock()
 
     def held(self) -> str:
         pane = self.window.pane
@@ -127,6 +134,12 @@ class Operating:
             await asyncio.to_thread(self.window.show)
         self.lang = "zh" if lang.startswith("zh") else "en"
         self.answered = None
+        if not go_on:
+            # A new errand: nothing answered before counts, and a card left waiting goes with the errand it was of.
+            self.kept, self.left = {}, None
+        else:
+            # Going on is the person's new word: an act they said no to is asked again (never done unasked).
+            self.kept = {act: answer for act, answer in self.kept.items() if answer.get("yes")}
         here = await asyncio.to_thread(pane.address)
         await asyncio.to_thread(pane.operate, task, go_on)
         if not go_on:
@@ -157,7 +170,7 @@ class Operating:
         self.hands = Hands(PaneTab(pane), ask=self.ask, allowed=self.allowed, attended=self.window.attended,
                            held=self.held, tell=tell, lang=lang,
                            downloads=lambda: (pane.op or {}).pop("downloads", []),
-                           mode=self.modes.mode, review=self.review)
+                           mode=self.modes.mode, review=self.review, kept=self.kept)
         return {"status": "ok", "url": await asyncio.to_thread(pane.address)}
 
     async def review(self, action: dict):
@@ -169,38 +182,63 @@ class Operating:
 
     async def ask(self, card: dict) -> dict | None:
         """The card shows beside the page, its control ringed on the page, until the person presses, the run
-        stops or time is up. The page stays in view."""
+        stops or time is up; one at a time, so a second never takes the place of one the person is reading. The
+        page stays in view. Time up with the card still up: {"waiting": the act}, and the card stays (`left`)."""
         from ..web.operate import CARD_S
-        said, act = SAID[self.lang], act_of(card, self.lang)
-        shown = {k: card.get(k) for k in ("id", "kind", "site", "to", "text", "button", "skippable")}
-        self.card, self.answer = card, asyncio.get_running_loop().create_future()
-        await asyncio.to_thread(self.window.pane.op_card, {**shown, "ringed": card.get("node") is not None},
-                                said["wait"].format(act=act))
-        if card.get("node") is not None:
-            await self.hands.page.hold_ring(card["node"])
-        answer = None
-        try:
-            began = asyncio.get_running_loop().time()
-            while asyncio.get_running_loop().time() - began < CARD_S and not self.held():
-                done, _ = await asyncio.wait({self.answer}, timeout=0.5)
-                if done:
-                    answer = self.answer.result()
-                    return answer
-            return None
-        finally:
-            self.card = self.answer = None
-            yes = bool(answer and answer.get("yes"))
-            if card.get("node") is not None and not yes and self.hands is not None:
-                await self.hands.page.hold_ring(None)
-            told = said["yes" if yes else "no" if answer else "none"].format(act=act)
-            self.answered = {"id": card["id"], "yes": yes, "said": told}
-            if self.window.pane is not None:
-                await asyncio.to_thread(self.window.pane.op_answered, "done" if yes else "cancelled", told)
+        async with self.one:
+            # A new card stands for the act now asked: one left from before goes.
+            self.left = None
+            said, act = SAID[self.lang], act_of(card, self.lang)
+            shown = {k: card.get(k) for k in ("id", "kind", "site", "to", "text", "button", "skippable")}
+            self.card, self.answer = card, asyncio.get_running_loop().create_future()
+            await asyncio.to_thread(self.window.pane.op_card, {**shown, "ringed": card.get("node") is not None},
+                                    said["wait"].format(act=act))
+            if card.get("node") is not None:
+                await self.hands.page.hold_ring(card["node"])
+            answer = None
+            try:
+                began = asyncio.get_running_loop().time()
+                while asyncio.get_running_loop().time() - began < CARD_S and not self.held():
+                    done, _ = await asyncio.wait({self.answer}, timeout=0.5)
+                    if done:
+                        answer = self.answer.result()
+                        return answer
+                if not self.held() and card.get("act"):
+                    answer = {"waiting": act}
+                    self.left = {**card, "said": act}
+                return answer
+            finally:
+                self.card = self.answer = None
+                yes = bool(answer and answer.get("yes"))
+                if card.get("node") is not None and not yes and self.hands is not None:
+                    await self.hands.page.hold_ring(None)
+                if answer is None or not answer.get("waiting"):
+                    told = said["yes" if yes else "no" if answer else "none"].format(act=act)
+                    self.answered = {"id": card["id"], "yes": yes, "said": told}
+                    if self.window.pane is not None:
+                        await asyncio.to_thread(self.window.pane.op_answered, "done" if yes else "cancelled", told)
 
     def answer_card(self, ident: str, yes: bool, never: bool, files: list[str]) -> bool:
+        if self.left is not None and self.left["id"] == ident and self.card is None:
+            # The card a run ended waiting on: the answer is kept for the act, and the errand goes on with it.
+            return self.keep(yes)
         if self.card is None or self.card["id"] != ident or self.answer is None or self.answer.done():
             return False
         self.answer.set_result({"yes": yes, "never": never, **({"files": files} if files else {})})
+        return True
+
+    def keep(self, yes: bool, said: bool = False) -> bool:
+        """The person's answer to the card a run ended waiting on, from the card or (`said`) their own words in the
+        chat beside the page, kept for its act. Paying, deleting, the account and access are answered on the card
+        alone: words leave such a card waiting."""
+        from ..acting import HARD
+        left = self.left
+        if left is None or said and left.get("kind") in HARD:
+            return False
+        self.left = None
+        self.kept[left["act"]] = {"yes": yes}
+        if self.window.pane is not None:
+            self.window.pane.op_kept(yes)
         return True
 
     async def end(self, status: str, note: str) -> None:
@@ -394,6 +432,12 @@ def mount(app, workspace, body) -> None:
                     or (start and (not browsed.web(start) or len(start) > 2000))):
                 raise ValueError("browse_invalid")
             return await run.begin(task, start, str(payload.get("lang") or "zh")[:8], payload.get("go_on") is True)
+        if op == "keep":
+            # The person's own words in the chat answered the card a run ended waiting on (loop._beside_page).
+            yes, left = payload.get("yes"), run.left
+            if not isinstance(yes, bool):
+                raise ValueError("browse_invalid")
+            return {"status": "ok", "said": left["said"]} if left and run.keep(yes, said=True) else {"status": "none"}
         if op == "steps":
             # The steps as the column showed them, for the steps under the chat's reply.
             pane = window_or_none().pane

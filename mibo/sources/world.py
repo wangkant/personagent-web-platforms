@@ -10,16 +10,14 @@ import re
 from datetime import datetime, timezone
 from typing import Callable
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
-from xml.etree import ElementTree
 
 import httpx
 
-from .base import PER_SOURCE, Find, Source, find, get_json, get_text, local_to, parse_feed, plain, written_in
+from .base import PER_SOURCE, Find, Source, find, get_json, local_to, plain, read_feed, written_in
 
 # Query parameters that only tell the publisher where a click came from; dropped
 # so the same story from two places is one item in the library.
 _TRACKING = ("utm_", "at_", "maca")
-_ATOM = "{http://www.w3.org/2005/Atom}"
 
 
 def _clean(url: str) -> str:
@@ -32,7 +30,7 @@ def _feed(key: str, name: tuple[str, str], about: tuple[str, str], group: str, u
           default: str = "", link: Callable[[str], str] = _clean) -> Source:
     """A source that is one feed address, its links cleaned of tracking."""
     async def fetch(http: httpx.AsyncClient) -> list[Find]:
-        found = parse_feed(await get_text(http, url), url, site=site or name[0])[:PER_SOURCE]
+        found = (await read_feed(http, url, site=site or name[0]))[:PER_SOURCE]
         for one in found:
             one.item.url = link(one.item.url)
             # NPR's feed sometimes names an image its page script never filled in.
@@ -173,36 +171,27 @@ async def _bluesky_hot(http: httpx.AsyncClient) -> list[Find]:
 
 # --- Pages and APIs that are not feeds.
 
-async def _xkcd(http: httpx.AsyncClient) -> list[Find]:
+def _alt(entry: dict) -> str:
     # The feed's summary is the comic itself; its title attribute is the joke's second half.
-    url = "https://xkcd.com/atom.xml"
-    text = await get_text(http, url)
-    found = parse_feed(text, url, site="xkcd")
-    alts = []
-    for entry in ElementTree.fromstring(text.encode("utf-8")).iter(f"{_ATOM}entry"):
-        match = re.search(r'title="([^"]*)"', entry.findtext(f"{_ATOM}summary") or "")
-        alts.append(match.group(1) if match else "")
-    for one, alt in zip(found, alts):
-        one.item.description = plain(alt)
-    return found[:PER_SOURCE]
+    match = re.search(r'title="([^"]*)"', entry.get("summary", ""))
+    return match.group(1) if match else ""
+
+
+async def _xkcd(http: httpx.AsyncClient) -> list[Find]:
+    return (await read_feed(http, "https://xkcd.com/atom.xml", site="xkcd", text=_alt))[:PER_SOURCE]
 
 
 _PARAGRAPH = re.compile(r"<p[^>]*>(.*?)</p>", re.S)
-_CONTENT = "{http://purl.org/rss/1.0/modules/content/}encoded"
+
+
+def _story(entry: dict) -> str:
+    # NASA's feed carries the whole page, menus and blurbs first; the longest paragraph is the story's own.
+    page = next((part.value for part in entry.get("content", [])), "")
+    return max((plain(p, 2000) for p in _PARAGRAPH.findall(page)), key=len, default="")
 
 
 async def _nasa(http: httpx.AsyncClient) -> list[Find]:
-    # NASA's feed carries the whole page, menus and blurbs first; the longest paragraph is the story's own.
-    url = "https://www.nasa.gov/feed/"
-    text = await get_text(http, url)
-    summaries = {}
-    for entry in ElementTree.fromstring(text.encode("utf-8")).iter("item"):
-        paragraphs = [plain(p, 2000) for p in _PARAGRAPH.findall(entry.findtext(_CONTENT) or "")]
-        summaries[entry.findtext("link")] = max(paragraphs, key=len, default="")
-    found = parse_feed(text, url, site="NASA")[:PER_SOURCE]
-    for one in found:
-        one.item.description = summaries.get(one.item.url, "")
-    return found
+    return (await read_feed(http, "https://www.nasa.gov/feed/", site="NASA", text=_story))[:PER_SOURCE]
 
 
 async def _espn(http: httpx.AsyncClient) -> list[Find]:

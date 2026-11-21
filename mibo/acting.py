@@ -50,6 +50,19 @@ def sensitive(site: str) -> bool:
     return bool(host) and bool(SENSITIVE.search(host))
 
 
+# Windows whose pictures always ask before they go to a model service: password managers, banks and payment, mail.
+SENSITIVE_WINDOW = re.compile(
+    r"password|passwort|keepass|bitwarden|1password|lastpass|dashlane|enpass|keeper|authenticator|密码|凭据|"
+    r"bank|paypal|alipay|wallet|payment|broker|银行|支付|钱包|证券|网银|"
+    r"outlook|thunderbird|foxmail|mailbird|\bmail\b|gmail|e-?mail|inbox|邮件|邮箱|收件箱", re.I)
+
+
+def sensitive_window(*names: str) -> bool:
+    """A window of a password manager, a bank or payment program, or a mail client, by its program's or title's
+    words."""
+    return any(SENSITIVE_WINDOW.search(str(name or "")) for name in names)
+
+
 def decide(mode: str, kind: str, site: str = "", area: str = "browser") -> str:
     """What an action of an outside `kind` gets in `mode`: "refuse" (read only), "review" (a kind the reviewer
     may pass, on a site that is not sensitive) or "ask" (a card). A gate's reading of a press (send, like, a
@@ -109,7 +122,13 @@ def asked(workspace) -> list[dict]:
 
 
 def reviewer(workspace):
-    """The reviewer's one model call, on the person's own model service as the app's settings name it."""
+    """The reviewer's one model call, on the person's own model service as the app's settings name it; in JSON
+    mode where the app's check measured the model keeps to it."""
+    from . import abilities
+    from .endpoints import chat_completions_url
     from .review import endpoint
     values = workspace.config()
-    return endpoint(values.get("LLM_BASE_URL", ""), values.get("LLM_API_KEY", ""), values.get("LLM_MODEL", ""))
+    base, model = values.get("LLM_BASE_URL", ""), values.get("LLM_MODEL", "")
+    json_mode = abilities.can(workspace.home / "runtime", chat_completions_url(base), model, "json") == "yes"
+    return endpoint(base, values.get("LLM_API_KEY", ""), model,
+                    extra={"response_format": {"type": "json_object"}} if json_mode else None)

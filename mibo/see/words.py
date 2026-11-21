@@ -19,16 +19,16 @@ SWITCH = {
 
 # The card at the first picture of a task: this once, always, or no.
 ASK = {
-    "zh": "「{window}」只能按画面操作，是否将此窗口的截图发送给模型服务 {service}？本次任务中将由{who}根据画面点击和拖动；输入文字和按回车键前仍会逐次请你确认。",
-    "zh-TW": "「{window}」只能依畫面操作，是否將此視窗的截圖傳送給模型服務 {service}？本次任務中將由{who}根據畫面點擊和拖曳；輸入文字和按 Enter 鍵前仍會逐次請你確認。",
-    "en": "{window} can only be worked by its picture. Send screenshots of this window to your model service, {service}? For this task {who} will click and drag by looking; typing and Enter still ask you each time.",
-    "ja": "「{window}」は画面でしか操作できません。このウィンドウの画像をモデルサービス {service} に送りますか？このタスクの間、{who}は画面を見てクリックやドラッグをします。入力と Enter は毎回確認します。",
-    "ko": "「{window}」은(는) 화면으로만 작업할 수 있습니다. 이 창의 이미지를 모델 서비스 {service}에 보낼까요? 이 작업 동안 {who}가 화면을 보고 클릭하고 끕니다. 입력과 Enter는 매번 묻습니다.",
-    "de": "{window} lässt sich nur nach Sicht bedienen. Bilder dieses Fensters an deinen Modelldienst {service} schicken? Für diese Aufgabe klickt und zieht {who} nach Sicht; Tippen und Enter fragen weiterhin jedes Mal.",
-    "es": "{window} solo se puede manejar mirando su imagen. ¿Enviar capturas de esta ventana a tu servicio de modelo, {service}? En esta tarea {who} hará clic y arrastrará mirando; escribir y pulsar Intro seguirán preguntándote cada vez.",
-    "fr": "{window} ne s'utilise qu'à vue. Envoyer des captures de cette fenêtre à ton service de modèle, {service} ? Pour cette tâche, {who} cliquera et glissera à vue ; taper du texte et Entrée te seront toujours demandés.",
-    "pt-BR": "{window} só pode ser usada pela imagem. Enviar capturas desta janela ao seu serviço de modelo, {service}? Nesta tarefa {who} vai clicar e arrastar olhando; digitar e Enter continuam perguntando toda vez.",
-    "ru": "С окном «{window}» можно работать только на глаз. Отправлять его снимки вашему сервису модели {service}? В этой задаче {who} будет нажимать и перетаскивать на глаз; ввод текста и Enter по-прежнему спрашивают каждый раз.",
+    "zh": "「{window}」只能按画面操作，是否将此窗口的截图发送给模型服务 {service}？本次任务中将由{who}根据画面点击、拖动和输入；发送内容前由自动审查核对你的原话，未通过时请你确认。",
+    "zh-TW": "「{window}」只能依畫面操作，是否將此視窗的截圖傳送給模型服務 {service}？本次任務中將由{who}根據畫面點擊、拖曳和輸入；傳送內容前由自動審查核對你的原話，未通過時請你確認。",
+    "en": "{window} can only be worked by its picture. Send screenshots of this window to your model service, {service}? For this task {who} will click, drag and type by looking; before anything is sent, the automatic review checks it against your own words and asks you when it does not pass.",
+    "ja": "「{window}」は画面でしか操作できません。このウィンドウの画像をモデルサービス {service} に送りますか？このタスクの間、{who}は画面を見てクリック、ドラッグ、入力をします。送信の前に自動レビューがあなたの言葉と照らし合わせ、通らないときは確認します。",
+    "ko": "「{window}」은(는) 화면으로만 작업할 수 있습니다. 이 창의 이미지를 모델 서비스 {service}에 보낼까요? 이 작업 동안 {who}가 화면을 보고 클릭하고 끌고 입력합니다. 보내기 전에 자동 검토가 사용자의 말과 대조하고, 통과하지 못하면 묻습니다.",
+    "de": "{window} lässt sich nur nach Sicht bedienen. Bilder dieses Fensters an deinen Modelldienst {service} schicken? Für diese Aufgabe klickt, zieht und tippt {who} nach Sicht; bevor etwas gesendet wird, gleicht die automatische Prüfung es mit deinen eigenen Worten ab und fragt dich, wenn es nicht durchgeht.",
+    "es": "{window} solo se puede manejar mirando su imagen. ¿Enviar capturas de esta ventana a tu servicio de modelo, {service}? En esta tarea {who} hará clic, arrastrará y escribirá mirando; antes de enviar algo, la revisión automática lo compara con tus propias palabras y te pregunta si no lo aprueba.",
+    "fr": "{window} ne s'utilise qu'à vue. Envoyer des captures de cette fenêtre à ton service de modèle, {service} ? Pour cette tâche, {who} cliquera, glissera et tapera à vue ; avant tout envoi, la vérification automatique le compare à tes propres mots et te demande s'il ne passe pas.",
+    "pt-BR": "{window} só pode ser usada pela imagem. Enviar capturas desta janela ao seu serviço de modelo, {service}? Nesta tarefa {who} vai clicar, arrastar e digitar olhando; antes de enviar algo, a revisão automática confere com as suas próprias palavras e pergunta a você quando não aprova.",
+    "ru": "С окном «{window}» можно работать только на глаз. Отправлять его снимки вашему сервису модели {service}? В этой задаче {who} будет нажимать, перетаскивать и вводить текст на глаз; перед отправкой автоматическая проверка сверит это с вашими словами и спросит вас, если не пропустит.",
 }
 
 # The same card when the model only looks (it did not point in the self-test): nothing is clicked.
@@ -47,31 +47,19 @@ LOOK = {
 
 # The card that lets the character work by sight in one window, for one task.
 LEASE = {
-    "zh": "{who}无法识别「{window}」中按钮的用途：该窗口未提供按钮名称。是否允许{who}在本次任务中根据画面点击和拖动？输入文字和按回车键时仍会逐次请你确认。",
-    "zh-TW": "{who}無法辨識「{window}」中按鈕的用途：該視窗未提供按鈕名稱。是否允許{who}在本次任務中根據畫面點擊和拖曳？輸入文字和按 Enter 鍵時仍會逐次請你確認。",
-    "en": "{who} can't tell what the buttons in {window} do: the window doesn't name them. Let {who} click and drag there by looking, for this task only? Typing and Enter will still ask you each time.",
-    "ja": "{who}には「{window}」のボタンが何をするのか分かりません（ウィンドウが名前を出していません）。このタスクの間だけ、画面を見てクリックやドラッグをしてよいですか？入力と Enter は毎回確認します。",
-    "ko": "{who}는 「{window}」의 버튼이 무엇을 하는지 알 수 없습니다(창이 이름을 알려 주지 않음). 이 작업 동안만 화면을 보고 클릭하고 끌어도 될까요? 입력과 Enter는 매번 물어봅니다.",
-    "de": "{who} erkennt nicht, was die Schaltflächen in {window} tun: das Fenster benennt sie nicht. Darf {who} dort nur für diese Aufgabe nach Sicht klicken und ziehen? Tippen und Enter fragen weiterhin jedes Mal.",
-    "es": "{who} no puede saber qué hacen los botones de {window}: la ventana no les da nombre. ¿Dejas que {who} haga clic y arrastre ahí mirando, solo para esta tarea? Escribir y pulsar Intro seguirán preguntándote cada vez.",
-    "fr": "{who} ne peut pas savoir ce que font les boutons de {window} : la fenêtre ne les nomme pas. Laisser {who} cliquer et glisser à vue, pour cette tâche seulement ? Taper du texte et Entrée te seront toujours demandés.",
-    "pt-BR": "{who} não sabe o que fazem os botões de {window}: a janela não dá nome a eles. Deixar {who} clicar e arrastar ali olhando, só nesta tarefa? Digitar e Enter continuam perguntando toda vez.",
-    "ru": "{who} не видит, что делают кнопки в «{window}»: окно не называет их. Разрешить {who} нажимать и перетаскивать там на глаз, только в этой задаче? Ввод текста и Enter всё равно будут спрашивать каждый раз.",
+    "zh": "{who}无法识别「{window}」中按钮的用途：该窗口未提供按钮名称。是否允许{who}在本次任务中根据画面点击和拖动？发送内容前由自动审查核对你的原话，未通过时请你确认。",
+    "zh-TW": "{who}無法辨識「{window}」中按鈕的用途：該視窗未提供按鈕名稱。是否允許{who}在本次任務中根據畫面點擊和拖曳？傳送內容前由自動審查核對你的原話，未通過時請你確認。",
+    "en": "{who} can't tell what the buttons in {window} do: the window doesn't name them. Let {who} click and drag there by looking, for this task only? Before anything is sent, the automatic review checks it against your own words.",
+    "ja": "{who}には「{window}」のボタンが何をするのか分かりません（ウィンドウが名前を出していません）。このタスクの間だけ、画面を見てクリックやドラッグをしてよいですか？送信の前に自動レビューがあなたの言葉と照らし合わせます。",
+    "ko": "{who}는 「{window}」의 버튼이 무엇을 하는지 알 수 없습니다(창이 이름을 알려 주지 않음). 이 작업 동안만 화면을 보고 클릭하고 끌어도 될까요? 보내기 전에 자동 검토가 사용자의 말과 대조합니다.",
+    "de": "{who} erkennt nicht, was die Schaltflächen in {window} tun: das Fenster benennt sie nicht. Darf {who} dort nur für diese Aufgabe nach Sicht klicken und ziehen? Bevor etwas gesendet wird, gleicht die automatische Prüfung es mit deinen eigenen Worten ab.",
+    "es": "{who} no puede saber qué hacen los botones de {window}: la ventana no les da nombre. ¿Dejas que {who} haga clic y arrastre ahí mirando, solo para esta tarea? Antes de enviar algo, la revisión automática lo compara con tus propias palabras.",
+    "fr": "{who} ne peut pas savoir ce que font les boutons de {window} : la fenêtre ne les nomme pas. Laisser {who} cliquer et glisser à vue, pour cette tâche seulement ? Avant tout envoi, la vérification automatique le compare à tes propres mots.",
+    "pt-BR": "{who} não sabe o que fazem os botões de {window}: a janela não dá nome a eles. Deixar {who} clicar e arrastar ali olhando, só nesta tarefa? Antes de enviar algo, a revisão automática confere com as suas próprias palavras.",
+    "ru": "{who} не видит, что делают кнопки в «{window}»: окно не называет их. Разрешить {who} нажимать и перетаскивать там на глаз, только в этой задаче? Перед отправкой автоматическая проверка сверит это с вашими словами.",
 }
 
-# Typing, or a key that may send, while working by sight: asked each time.
-TYPE = {
-    "zh": "{who}将在「{window}」中圈出的位置输入「{text}」。此操作基于画面识别，无法确定这段文字将发送到何处。",
-    "zh-TW": "{who}將在「{window}」中圈出的位置輸入「{text}」。此操作基於畫面辨識，無法確定這段文字將傳送到何處。",
-    "en": "{who} wants to type “{text}” at the ringed spot in {window}. It is working by sight and can't tell where the text goes.",
-    "ja": "{who}は「{window}」の丸で囲んだ場所に「{text}」と入力しようとしています。画面を見て操作しているため、文字がどこへ送られるかは分かりません。",
-    "ko": "{who}가 「{window}」의 동그라미 친 곳에 「{text}」를 입력하려고 합니다. 화면을 보고 작업하므로 글이 어디로 가는지 알 수 없습니다.",
-    "de": "{who} möchte „{text}“ an der markierten Stelle in {window} tippen. Es arbeitet nach Sicht und weiß nicht, wohin der Text geht.",
-    "es": "{who} quiere escribir «{text}» en el punto marcado de {window}. Trabaja mirando y no puede saber adónde va el texto.",
-    "fr": "{who} veut taper « {text} » à l'endroit entouré dans {window}. Il travaille à vue et ne peut pas savoir où va le texte.",
-    "pt-BR": "{who} quer digitar “{text}” no ponto marcado em {window}. Está trabalhando pela imagem e não sabe para onde o texto vai.",
-    "ru": "{who} хочет ввести «{text}» в отмеченном месте окна «{window}». Он работает на глаз и не знает, куда уйдёт текст.",
-}
+# A key that may send, pressed by sight, when the automatic review did not pass it.
 KEY = {
     "zh": "{who}将在「{window}」中按 {key}。此操作基于画面识别，无法确定是否会发送内容。",
     "zh-TW": "{who}將在「{window}」中按 {key}。此操作基於畫面辨識，無法確定是否會傳送內容。",

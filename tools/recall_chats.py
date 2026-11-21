@@ -4,13 +4,12 @@
     python tools/recall_chats.py run <home>       ask the probes on the running home, each in a new chat
     python tools/recall_chats.py forget <home>    on the running home: a forget and a deleted chat leave the search
 
-`seed` writes eight page chats with their chat records (runtime/log) into a fresh home that already has its .env.
+`seed` writes eight page chats with their chat records (runtime/mibo.db) into a fresh home that already has its .env.
 `run` asks five questions about them, each in a chat of its own that is deleted after, and prints one JSON object:
 for each probe the reply, whether it names the answer, and the steps under it; then how many replies named it.
-`forget` checks with search_past_chats's own search, read from the files: a fact is found, "忘掉" it in the chat,
-not found; a line of a chat is found, the chat deleted, not found, its record gone from disk.
+`forget` checks with search_past_chats's own search, read from the database: a fact is found, "忘掉" it in the
+chat, not found; a line of a chat is found, the chat deleted, not found, its record gone.
 """
-import hashlib
 import json
 import sys
 import time
@@ -47,9 +46,9 @@ PROBES = [("上个月我跟你说我在读的那本书叫什么来着？", "克�
 
 
 def seed(home: Path) -> None:
-    desk, log = home / "runtime" / "desktop", home / "runtime" / "log"
-    (desk / "chats").mkdir(parents=True, exist_ok=True)
-    log.mkdir(parents=True, exist_ok=True)
+    from mibo import chatlog, db, welcome
+    runtime = home / "runtime"
+    log, store = chatlog.ChatLog(runtime, 30), db.at(runtime)
     now = time.time()
     for ident, conversation, title, days, talk in CHATS:
         rows, t = [], now - days * DAY
@@ -57,14 +56,12 @@ def seed(home: Path) -> None:
             t += 60
             rows.append({"seq": n, "t": t, "user_id": "" if who == "m" else f"browser:{conversation}",
                          "name": "Mibo" if who == "m" else "林晓", "text": text, **({"self": True} if who == "m" else {})})
-        name = hashlib.sha256(f"private:browser:{conversation}".encode()).hexdigest()[:32] + ".jsonl"
-        (log / name).write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
-        saved = {"conversation": conversation, "seq": 0, "messages": [], "trimmed": True}
-        if ident == "main":
-            (desk / "browser-chat.json").write_text(json.dumps(saved, ensure_ascii=False), encoding="utf-8")
-        else:
-            saved.update(title=title, at=time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(t)))
-            (desk / "chats" / f"{ident}.json").write_text(json.dumps(saved, ensure_ascii=False), encoding="utf-8")
+        log.take(f"private:browser:{conversation}", rows)
+        chat = welcome.PageChat(store, ident)
+        chat.conversation = conversation
+        if ident != "main":
+            chat.title, chat.at = title, time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(t))
+        chat.save()
     print(f"seeded {len(CHATS)} chats into {home}")
 
 
@@ -97,25 +94,26 @@ def run(home: Path) -> None:
 
 
 def found(home: Path, query: str, when: str = "") -> str:
-    """What search_past_chats hands the model now, read from the home's files as the tool reads them."""
+    """What search_past_chats hands the model now, read from the home's database as the tool reads it."""
     from mibo import chatlog, pastchats
-    log = chatlog.ChatLog(home / "runtime" / "log", 30)
+    log = chatlog.ChatLog(home / "runtime", 30)
     at = {"log": log, "convs": sorted(log.private_chats("browser")), "here": "", "in_view": set(),
-          "tz": timezone(timedelta(hours=-8)), "lang": "zh", "desktop": home / "runtime" / "desktop"}
+          "tz": timezone(timedelta(hours=-8)), "lang": "zh", "runtime": home / "runtime"}
     return pastchats.search(at, query, when)[0]
 
 
 def forget(home: Path) -> None:
-    call, log = api(home), home / "runtime" / "log"
-    record = log / (hashlib.sha256(b"private:browser:c0000000000000000000000e").hexdigest()[:32] + ".jsonl")
+    from mibo import chatlog
+    call, log = api(home), chatlog.ChatLog(home / "runtime", 30)
     checks = {"fact found before": "野生菌子" in found(home, "云南菜")}
     call("chat", {"text": "忘掉野生菌子"})
     checks["fact found after 忘掉"] = "野生菌子" in found(home, "云南菜")
-    checks["fact left in any record"] = any("野生菌子" in p.read_text(encoding="utf-8") for p in log.glob("*.jsonl"))
+    checks["fact left in any record"] = any("野生菌子" in r["text"] for c in log.private_chats("browser")
+                                            for r in log.read(c))
     checks["chat line found before"] = "小星星" in found(home, "吉他")
     call("chats/delete", {"id": "5e6f7a8b9c0d1e2f"})
     checks["chat line found after delete"] = "小星星" in found(home, "吉他")
-    checks["deleted chat's record on disk"] = record.exists()
+    checks["deleted chat's record kept"] = bool(log.read("private:browser:c0000000000000000000000e"))
     print(json.dumps(checks, ensure_ascii=False, indent=1))
 
 

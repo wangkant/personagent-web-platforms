@@ -347,6 +347,132 @@ class Why:
                         "lean": self.leans.get(chip[2])},
                 "topic": topic and {"key": topic[0], "name": topic[1]}}
 
+    def told(self, said: dict, item: Item, shaped: dict, name: str, title_of) -> str:
+        """`facts` as the sentence the 推荐记录 list shows under a find; `title_of(id)` names an earlier find."""
+        words = REASONS["zh" if self.lang.startswith("zh") else "en"]
+        zh = int(self.lang.startswith("zh"))
+        known = self.reader.sources.get(item.source)
+        source = known.name[zh] if known else shaped["site"].removeprefix("www.")
+        kind = said["k"]
+        if kind == "browsed":
+            return words["browsed"].format(site=source)
+        if kind in ("topic", "like"):
+            topic = self._topic(said["name"]) if kind == "topic" else self.likes.get(said["name"], said["name"])
+            return words[kind].format(name=topic, src=source)
+        if kind == "took":
+            family, _, rest = said["on"].partition(":")
+            text = words["took_" + ("subj" if family == "subj" else "origin")]
+            return text.format(how=words["how"][said["how"]], title=title_of(said["from"]),
+                               topic=subjects.name(rest, self.lang), src=source)
+        if kind == "said":
+            return words["said"].format(name=name, words=said["words"])
+        # What it is, for a reason the ranking could not give: its subject beyond doubt, else what its source
+        # says it brings, else its own tags, else its kind.
+        own = own_subject(item, shaped)
+        about = known.about[zh] if known else ""
+        if own:
+            what = words["what"].format(src=source, topic=subjects.name(own, self.lang))
+        elif about:
+            what = words["what_about"].format(src=source, about=about)
+        else:
+            what = words["what"].format(src=source, topic=str((item.tags or [words["kinds"][shaped["kind"]]])[0]))
+        if kind == "try":
+            return words["try_first" if said["first"] else "try"].format(what=what)
+        return words["first_run" if said["first_run"] else "empty" if said["empty"] else "new"].format(what=what)
+
+
+# The sentence under each find in the 推荐记录 list, in the page's language (zh and en; the language pass adds the
+# rest). The character's own words (said) are its voice; the rest are the app's.
+REASONS = {
+    "en": {"browsed": "You opened this page yourself in the built-in browser ({site})",
+           "topic": "On {name}, a topic you picked; from {src}",
+           "like": "On {name}, which you said you like; from {src}",
+           "took_subj": "You {how} “{title}”, also on {topic}",
+           "took_origin": "You {how} “{title}” from {src} before",
+           "how": {"like": "liked", "open": "opened", "play": "watched or read"},
+           "said": "{name}: {words}",
+           "what": "{topic} from {src}", "what_about": "{src} ({about})",
+           "kinds": {"video": "video", "page": "article", "text": "article"},
+           "try": "A deliberate try outside your usual: {what}",
+           "try_first": "A deliberate try outside your usual: {what}, a kind you have not opened before",
+           "first_run": "A sample for the first run, before any reading history: {what}",
+           "empty": "No reading history to go on yet, so a recent find: {what}",
+           "new": "Nothing in your reading points here yet, so a recent find: {what}"},
+    "zh": {"browsed": "你在内置浏览器中自行打开了此页（{site}）",
+           "topic": "符合你选择的主题「{name}」，来自{src}",
+           "like": "与你表示喜欢的「{name}」相关，来自{src}",
+           "took_subj": "你{how}过同属「{topic}」主题的《{title}》",
+           "took_origin": "你此前{how}过{src}的《{title}》",
+           "how": {"like": "喜欢", "open": "打开", "play": "看完"},
+           "said": "{name}的推荐理由：{words}",
+           "what": "{src}的「{topic}」内容", "what_about": "{src}（{about}）",
+           "kinds": {"video": "视频", "page": "文章", "text": "文章"},
+           "try": "有意尝试的新方向：{what}",
+           "try_first": "有意尝试的新方向：{what}，此类内容你此前未打开过",
+           "first_run": "首次使用时的示例推荐，尚无阅读记录：{what}",
+           "empty": "尚无阅读记录可供参考，按新近程度推荐：{what}",
+           "new": "与你的阅读记录暂无关联，按新近程度推荐：{what}"},
+}
+# The character's words in a reason, at most this many characters.
+SAID_MAX = 160
+
+
+def _took(before: dict, ident: str, term: str) -> Optional[dict]:
+    """The latest earlier find the person liked, opened or played that shares `term` (a subject, or where it
+    came from), as {"from", "how"}; None when there is none."""
+    family, _, rest = term.partition(":")
+    found = None
+    for other, h in before.items():
+        snap = h["f"] or {}
+        if other == ident or not (h["like"] or h["open"] or h["play"] > 0):
+            continue
+        if rest in snap.get("subj", ()) if family == "subj" else snap.get("origin") == rest:
+            if found is None or (h["acted"] or h["at"]) > (found[1]["acted"] or found[1]["at"]):
+                found = other, h
+    if found is None:
+        return None
+    return {"from": found[0], "how": "like" if found[1]["like"] else "play" if found[1]["play"] > 0 else "open"}
+
+
+def facts(item: Item, snap: Optional[dict], slot: str, surface: str, term: str, line: str, before: dict) -> dict:
+    """What a showing's reason rests on, kept with its "seen" event so the list can say it later (`Why.told`).
+    `snap` is the thing as the ranking read it then, `slot` and `term` how the ranking served it (taste.Ranker),
+    `line` the character's sentence when it brought it, and `before` the person's history until then
+    (taste.history). In order: a page they opened themselves; a topic they picked or a like they said, that the
+    ranking's reason names; an earlier find they took on the subject or from the source the reason names; the
+    character's own words on it; a deliberate try outside their usual; else that nothing pointed here."""
+    snap = snap or {}
+    family, _, rest = term.partition(":")
+    if surface == "browser":
+        return {"k": "browsed"}
+    if family in ("topic", "like") and rest in snap.get(family + "s", ()):
+        return {"k": family, "name": rest}
+    took = _took(before, item.id, term) if family in ("subj", "origin") else None
+    if took:
+        return {"k": "took", "on": term, **took}
+    words = " ".join(str(line or item.why or "").split())
+    if words:
+        return {"k": "said", "words": words[:SAID_MAX]}
+    taken = [h["f"] or {} for other, h in before.items() if other != item.id and (h["like"] or h["open"] or h["play"] > 0)]
+    near = any(f.get("origin") == snap.get("origin") or set(f.get("subj", ())) & set(snap.get("subj", ()))
+               for f in taken)
+    if slot == "explore":
+        return {"k": "try", "first": not near}
+    return {"k": "new", "first_run": surface == "first", "empty": not taken}
+
+
+def term_of(top: list, guess: bool) -> str:
+    """The ranking's reason term from the top terms shown.jsonl kept for a showing, for one shown before the
+    reason was kept with its event: the largest the person's reactions or picks could have lifted
+    (taste.Ranker.reason, without the draw that is not kept)."""
+    from .taste import REASON_MIN
+    named = ("origin:",) if guess else ("origin:", "topic:", "like:", "subj:")
+    best, key = REASON_MIN, ""
+    for name, value in top:
+        if name.startswith(named) and value > best:
+            best, key = value, name
+    return key
+
 
 # ------------------------------------------------------------ from the chat
 

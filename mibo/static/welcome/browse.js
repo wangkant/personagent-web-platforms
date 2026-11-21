@@ -54,7 +54,7 @@
   const PAGE_WIDE = 1024;
   const PAGE_LEAST = 720;
   // The ends after which the page is the person's until they say to go on (browser.THEIRS).
-  const THEIRS = ["handover", "asked", "paused", "cap"];
+  const THEIRS = ["handover", "asked", "paused", "cap", "waiting"];
 
   const HEADERS = { "Content-Type": "application/json", "X-Mibo-Setup-Token": token,
     "X-Mibo-Window": frameKey };
@@ -441,6 +441,12 @@
         const response = await post("browser/confirm", { id: card.id, yes, never, pick });
         const ok = response && (await response.json().catch(() => ({}))).ok;
         if (!ok && shownCard === card.id) node.append(el("p", "op-card-told", words.gone));
+        // The card a run ended waiting on: the answer is kept for its act, and a yes goes on with the errand.
+        if (ok && op?.end === "waiting" && op.card?.id === card.id) {
+          op = { ...op, card: null, end: yes ? op.end : "declined" };
+          drawRun();
+          if (yes) goOn(col().goOnPaused);
+        }
       });
       row.append(b);
     }
@@ -493,6 +499,8 @@
       const said = words.handover[kind === "sign_in_overlay" ? "sign_in" : kind] || words.handover.stuck;
       return said.replace("{field}", field || "");
     }
+    // Waiting on a card: the act it waits on, as its step says it.
+    if (op.end === "waiting") return op.steps.findLast((step) => step.state === "waiting")?.text || words.modes.waiting;
     const said = words.ends[op.end] || words.ends.failed;
     // The character's own one sentence of how it went, where it wrote one for the person; at the step limit,
     // what is left.
@@ -544,8 +552,9 @@
     } else {
       endLine.textContent = endWords();
       // 继续: the page is theirs for a moment and they say when they are done (not where the page cannot be
-      // worked, nor where it asked something: their answer is typed in the chat's box).
-      if (op.end !== "asked" && op.why !== "drawn" && op.why !== "empty") {
+      // worked, nor where it asked something or a card waits: their answer is typed in the chat's box or pressed
+      // on the card).
+      if (!["asked", "waiting"].includes(op.end) && op.why !== "drawn" && op.why !== "empty") {
         const text = ["paused", "cap"].includes(op.end) ? words.goOnPaused : words.goOn;
         buttons.push(footButton("pa-btn pa-btn-primary pa-btn-sm", text, () => goOn(text)));
       }
@@ -586,7 +595,8 @@
     if (running() && !op.card && !op.held && !op.wait && last?.state !== "doing") {
       list.append(stepNode({ text: words.thinking, state: "doing" }));
     }
-    drawCard(running() ? op.card || (op.wait && { ...op.wait, id: `wait:${op.wait.site}:${op.wait.say}`, kind: "wait" }) : null);
+    drawCard(running() ? op.card || (op.wait && { ...op.wait, id: `wait:${op.wait.site}:${op.wait.say}`, kind: "wait" })
+      : op.end === "waiting" ? op.card : null);
     drawFoot();
     if (atEnd && !op.card) scroller.scrollTop = scroller.scrollHeight;
   }

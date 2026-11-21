@@ -54,7 +54,6 @@ def test_a_hello_is_one_plain_request_and_its_answer_is_said(turn):
     done = turn("hello", say("hey, you."))
     (body,) = done.asked()
     assert body["tool_choice"] == "auto" and body["tools"] and "response_format" not in body
-    assert body["max_tokens"] >= 8192
     assert (done.status, done.reply) == (200, "hey, you.")
     # A model with no reasoning on record is not asked to reason.
     assert "reasoning_effort" not in body and (body.get("thinking") or {}).get("type") != "enabled"

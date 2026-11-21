@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>小乐的日常的主页 - 短视频</title>
+<style>
+body { margin: 0; font: 14px/1.5 system-ui, "Microsoft YaHei", sans-serif; background: #161823; color: #fff; }
+nav { display: flex; gap: 18px; padding: 10px 24px; background: #0f1017; }
+nav a { color: #aaa; text-decoration: none; }
+header.me { display: flex; gap: 20px; padding: 24px; align-items: center; }
+.face { width: 96px; height: 96px; border-radius: 50%; background: #444; }
+.me h1 { margin: 0 0 6px; font-size: 22px; }
+.stats { display: flex; gap: 22px; color: #ccc; }
+.stats b { color: #fff; font-size: 16px; margin-left: 4px; }
+.tabs { display: flex; gap: 24px; padding: 0 24px; border-bottom: 1px solid #333; }
+.tabs span { padding: 10px 0; }
+.grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 16px 24px; }
+.card { background: #22232c; border-radius: 6px; padding: 10px; height: 220px; box-sizing: border-box; }
+.card .t { font-weight: 600; } .card .m { color: #999; font-size: 12px; }
+#more { padding: 20px; text-align: center; color: #777; }
+footer { padding: 16px 24px; color: #666; font-size: 12px; }
+</style></head>
+<body>
+<nav><a href="#">首页</a><a href="#">推荐</a><a href="#">关注</a><a href="#">朋友</a><a href="#">直播</a><a href="#">放映厅</a></nav>
+<header class="me">
+  <div class="face"></div>
+  <div>
+    <h1 id="nick">小乐的日常</h1>
+    <div class="m">短视频号：xiaole_daily · IP属地：浙江</div>
+    <div class="stats"><span>关注<b id="follows"></b></span><span>粉丝<b id="fans"></b></span><span>获赞<b id="likes"></b></span></div>
+    <p>记录生活里的小事，偶尔做饭，经常撸猫。</p>
+  </div>
+</header>
+<div class="tabs"><span>作品</span><span>推荐</span><span>收藏</span><span>喜欢</span></div>
+<div class="grid" id="grid"></div>
+<div id="more">加载中…</div>
+<footer>用户服务协议 · 隐私政策 · 账号找回 · 联系我们 · 营业执照</footer>
+<script src="/t/kit.js"></script>
+<script>
+// A profile as large short-video sites draw it: the account's numbers in the first screen, above a feed of
+// videos that loads twelve more whenever its end comes into view, with no end. The numbers change with each
+// reset of the site (tasks.w_answer).
+const TOPIC = ["周末在家做了一锅番茄牛腩", "猫咪第一次见到雪的反应", "通勤路上看到的晚霞", "十分钟搞定的早餐三明治",
+  "给阳台的绿萝换了新盆", "试了网上很火的手冲咖啡", "下班后一个人去江边散步", "整理了一整天的书架",
+  "第一次自己修好了自行车", "楼下新开的面馆探店", "雨天窝在家里看老电影", "带猫去打疫苗的全过程"];
+const grid = document.getElementById("grid"), more = document.getElementById("more");
+let n = 0, busy = false;
+function batch() {
+  if (busy) return;
+  busy = true;
+  setTimeout(() => {
+    for (let i = 0; i < 12; i++, n++) {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML = `<div class="t"></div><div class="m">${11 - Math.floor(n / 30) % 11}-${String(1 + n % 28).padStart(2, "0")} · ♡ ${300 + (n * 7919) % 9000} · 评论 ${10 + (n * 31) % 500} · 分享 ${(n * 17) % 200}</div><div class="m">#生活记录 #日常vlog #${["猫", "做饭", "散步", "咖啡"][n % 4]}</div>`;
+      card.firstChild.textContent = `${TOPIC[n % 12]}（第${n + 1}期）`;
+      grid.append(card);
+    }
+    busy = false;
+  }, 600);
+}
+fetch("/api/state").then((r) => r.json()).then(({ round }) => {
+  const r = (round || 0) % 9;
+  document.getElementById("follows").textContent = String(128 + r);
+  document.getElementById("fans").textContent = String(4612 + 37 * r);
+  document.getElementById("likes").textContent = String(87310 + 101 * r);
+  batch();
+  setTimeout(batch, 700);
+  // Near the end of the page, twelve more, as a feed's scroll handler loads them.
+  addEventListener("scroll", () => {
+    const e = document.scrollingElement;
+    if (e.scrollTop + e.clientHeight > e.scrollHeight - 400) batch();
+  });
+});
+</script></body></html>

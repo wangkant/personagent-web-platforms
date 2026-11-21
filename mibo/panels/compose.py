@@ -83,7 +83,7 @@ _ready: dict = {"snip": None}
 
 def _snipper() -> subprocess.Popen:
     return subprocess.Popen([sys.executable, "-m", "mibo.snip", "--wait"], stdin=subprocess.PIPE,
-                            text=True, creationflags=0x08000000)
+                            text=True)
 
 
 def warm() -> None:

@@ -1,22 +1,20 @@
 """Optional embedding vectors for retrieval: the /embeddings call and its cache.
 
 Off unless EMBEDDING_MODEL is set. Vectors are fetched in the async path ahead
-of a turn and cached in memory and on disk by model and text hash; the
-ranking only ever reads the cache."""
+of a turn and cached in memory and in the runtime database by model and text
+hash; the ranking only ever reads the cache."""
 from __future__ import annotations
 
 import base64
 import hashlib
-import json
 import math
-import os
 import sys
 from array import array
 from collections import OrderedDict
 from pathlib import Path
 from typing import Optional
 
-from .storage import atomic_write_text
+from . import db
 
 #: Texts per request: some OpenAI-compatible providers refuse more than 10.
 BATCH_SIZE = 10
@@ -60,54 +58,44 @@ async def fetch(client, url: str, api_key: str, model: str,
     return [unit(row["embedding"]) for row in rows]
 
 
-def _encode(vec: array) -> str:
+def _bytes(vec: array) -> bytes:
     vec = array("f", vec)
     if sys.byteorder == "big":
         vec.byteswap()
-    return base64.b64encode(vec.tobytes()).decode("ascii")
+    return vec.tobytes()
 
 
-def _decode(text: str) -> array:
+def _vector(blob: bytes) -> array:
     vec = array("f")
-    vec.frombytes(base64.b64decode(text))
+    vec.frombytes(blob)
     if sys.byteorder == "big":
         vec.byteswap()
     return vec
 
 
-def _line(model: str, key: str, vec: array) -> str:
-    return json.dumps({"model": model, "key": key, "vec": _encode(vec)}) + "\n"
+def blob_of(text: str) -> bytes:
+    """A vector as the old cache file wrote it (base64 of little-endian floats), as the database keeps it."""
+    return base64.b64decode(text)
 
 
 class EmbeddingCache:
-    """Unit vectors of one model by text key, kept in memory and appended to
-    a JSONL file so a restart does not re-embed. Query vectors are one-off,
-    so they stay in a small in-memory LRU and never reach the file."""
+    """Unit vectors of one model by text key, kept in memory and in the runtime database (db.py) so a restart
+    does not re-embed. Query vectors are one-off, so they stay in a small in-memory LRU and are never stored."""
 
     def __init__(self, path: Path):
         self.path = Path(path)
+        self.db = db.at(self.path)
         self._model: Optional[str] = None
         self._stored: dict[str, array] = {}
         self._queries: OrderedDict[str, array] = OrderedDict()
-        self._lines = 0
 
     def _load(self, model: str) -> None:
         if model == self._model:
             return
-        self._model, self._stored, self._lines = model, {}, 0
+        self._model = model
         self._queries.clear()
-        try:
-            with self.path.open("r", encoding="utf-8") as f:
-                for line in f:
-                    self._lines += 1
-                    try:
-                        rec = json.loads(line)
-                        if rec["model"] == model:
-                            self._stored[rec["key"]] = _decode(rec["vec"])
-                    except (ValueError, KeyError, TypeError):
-                        continue  # a torn append costs one vector
-        except FileNotFoundError:
-            pass
+        self._stored = {key: _vector(blob) for key, blob in self.db.read(
+            "SELECT key, vec FROM embeddings WHERE model = ?", (model,))}
 
     def get(self, model: str, key: str) -> Optional[array]:
         self._load(model)
@@ -127,49 +115,16 @@ class EmbeddingCache:
                 self._queries.popitem(last=False)
             return
         self._stored.update(vectors)
-        data = "".join(_line(model, k, v) for k, v in vectors.items()).encode("ascii")
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND
-                     | getattr(os, "O_BINARY", 0), 0o600)
-        try:
-            view = memoryview(data)
-            while view:
-                view = view[os.write(fd, view):]
-        finally:
-            os.close(fd)
-        self._lines += len(vectors)
-
-    def drop(self, model: str, key: str) -> bool:
-        """Forget one text's vector now, in memory and in the file, for every
-        model: a forgotten memory leaves nothing behind. Did anything go?"""
-        self._load(model)
-        found = self._stored.pop(key, None) is not None
-        found = self._queries.pop(key, None) is not None or found
-        try:
-            lines = self.path.read_text(encoding="utf-8").splitlines(keepends=True)
-        except FileNotFoundError:
-            return found
-        kept = []
-        for line in lines:
-            try:
-                if json.loads(line).get("key") == key:
-                    continue
-            except (ValueError, AttributeError):
-                pass
-            kept.append(line)
-        if len(kept) != len(lines):
-            atomic_write_text(self.path, "".join(kept), fsync=False)
-            self._lines = len(kept)
-            found = True
-        return found
+        with self.db.write() as conn:
+            conn.executemany("INSERT OR REPLACE INTO embeddings VALUES (?,?,?)",
+                             [(model, key, _bytes(vec)) for key, vec in vectors.items()])
 
     def prune(self, model: str, keep: set[str]) -> None:
-        """Rewrite the file with only `keep` once most of it is dead weight:
-        vectors of forgotten memories, rotated rows, another model's."""
+        """Only `keep` stays: not the vectors of forgotten memories, rotated rows or another model."""
         self._load(model)
-        if self._lines <= 2 * len(keep) + 100:
-            return
-        self._stored = {k: v for k, v in self._stored.items() if k in keep}
-        atomic_write_text(self.path, "".join(
-            _line(model, k, v) for k, v in self._stored.items()), fsync=False)
-        self._lines = len(self._stored)
+        gone = [key for key in self._stored if key not in keep]
+        for key in gone:
+            del self._stored[key]
+        with self.db.write() as conn:
+            conn.execute("DELETE FROM embeddings WHERE model != ?", (model,))
+            conn.executemany("DELETE FROM embeddings WHERE model = ? AND key = ?", [(model, key) for key in gone])

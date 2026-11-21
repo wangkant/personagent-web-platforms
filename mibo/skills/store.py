@@ -3,7 +3,7 @@
 A skill is a folder holding SKILL.md: YAML front matter (name, description, and optional license,
 compatibility, metadata, allowed-tools) between two `---` lines, then the instructions. Built-in skills ship in
 builtin/; the person's own are the folders of <home>/skills, one level deep, as other agents keep them. Mibo's
-own records (which are off, where each came from, search words) are in runtime/skills.json, never in a skill's
+own records (which are off, where each came from, Chinese titles) are in runtime/skills.json, never in a skill's
 folder, so the folder stays as its author wrote it. A skill that does not read is listed with what is wrong and
 never offered to the model. Nothing in a skill's folder is run when it is added.
 """
@@ -64,10 +64,7 @@ class Skill:
     origin: str = ""
     source: str = ""
     added: float = 0.0
-    # Words the ranking reads besides the name and description: the built-in ones' own, or made when added.
-    words: str = ""
-    # Phrases any one of which asks for the skill by itself ("哪个更", "worth it"), comma-separated.
-    asks: str = ""
+    # The Chinese title and description Settings shows: the built-in ones' own, or made when added.
     title_zh: str = ""
     description_zh: str = ""
     digest: str = ""
@@ -206,7 +203,7 @@ def all_skills(home: Path) -> list[Skill]:
     kept = records(home)
     off = set(kept.get("off") or [])
     sources = kept.get("sources") or {}
-    words = kept.get("words") or {}
+    titles = kept.get("titles") or {}
     found: list[Skill] = []
     seen: set[str] = set()
     for builtin, root in ((False, skills_dir(home)), (True, BUILTIN)):
@@ -224,11 +221,9 @@ def all_skills(home: Path) -> list[Skill]:
                 skill.origin = "builtin"
             else:
                 skill.origin = "folder"
-            made = words.get(skill.name) if isinstance(words.get(skill.name), dict) else {}
+            made = titles.get(skill.name) if isinstance(titles.get(skill.name), dict) else {}
             if builtin or made.get("digest") != skill.digest:
                 made = {}
-            skill.words = " ".join(filter(None, (skill.meta.get("mibo-words", ""), str(made.get("words") or ""))))
-            skill.asks = skill.meta.get("mibo-asks", "")
             skill.title_zh = skill.meta.get("mibo-title-zh", "") or str(made.get("title_zh") or "")
             skill.description_zh = skill.meta.get("mibo-description-zh", "") or str(made.get("description_zh") or "")
             found.append(skill)
@@ -388,12 +383,12 @@ def remove(home: Path, folder_name: str) -> None:
     _save(home, data)
 
 
-def keep_words(home: Path, skill: Skill, made: dict) -> None:
-    """The search words and Chinese title and description a model made for a skill, kept by its file's digest."""
+def keep_titles(home: Path, skill: Skill, made: dict) -> None:
+    """The Chinese title and description made for a skill, kept by its file's digest."""
     data = records(home)
-    data.setdefault("words", {})[skill.name] = {"digest": skill.digest, **{
+    data.setdefault("titles", {})[skill.name] = {"digest": skill.digest, **{
         k: " ".join(str(made.get(k) or "").split())[:limit]
-        for k, limit in (("words", 400), ("title_zh", 40), ("description_zh", 300))}}
+        for k, limit in (("title_zh", 40), ("description_zh", 300))}}
     _save(home, data)
 
 

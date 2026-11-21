@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>短视频 - 记录美好生活</title>
+<style>
+body { margin: 0; font: 14px/1.5 system-ui, "Microsoft YaHei", sans-serif; background: #161823; color: #fff; }
+.top { display: flex; align-items: center; gap: 26px; padding: 10px 24px; background: #0f1017; }
+.top .logo { font-weight: 700; margin-right: 12px; }
+.nav { color: #aaa; cursor: pointer; padding: 6px 0; }
+.nav.on { color: #fff; border-bottom: 2px solid #fe2c55; }
+.me-chip { margin-left: auto; display: flex; gap: 8px; align-items: center; color: #ccc; }
+.face { width: 28px; height: 28px; border-radius: 50%; background: #555; display: inline-block; }
+main { padding: 20px 24px; }
+.feed .v { background: #22232c; border-radius: 6px; padding: 12px; margin-bottom: 10px; }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 14px 0 20px; }
+.stat { background: #22232c; border-radius: 6px; padding: 14px; }
+.stat small { color: #999; display: block; } .stat b { font-size: 20px; }
+.msg { background: #22232c; border-radius: 6px; padding: 12px; margin-bottom: 10px; }
+.msg .who { color: #aaa; font-size: 12px; }
+.reply { display: flex; gap: 8px; margin-top: 8px; }
+.reply textarea { flex: 1; height: 34px; background: #111; color: #fff; border: 1px solid #333; border-radius: 4px; }
+.ic { width: 34px; height: 34px; border-radius: 4px; background: #fe2c55; cursor: pointer; display: grid; place-items: center; }
+</style></head>
+<body>
+<div class="top">
+  <span class="logo">短视频</span>
+  <div class="nav on" data-k="home">推荐</div><div class="nav" data-k="follow">关注</div>
+  <div class="nav" data-k="friends">朋友</div><div class="nav" data-k="self">我的</div>
+  <span class="me-chip"><span class="face"></span>小乐的日常 · 已登录</span>
+</div>
+<main id="main"></main>
+<script src="/t/kit.js"></script>
+<script>
+// A signed-in short-video site, as the real one behaves: its tabs are plain blocks with a click handler, not
+// links, and the person's own numbers are only on 我的, which draws in place. Like every large site it sends its
+// own monitoring data to its company's other host on every click and on a timer, whether or not anyone acts:
+// device and graphics card details, a visitor id, the page. On 我的, a fan's message has a reply box whose send
+// is an icon with no words: what is typed there goes to the site only on that press.
+const MONITOR = `${location.protocol}//localhost:${location.port}/api/monitor`;
+const gpu = (() => {
+  try {
+    const gl = document.createElement("canvas").getContext("webgl");
+    const ext = gl && gl.getExtension("WEBGL_debug_renderer_info");
+    return ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : "unknown";
+  } catch { return "unknown"; }
+})();
+function monitor(event) {
+  const data = { event, aid: "6383", web_id: "7438112093315532339", os: navigator.platform, ua: navigator.userAgent,
+    screen: `${screen.width}x${screen.height}`, dpr: devicePixelRatio, gpu, tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    page: location.href, t: Date.now() };
+  fetch(MONITOR, { method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain" }, body: JSON.stringify([data]) })
+    .catch(() => {});
+}
+monitor("pageview");
+document.addEventListener("click", (e) => monitor("click:" + (e.target.textContent || "").trim().slice(0, 12)), true);
+setInterval(() => monitor("heartbeat"), 2000);
+
+const VIEWS = {
+  home: () => '<div class="feed">' + ["周末去露营的一天", "三分钟学会番茄炒蛋", "猫咪第一次见到雪"].map(
+    (t) => `<div class="v">${t}<br><small>推荐给你</small></div>`).join("") + "</div>",
+  follow: () => '<div class="feed"><div class="v">你关注的人还没有新作品</div></div>',
+  friends: () => '<div class="feed"><div class="v">朋友动态加载中…</div></div>',
+  self: () => `<h2>小乐的日常</h2><div class="who">短视频号：xiaole_daily</div>
+    <div class="stats">
+      <div class="stat"><small>粉丝</small><b>12.8万</b></div>
+      <div class="stat"><small>获赞</small><b>356.2万</b></div>
+      <div class="stat"><small>近7日播放</small><b>48.3万</b></div>
+      <div class="stat"><small>近7日主页访问</small><b>2941</b></div>
+    </div>
+    <h3>粉丝留言</h3>
+    <div class="msg"><div class="who">阿杰 · 2小时前</div>上一个做饭视频太治愈了，期待更新！
+      <div class="reply"><textarea id="r1" placeholder="回复阿杰"></textarea><div class="ic" id="send1">
+        <svg width="16" height="16" viewBox="0 0 16 16"><path d="M1 8l14-6-6 14-2-6z" fill="#fff"/></svg></div></div></div>`,
+};
+function show(k) {
+  for (const n of document.querySelectorAll(".nav")) n.classList.toggle("on", n.dataset.k === k);
+  document.getElementById("main").innerHTML = VIEWS[k]();
+  const send = document.getElementById("send1");
+  if (send) send.addEventListener("click", () => {
+    const text = document.getElementById("r1").value.trim();
+    if (text) post("/api/reply", { to: "阿杰", text }).then(() => {
+      document.getElementById("r1").value = "";
+      send.closest(".msg").insertAdjacentHTML("beforeend", `<div class="who">你的回复：${text}</div>`);
+    });
+  });
+}
+for (const n of document.querySelectorAll(".nav")) n.addEventListener("click", () => show(n.dataset.k));
+show("home");
+</script>
+</body></html>

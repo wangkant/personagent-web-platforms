@@ -494,8 +494,7 @@ def _metered() -> Optional[bool]:
               "GetInternetConnectionProfile();if($p){$p.GetConnectionCost().NetworkCostType}")
     try:
         answer = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-                                capture_output=True, text=True, timeout=15,
-                                creationflags=subprocess.CREATE_NO_WINDOW).stdout.strip()
+                                capture_output=True, text=True, timeout=15).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return None
     return answer in ("Fixed", "Variable") if answer else None

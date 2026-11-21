@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mibo test fixture</title>
+<style>
+  body { margin: 0; font: 13px/1.4 "Segoe UI", sans-serif; display: flex; height: 100vh; color: #1d1d1f; }
+  aside { width: 150px; background: #f2f2f4; border-right: 1px solid #ddd; display: flex; flex-direction: column;
+          align-items: stretch; padding: 12px 0; box-sizing: border-box; }
+  .agent { display: flex; flex-direction: column; align-items: center; margin-bottom: 14px; }
+  .avatar { width: 56px; height: 56px; border-radius: 50%; background: #111; border: 0; padding: 0; cursor: pointer; }
+  .avatar img { width: 56px; height: 56px; border-radius: 50%; display: block; }
+  .appname { margin-top: 6px; font-weight: 600; }
+  .heading { padding: 0 12px; color: #777; font-size: 11px; text-transform: uppercase; }
+  ul { list-style: none; margin: 4px 0; padding: 0; }
+  li { padding: 7px 12px; cursor: pointer; }
+  li.on, .agent.on .appname { color: #0a60d0; }
+  main { flex: 1; display: flex; flex-direction: column; }
+  header { padding: 10px 14px; border-bottom: 1px solid #ddd; }
+  #title { font-weight: 600; } #sub { color: #777; font-size: 11px; }
+  #messages { flex: 1; overflow: auto; padding: 10px 14px; }
+  form { display: flex; gap: 6px; padding: 10px; border-top: 1px solid #ddd; }
+  textarea { flex: 1; height: 34px; resize: none; font: inherit; }
+</style>
+</head>
+<body>
+<aside>
+  <div class="agent" id="agent"></div>
+  <div class="heading">Chats</div>
+  <ul id="chats"></ul>
+</aside>
+<main>
+  <header><div id="title"></div><div id="sub"></div></header>
+  <div id="messages"></div>
+  <form id="form">
+    <textarea id="box" placeholder="Message"></textarea>
+    <button type="submit">Send</button>
+  </form>
+</main>
+<script>
+  const { ipcRenderer } = require('electron');
+  const query = new URLSearchParams(location.search);
+  const variant = query.get('variant') || 'named';
+  const CHATS = ['Daily notes', 'Travel plan', 'Code review', 'Reading list'];
+  const history = {};
+  let current = CHATS[0];
+  const agent = document.getElementById('agent');
+  // A black disc, drawn as a picture with no text in it.
+  const disc = 'data:image/svg+xml,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="56" height="56"><circle cx="28" cy="28" r="28" fill="#111"/>' +
+    '<circle cx="28" cy="24" r="9" fill="#444"/><rect x="14" y="38" width="28" height="10" rx="5" fill="#444"/></svg>');
+  if (variant === 'named') {
+    agent.innerHTML = '<button class="avatar" aria-label="Main agent"></button><div class="appname">Lumen</div>';
+  } else {
+    agent.innerHTML = `<div class="avatar"><img src="${disc}"></div><div class="appname">Lumen</div>`;
+  }
+  agent.querySelector('.avatar').addEventListener('click', () => pick('main'));
+  const list = document.getElementById('chats');
+  for (const name of CHATS) {
+    const item = document.createElement('li');
+    item.textContent = name;
+    item.tabIndex = 0;
+    item.addEventListener('click', () => pick(name));
+    list.appendChild(item);
+  }
+  function pick(name) {
+    current = name;
+    agent.classList.toggle('on', name === 'main');
+    for (const item of list.children) item.classList.toggle('on', item.textContent === name);
+    document.getElementById('title').textContent = name === 'main' ? 'Lumen' : name;
+    document.getElementById('sub').textContent = name === 'main' ? 'Main agent' : 'Chat';
+    const messages = document.getElementById('messages');
+    messages.replaceChildren(...(history[name] || []).map((text) => {
+      const line = document.createElement('p');
+      line.textContent = text;
+      return line;
+    }));
+  }
+  document.getElementById('form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const box = document.getElementById('box');
+    const text = box.value.trim();
+    if (!text) return;
+    (history[current] = history[current] || []).push(text);
+    ipcRenderer.send('sent', current, text);
+    box.value = '';
+    pick(current);
+  });
+  document.getElementById('box').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      document.getElementById('form').requestSubmit();
+    }
+  });
+  pick(query.get('chat') || current);
+</script>
+</body>
+</html>

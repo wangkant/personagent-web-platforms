@@ -35,11 +35,14 @@ def test_a_newer_line_ranks_before_an_older_one_that_says_the_same() -> None:
 
 
 def test_the_embedding_cache_keeps_only_the_vectors_still_used(tmp_path) -> None:
-    cache = embeddings.EmbeddingCache(tmp_path / "embeddings.jsonl")
+    cache = embeddings.EmbeddingCache(tmp_path)
     vec = embeddings.unit([1.0, 2.0])
+    cache.put("other-model", {"k1": vec}, persist=True)
+    assert embeddings.EmbeddingCache(tmp_path).get("m", "k1") is None, "another model's vectors are not this one's"
     cache.put("m", {f"k{i}": vec for i in range(150)}, persist=True)
+    cache.put("m", {"query": vec}, persist=False)
     cache.prune("m", {"k1", "k2"})
-    assert len((tmp_path / "embeddings.jsonl").read_text(encoding="utf-8").splitlines()) == 2
-    fresh = embeddings.EmbeddingCache(tmp_path / "embeddings.jsonl")
+    assert cache.db.read("SELECT model, key FROM embeddings ORDER BY key") == [("m", "k1"), ("m", "k2")]
+    fresh = embeddings.EmbeddingCache(tmp_path)
     assert list(fresh.get("m", "k1")) == list(vec) and fresh.get("m", "k3") is None
-    assert fresh.get("other-model", "k1") is None, "another model's vectors are not this one's"
+    assert fresh.get("m", "query") is None, "a query's vector is never stored"

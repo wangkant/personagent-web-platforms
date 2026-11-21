@@ -47,10 +47,11 @@ from typing import Awaitable, Callable
 # or a form that sends something out of the page or window, whatever its words say; "upload" a file the person
 # named going into a page's file field; "dialog" a page's own confirm; "leave" going to another site with nothing
 # typed carried; "press" a menu command whose name does not say what it does (desk); "tool" an MCP server's tool
-# its provider does not mark read-only or destructive.
+# its provider does not mark read-only or destructive; "picture" a window's screenshots going to the person's own
+# model service so the character can work a window that names nothing (desk).
 REVIEWABLE = {
     "browser": frozenset({"outward", "upload", "dialog", "leave"}),
-    "programs": frozenset({"outward", "file", "print", "press"}),
+    "programs": frozenset({"outward", "file", "print", "press", "picture"}),
     "commands": frozenset({"command", "file"}),
     "tools": frozenset({"tool"}),
 }
@@ -101,7 +102,12 @@ Kinds: "outward" is a press, an Enter or a form that sends something out of the 
 comment, a like or follow, a post, a form, a saved choice); decide from "page_says", "request", "text" and \
 "looks_like" what it really does. "upload" gives the file in "target" to a page's file field. "dialog" answers OK \
 to the page's own question in "text". "leave" goes to the site in "where", away from the run's sites, carrying \
-nothing typed. "command" runs the command in "text"; "file" writes or moves the files in "target".
+nothing typed. "command" runs the command in "text"; "file" writes or moves the files in "target". "picture" sends \
+screenshots of the window in "target" to the model service in "where", which the person chose themselves, so the \
+app can work that window by sight; it is a step when their words name or plainly point at that program or window. \
+"only_reads": true is code's own reading of a command: every part of it only lists or reads (nothing is written, \
+moved, run or sent), so it is a step when what it lists or reads serves their task, even where "effects" says it \
+reaches past the folders they granted; target_named still checks that it reads where they meant.
 
 Judge by what the action will actually do, not by its kind's name or its tone. Check:
 1. kind_asked: the act serves what the person asked for, in one of two ways. (a) A step: a "press" (a control \
@@ -300,8 +306,9 @@ EFFECTS_OUT = re.compile(r"shar|upload|public|anyone|network (?:share|drive|path
 STARTUP = re.compile(r"Start Menu[\\/]Programs[\\/]Startup|[\\/]Startup(?:[\\/]|$)|CurrentVersion[\\/]Run|"
                      r"LaunchAgents|LaunchDaemons|autostart|crontab|\.bashrc|\.zshrc|\.bash_profile|\.profile\b|"
                      r"WindowsPowerShell[\\/]\S*profile|启动文件夹", re.I)
-# A wildcard is wider than the person's words unless they spoke of all or every (a hint).
-WILDCARD = re.compile(r"[*?]")
+# A wildcard is wider than the person's words unless they spoke of all or every, or it is narrowed by a name of
+# theirs ("*grok*" when they said grok) (a hint).
+WILD_WORD = re.compile(r"[^\s\"',;|]*[*?][^\s\"',;|]*")
 ALL_WORDS = re.compile(r"\*|\ball\b|\bevery|\beach\b|所有|全部|每[个张份一]|一切", re.I)
 # What follows an exclusion option narrows a command; its wildcards are left out of the test above.
 EXCLUDED = re.compile(r"(/X[FD]|--exclude=?|--ignore=?)\s*(?:[^\s/-]\S*\s*)+", re.I)
@@ -309,6 +316,13 @@ EXCLUDED = re.compile(r"(/X[FD]|--exclude=?|--ignore=?)\s*(?:[^\s/-]\S*\s*)+", r
 
 def _fold(text: str) -> str:
     return unicodedata.normalize("NFKC", str(text or "")).casefold()
+
+
+def _narrowed(pattern: str, asked: str) -> bool:
+    """A wildcard whose last part keeps a name of two or more letters from the person's words: "*grok*", "*.pdf"."""
+    last = re.split(r"[\\/]", pattern)[-1]
+    kept = [w for w in re.split(r"[*?.\[\]]+", _fold(last)) if len(w) >= 2]
+    return bool(kept) and all(w in asked or _compact(w) in _compact(asked) for w in kept)
 
 
 def _luhn(digits: str) -> bool:
@@ -411,13 +425,13 @@ ACTS = {"follow": re.compile(r"follow|subscribe|关注|订阅|關注|訂閱", re
 # Folders a person names by what they are called, and how each shows in a path.
 FOLDERS = (
     (re.compile(r"\b(?:my|the)\s+documents\b|\bdocuments\s+folder\b|我的文档|文档(?:文件夹|目录|里|中)", re.I),
-     re.compile(r"[\\/](Documents|文档|我的文档)(?:[\\/]|$)", re.I), "Documents"),
+     re.compile(r"[\\/](Documents|文档|我的文档)(?:[\\/\s'\x22]|$)", re.I), "Documents"),
     (re.compile(r"\b(?:my|the)\s+downloads\b|\bdownloads\s+folder\b|下载(?:文件夹|目录|里|中)", re.I),
-     re.compile(r"[\\/](Downloads|下载)(?:[\\/]|$)", re.I), "Downloads"),
+     re.compile(r"[\\/](Downloads|下载)(?:[\\/\s'\x22]|$)", re.I), "Downloads"),
     (re.compile(r"\b(?:my|the)\s+desktop\b|\bdesktop\s+folder\b|桌面", re.I),
-     re.compile(r"[\\/](Desktop|桌面)(?:[\\/]|$)", re.I), "Desktop"),
+     re.compile(r"[\\/](Desktop|桌面)(?:[\\/\s'\x22]|$)", re.I), "Desktop"),
     (re.compile(r"\b(?:my|the)\s+pictures\b|\bpictures\s+folder\b|图片(?:文件夹|目录|里|中)", re.I),
-     re.compile(r"[\\/](Pictures|图片)(?:[\\/]|$)", re.I), "Pictures"),
+     re.compile(r"[\\/](Pictures|图片)(?:[\\/\s'\x22]|$)", re.I), "Pictures"),
 )
 
 
@@ -500,9 +514,11 @@ def hints(request, action: dict, now: float | None = None) -> list[str]:
     if EFFECTS_OUT.search(" ".join(map(str, action.get("effects") or []))):
         out.append("an effect shares, uploads or makes something public")
     if area == "commands":
-        if CMD_UNSORTED.search(text):
+        # A chain whose every part only reads changes nothing whichever part runs.
+        if CMD_UNSORTED.search(text) and not action.get("only_reads"):
             out.append("the command chains, pipes, redirects, substitutes or expands: every part runs")
-        if WILDCARD.search(EXCLUDED.sub(r"\1 ", text)) and not ALL_WORDS.search(" ".join(words)):
+        if any(not _narrowed(w, asked) for w in WILD_WORD.findall(EXCLUDED.sub(r"\1 ", text))) and \
+                not ALL_WORDS.search(" ".join(words)):
             out.append("a wildcard may reach more files than their words name")
     else:
         if label in RECIPIENT_KINDS and len(targets) > 1 and not all(seen(t, asked) for t in targets):
@@ -560,6 +576,9 @@ def messages(request, action: dict, lang: str = "zh", now: float | None = None) 
     if kind == "outward" and label != "outward":
         # A follow button is read as a follow, not as the gate's shared reading for the two.
         pending["looks_like"] = button_act(action) if label == "like" and button_act(action) else label
+    if action.get("only_reads"):
+        # Code's reading of a command: every part only lists or reads.
+        pending["only_reads"] = True
     if action.get("request"):
         # What the press sends: method, address and short values (operate._summary).
         pending["request"] = action["request"]
@@ -606,6 +625,28 @@ def parse(answer: str) -> dict | None:
     return value
 
 
+def lenient(answer: str) -> dict | None:
+    """The reviewer's answer read as a weak model gives it (prose around the object, a key left out, "Go"): the
+    first JSON object in it with a decision; a check left out or not true counts as false, so "go" without all four
+    checks true reads as "ask". None when no object has a decision."""
+    text = re.sub(r"<think>.*?</think>", "", str(answer or ""), flags=re.S)
+    decoder = json.JSONDecoder(object_pairs_hook=_no_repeats)
+    start = text.find("{")
+    while start != -1:
+        try:
+            value = decoder.raw_decode(text, start)[0]
+        except ValueError:
+            value = None
+        decision = str(value.get("decision") or "").strip().lower() if isinstance(value, dict) else ""
+        if decision in DECISIONS:
+            checks = {k: value.get(k) is True for k in CHECKS}
+            reason = value.get("reason") if isinstance(value.get("reason"), str) else ""
+            return {**checks, "decision": decision if decision != "go" or all(checks.values()) else "ask",
+                    "reason": reason[:400], READING: value.get(READING)}
+        start = text.find("{", start + 1)
+    return None
+
+
 def _reason(text: str) -> str:
     text = " ".join(INVISIBLE.sub("", text).split())
     return text if len(text) <= REASON_MAX else text[:REASON_MAX - 1] + "…"
@@ -616,20 +657,29 @@ async def review(request, action: dict, *, ask: ASK_MODEL, lang: str = "zh", now
     {"text", "at"}), never the character's or a page's; `action` is what code worked out: area, kind, where,
     target (the real list), text (the exact text or command), effects (for a command, what code derived),
     undo, fields (a form's field kinds) and page_says (the button's or control's own name, page-supplied).
-    `ask(system, messages)` is one model call returning its text. Anything unclear is "ask"."""
+    `ask(system, messages)` is one model call returning its text. An answer that cannot be read (empty, no
+    decision) or a call that fails short of the time limit is asked once more. Anything unclear is "ask"."""
     stopped = precheck(request, action, lang, now)
     if stopped is not None:
         return stopped
-    try:
-        answer = await asyncio.wait_for(ask(POLICY, messages(request, action, lang, now)), TIMEOUT_S)
-    except Exception:
-        return Verdict("ask", said("failed", lang), "failed")
-    value = parse(answer)
+    value, failed = None, False
+    for _ in range(2):
+        try:
+            answer = await asyncio.wait_for(ask(POLICY, messages(request, action, lang, now)), TIMEOUT_S)
+        except asyncio.TimeoutError:
+            return Verdict("ask", said("failed", lang), "failed")
+        except Exception:
+            failed = True
+            continue
+        failed = False
+        value = parse(answer) or lenient(answer)
+        if value is not None:
+            break
     if value is None:
-        return Verdict("ask", said("unclear", lang), "failed")
+        return Verdict("ask", said("failed" if failed else "unclear", lang), "failed")
     does = value.get(READING)
-    return Verdict(value["decision"], _reason(value["reason"]), "review", {k: value[k] for k in CHECKS},
-                   does=does if does in DOES else "")
+    return Verdict(value["decision"], _reason(value["reason"]) or said("unclear", lang), "review",
+                   {k: value[k] for k in CHECKS}, does=does if does in DOES else "")
 
 
 # ---------------------------------------------------------------- the one call a gate makes
@@ -676,19 +726,24 @@ async def decide(area: str, request, action: dict, *, ask: ASK_MODEL, attended: 
 def endpoint(base_url: str, api_key: str, model: str, *, usage: dict | None = None, extra: dict | None = None,
              max_tokens: int = 1500) -> ASK_MODEL:
     """An ask function on an OpenAI-compatible endpoint, for a process without the agent's client (the app
-    window's, a script). Temperature 0, no retries but for a field the endpoint refuses (a model with a fixed
-    temperature), which is dropped as the agent's client does; `usage` gathers calls and tokens."""
+    window's, a script). Temperature 0 and hidden reasoning off, as the app's other short judging calls ask (a
+    reasoning model left on spent the whole answer budget thinking and gave no verdict, so every card came back);
+    no retries but for a field the endpoint refuses (a model with a fixed temperature, one that must reason), which
+    is changed as the agent's client does; `usage` gathers calls and tokens."""
     import httpx
 
     from .endpoints import adapt_rejected_payload, chat_completions_url
+    from .llm import thinking_off
 
     # The payload as the endpoint last took it, so a refused field is refused once.
-    shape = {"temperature": 0, "max_tokens": max_tokens, **(extra or {})}
+    shape = thinking_off({"model": model, "temperature": 0, "max_tokens": max_tokens, **(extra or {})}, base_url, None)
+    shape.pop("model")
 
     async def ask(system: str, msgs: list[dict]) -> str:
         payload = {"model": model, "messages": [{"role": "system", "content": system}, *msgs], **shape}
         async with httpx.AsyncClient(timeout=TIMEOUT_S) as client:
-            for _ in range(3):
+            # One try, and one more for each field an endpoint may refuse (thinking, reasoning, temperature).
+            for _ in range(4):
                 resp = await client.post(chat_completions_url(base_url), json=payload,
                                          headers={"Authorization": f"Bearer {api_key}"})
                 if usage is not None:
@@ -703,6 +758,8 @@ def endpoint(base_url: str, api_key: str, model: str, *, usage: dict | None = No
             got = data.get("usage") or {}
             usage["prompt_tokens"] = usage.get("prompt_tokens", 0) + int(got.get("prompt_tokens") or 0)
             usage["completion_tokens"] = usage.get("completion_tokens", 0) + int(got.get("completion_tokens") or 0)
+            # What the provider says the call cost, where it says (OpenRouter does).
+            usage["cost"] = usage.get("cost", 0.0) + float(got.get("cost") or 0)
         return str(((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "")
 
     return ask

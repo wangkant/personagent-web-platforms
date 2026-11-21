@@ -269,26 +269,15 @@
   font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
 }
 
-/* ---- Under the reply: the sites it drew on, opening to the pages. */
+/* ---- Under the reply: the sites it drew on, each chip opening its page; the button at the end lists them all. */
 .act-src {
   margin-top: var(--pa-s3);
   font-size: var(--pa-fs-xs);
 }
-.act-src-head {
+.act-src-row {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  width: fit-content;
-  cursor: pointer;
-  list-style: none;
-}
-.act-src-head::-webkit-details-marker {
-  display: none;
-}
-.act-src-head:focus-visible {
-  outline: var(--pa-focus);
-  outline-offset: 2px;
-  border-radius: var(--pa-r-pill);
 }
 .act-chip {
   display: inline-flex;
@@ -300,18 +289,25 @@
   border-radius: var(--pa-r-pill);
   background: var(--pa-surface);
   color: var(--pa-muted);
+  font: inherit;
+  text-decoration: none;
   white-space: nowrap;
+  cursor: pointer;
   transition: background var(--pa-t-fast), border-color var(--pa-t-fast);
+}
+.act-chip:hover {
+  border-color: var(--pa-line-strong);
+  background: var(--pa-hover);
+}
+.act-chip:focus-visible {
+  outline: var(--pa-focus);
+  outline-offset: 2px;
 }
 .act-chip-more {
   padding: 0 10px;
 }
-.act-src-head:hover .act-chip,
-.act-src[open] .act-chip {
+.act-chip-more[aria-expanded="true"] {
   border-color: var(--pa-line-strong);
-}
-.act-src-head:hover .act-chip {
-  background: var(--pa-hover);
 }
 .act-src-list {
   max-width: 520px;

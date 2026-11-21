@@ -7,7 +7,8 @@ A model that takes pictures also points at one drawn picture (see/profile.py's
 self-test), kept as `pointing`: how it works a window only a picture can work.
 The answers and the refusals those calls taught (llm's quirks) are kept in
 <runtime>/model-abilities.json, keyed by the chat URL and the model, so the
-service process and the page read the same answers after a restart.
+service process and the page read the same answers after a restart. Ordinary calls add what they measure to the
+record (note_learned): the ratio of reported to estimated tokens and the window an overflow error stated (context.py).
 
     record(runtime, url, model)       the measured abilities, or None before a check
     can(runtime, url, model, name)    "yes", "no", "unstable", or "" when not measured;
@@ -206,6 +207,23 @@ def note_quirk(caller, url: str, model: str, field: str, value) -> None:
         _change(runtime, edit)
     except OSError as e:
         logger.debug("[Agent] refusal not kept: %s", e)
+
+
+def note_learned(caller, url: str, model: str, **found) -> None:
+    """Keep what ordinary calls measured (context.py: `token_ratio`, `context_error`) with the model's record;
+    a check measures afresh and drops it."""
+    runtime = runtime_of(caller)
+    if runtime is None or caller.__dict__.get("_abilities_fresh") or not record(runtime, url, model):
+        return
+
+    def edit(data):
+        rec = (data.get("models") or {}).get(key_of(url, model))
+        if isinstance(rec, dict):
+            rec.update(found)
+    try:
+        _change(runtime, edit)
+    except OSError as e:
+        logger.debug("[Agent] measure not kept: %s", e)
 
 
 def note_problem(caller, kind: str, url: str) -> None:
@@ -445,7 +463,7 @@ async def _measure(caller, url: str, key: str, model: str) -> dict:
                 break
     out["thinking_detail"] = {"reasons": reasons, "off": quiet is not False, "param": param}
     out["thinking"] = "yes" if reasons else ("no" if quiet is not None else "")
-    # How much the reply's tool rounds may hold (search.py budgets them from it).
+    # The window as the host lists it, one source of the budget's (context.window).
     out["context"] = await _context(url, key, model)
     return out
 

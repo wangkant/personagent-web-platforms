@@ -5,8 +5,6 @@ license: Apache-2.0
 metadata:
   mibo-title-zh: 按你的口吻起草消息
   mibo-description-zh: 根据记忆中你的写作习惯（篇幅、语气、用词）起草消息、回复或短帖；仅起草，不发送。
-  mibo-words: 起草 草稿 写一条 写条 写封 回复 回信 消息 短信 邮件 私信 朋友圈 口吻 语气 措辞 老板 同事 请假 道歉 祝福 邀请 draft write reply message email text post invite inviting wording tone voice
-  mibo-asks: 起草, 帮我回复, 回个消息, 写一封, 用我的口吻, draft a, reply to
 ---
 
 # Drafting in their voice

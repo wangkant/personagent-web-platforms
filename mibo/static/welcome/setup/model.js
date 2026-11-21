@@ -27,7 +27,10 @@
     ["LLM_FALLBACK_API_KEY", "fallbackKey"],
     ["LLM_JUDGE_MODEL", "judge"],
     ["LLM_DM_MODEL", "dm"],
+    ["CONTEXT_WINDOW", "contextWindow"],
   ];
+  // The help under the context window, by where the window in use when it is blank comes from (context.window).
+  const WINDOW_HELP = { host: "contextWindowHost", error: "contextWindowLearned", assumed: "contextWindowAssumed" };
   // A failed save or test, as a state of the top card.
   const STATE_OF = {
     key_rejected: "key", model_no_balance: "no_balance", model_not_found: "not_found", model_limited: "limited",
@@ -974,6 +977,7 @@
           control.classList.add("setup-secret-input");
         }
         if (name === "LLM_FALLBACK_BASE_URL") control.inputMode = "url";
+        if (name === "CONTEXT_WINDOW") control.inputMode = "numeric";
         const one = field(t[word], control, t[`${word}Help`]);
         control.addEventListener("input", () => {
           one.error("");
@@ -1014,6 +1018,9 @@
           } else one.value = value.values[name] || "";
         }
         more.fields.LLM_FALLBACK_BASE_URL.control.placeholder = value.llmBaseUrl || "";
+        const room = value.contextWindow;
+        more.fields.CONTEXT_WINDOW.control.placeholder = String(room.tokens);
+        more.fields.CONTEXT_WINDOW.help(fill(t[WINDOW_HELP[room.from]], { n: room.tokens.toLocaleString() }));
         more.loaded = true;
         more.failLine.hidden = true;
       } catch (failure) {

@@ -19,6 +19,7 @@ from pathlib import Path
 import re
 import secrets
 import socket
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -33,7 +34,7 @@ from dotenv import dotenv_values
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 
-from . import __version__, channels, home as homes, i18n, langs
+from . import __version__, channels, db, home as homes, i18n, langs
 from . import setup_wizard as sw
 from . import life
 from . import quiet
@@ -64,7 +65,7 @@ PAGE_ASSETS = ("i18n.js", "app.js", "app.css", "chat.js", "chat.css", "finds.js"
                "browse.js", "browsetabs.js", "browsemenu.js", "browsestrip.js", "browse.css", "plus.js", "plus.css", "activity.js", "activity.css",
                "linkcard.js", "linkcard.css", "modelbar.js", "modelbar.css", "providermarks.js", "sites.js", "sites.css",
                "toolcard.js", "petux.css", "petbox.js", "petline.js", "petedge.js", "petdial.js",
-               "petclick.js", "petoff.js", "compact.js", "compact.css", "schedulechat.js")
+               "petclick.js", "petoff.js", "compact.js", "compact.css", "schedulechat.js", "markdown-it.umd.min.js")
 # Settings' sections, each a script of its own under ASSETS/setup (setup.js is their shell).
 SETUP_PARTS = ("character", "model", "connect", "language", "recs", "walks", "memory", "privacy", "device", "about", "shell", "programs",
                "skills", "tools", "schedule")
@@ -77,7 +78,6 @@ PERSONA_LIMIT = 16_000
 # Another assistant's memory list pasted into Settings › 记忆: characters read, items kept at most (person.FACTS_MAX).
 PERSON_PASTE_MAX = 8_000
 PERSON_IMPORT_MAX = 200
-CHAT_KEPT = 50
 # The chat that is the character's own: what it finds arrives there. The others are plain chats.
 MAIN_CHAT = "main"
 CHAT_ID = re.compile(r"[0-9a-f]{16}")
@@ -121,16 +121,6 @@ PAGE_HOST = "127.0.0.1"
 RESTART_WAIT_S = 60
 LOOPBACK = ("localhost", "127.0.0.1", "::1")
 FORWARDED = ("x-forwarded-host", "forwarded", "x-forwarded-for")
-
-
-def keep_recent(messages: list[dict]) -> tuple[list[dict], bool]:
-    """The last CHAT_KEPT messages, starting at one the person sent so that no
-    reply is cut in half, and whether any were dropped."""
-    if len(messages) <= CHAT_KEPT:
-        return messages, False
-    kept = messages[-CHAT_KEPT:]
-    first = next((i for i, m in enumerate(kept) if m.get("role") == "user"), 0)
-    return kept[first:], True
 
 
 class _CommandReader:
@@ -208,20 +198,20 @@ def _now_iso() -> str:
 
 
 class PageChat:
-    """One chat of the page: its own conversation with the character and the
-    messages the page shows. The main chat is kept where the page always kept
-    its one chat, a plain chat in a file of its own named by its id."""
+    """One chat of the page: its own conversation with the character and every
+    message the page shows, kept in the runtime database (db.py): a row for the
+    chat in page_chats, one per message in page_messages. Rows of another kind
+    in page_messages are not this class's and are left as they are."""
 
-    def __init__(self, path: Path, ident: str = MAIN_CHAT):
-        self.path, self.id = path, ident
-        saved = sw._read_json(path)
-        self.conversation = str(saved.get("conversation") or secrets.token_hex(12))[:64]
-        self.title = str(saved.get("title") or "")[:TITLE_MAX]
-        self.at = str(saved.get("at") or "")
-        messages = [m for m in saved.get("messages", []) if isinstance(m, dict)]
-        self.history, dropped = keep_recent(messages)
-        self.trimmed = bool(saved.get("trimmed")) or dropped
-        self.seq = int(saved.get("seq") or 0) if str(saved.get("seq") or 0).isdigit() else 0
+    def __init__(self, store: db.Db, ident: str = MAIN_CHAT, row: tuple | None = None, messages=()):
+        self.store, self.id = store, ident
+        self.conversation, self.title, self.at, self.seq = row or (secrets.token_hex(12), "", "", 0)
+        # {seq: the message as stored}: what a save compares with to write only what changed.
+        self._stored = dict(messages)
+        self._wipe = False
+        # The secrets said in this chat since the page started, masked wherever a reply repeats them.
+        self._secrets: dict = {}
+        self.history = [json.loads(body) for body in self._stored.values()]
         for message in self.history:
             # Sent while the page process ended: shown as not answered, to send again.
             if message.pop("pending", None):
@@ -237,36 +227,74 @@ class PageChat:
             entry["seq"] = self.seq
             # When it was said: the page draws its days and times from this.
             entry.setdefault("at", self.at)
-        self.history, dropped = keep_recent(self.history + entries)
-        self.trimmed = self.trimmed or dropped
+        self.history = self.history + entries
         return entries
 
     def view(self, after: int | None = None) -> dict:
         """The chat as the page shows it; with `after`, only what came since that number.
         `chat` changes when a new chat starts, so the page knows to start over."""
         messages = [dict(m) for m in self.history if after is None or m["seq"] > after]
-        return {"messages": messages, "chat": self.tag(), "last": self.seq, "kept": CHAT_KEPT,
-                "trimmed": self.trimmed, **({"private": True} if self.private else {})}
+        return {"messages": messages, "chat": self.tag(), "last": self.seq,
+                **({"private": True} if self.private else {})}
 
     def reset(self) -> None:
         self.conversation = secrets.token_hex(12)
         self.history = []
-        self.trimmed = False
+        self._wipe = True
 
     @property
     def private(self) -> bool:
         """A 无痕对话: kept in this process only, and never in the character's record or memory."""
         return channels.private_chat(self.conversation)
 
-    def save(self) -> None:
+    def _mask(self, messages: list[dict]) -> None:
+        """No ID or card number, password or code is kept in the page's copy (person.mask): not in a line, its
+        steps or the chat's title, nor where a reply repeats a password of theirs without its word."""
+        from . import person
+        for m in messages:
+            if m.get("role") == "user" and isinstance(m.get("text"), str):
+                self._secrets.update(person.secret_values(m["text"]))
+        self.title = person.mask(self.title, self._secrets)[0]
+        for m in messages:
+            if isinstance(m.get("text"), str):
+                m["text"] = person.mask(m["text"], self._secrets)[0]
+            for step in m.get("trace") or []:
+                for key in ("what", "out"):
+                    if isinstance(step.get(key), str):
+                        step[key] = person.mask(step[key], self._secrets)[0]
+            for entry in m.get("activity") or []:
+                entry["line"] = person.mask(entry["line"], self._secrets)[0]
+
+    def save(self) -> set:
+        """Write the messages that changed, masked, and remove those that left, in one transaction; the stored
+        pictures and files of the messages that left. A 无痕对话 is never written."""
         if self.private:
-            return
-        saved = {"conversation": self.conversation, "seq": self.seq, "messages": self.history,
-                 "trimmed": self.trimmed}
-        if self.id != MAIN_CHAT:
-            saved.update(title=self.title, at=self.at)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_text(self.path, json.dumps(saved, ensure_ascii=False))
+            return set()
+        changed = [m for m in self.history
+                   if self._stored.get(m["seq"]) != json.dumps(m, ensure_ascii=False)]
+        self._mask(changed)
+        bodies = {m["seq"]: self._stored.get(m["seq"]) for m in self.history}
+        bodies.update((m["seq"], json.dumps(m, ensure_ascii=False)) for m in changed)
+        left = [seq for seq in self._stored if seq not in bodies]
+        with self.store.write() as conn:
+            if self._wipe:
+                conn.execute("DELETE FROM page_messages WHERE chat = ?", (self.id,))
+            conn.execute("INSERT OR REPLACE INTO page_chats VALUES (?,?,?,?,?)",
+                         (self.id, self.conversation, self.title, self.at, self.seq))
+            conn.executemany("DELETE FROM page_messages WHERE chat = ? AND seq = ?", [(self.id, s) for s in left])
+            conn.executemany("INSERT OR REPLACE INTO page_messages(chat, seq, body) VALUES (?,?,?)",
+                             [(self.id, m["seq"], bodies[m["seq"]]) for m in changed])
+        gone = set().union(*(_stored_names(json.loads(self._stored[s])) for s in left))
+        self._stored, self._wipe = bodies, False
+        return gone
+
+    def delete(self) -> set:
+        """The chat and its messages leave the database; the stored pictures and files they showed."""
+        with self.store.write() as conn:
+            conn.execute("DELETE FROM page_messages WHERE chat = ?", (self.id,))
+            conn.execute("DELETE FROM page_chats WHERE id = ?", (self.id,))
+        self.store.scrubbed()
+        return set().union(*map(_stored_names, self.history))
 
     def listed(self) -> dict:
         return {"id": self.id, "title": self.title, "at": self.at, **({"private": True} if self.private else {})}
@@ -293,17 +321,22 @@ class Workspace:
         # Set when something new came in (found): the share step looks then.
         self._share_wake = asyncio.Event()
         self._closed = False
-        self._history_path = self.home / "runtime" / "desktop" / "browser-chat.json"
-        self._pictures = self._history_path.with_name("chat-pictures")
+        self._desktop = self.home / "runtime" / "desktop"
+        self._pictures = self._desktop / "chat-pictures"
         # The text files the person attached.
-        self._files = self._history_path.with_name("chat-files")
-        # The main chat, where what the character finds arrives too, is the page's one chat of before.
-        self._main = PageChat(self._history_path)
-        self._chats: dict[str, PageChat] = {}
-        folder = self._history_path.with_name("chats")
-        for path in sorted(folder.glob("*.json")) if folder.is_dir() else ():
-            if CHAT_ID.fullmatch(path.stem):
-                self._chats[path.stem] = PageChat(path, path.stem)
+        self._files = self._desktop / "chat-files"
+        # The chats, from the runtime database: the main chat, where what the character finds arrives too,
+        # and the plain chats.
+        self.db = db.at(self._runtime())
+        messages: dict[str, list] = {}
+        for chat, seq, body in self.db.read(
+                "SELECT chat, seq, body FROM page_messages WHERE kind = 'message' ORDER BY chat, seq"):
+            messages.setdefault(chat, []).append((seq, body))
+        rows = {r[0]: r[1:] for r in self.db.read("SELECT id, conversation, title, at, seq FROM page_chats")}
+        self._main = PageChat(self.db, MAIN_CHAT, rows.pop(MAIN_CHAT, None), messages.get(MAIN_CHAT, ()))
+        self._chats: dict[str, PageChat] = {ident: PageChat(self.db, ident, row, messages.get(ident, ()))
+                                            for ident, row in sorted(rows.items())}
+        self._prune_pictures()
         # The one thing the pet's card and the share step bring next, chosen by the character's model.
         self.chooser = recommend.Chooser(self)
         # When the card and the share step bring it (pacing.py).
@@ -512,6 +545,7 @@ class Workspace:
     def reset_chat(self) -> None:
         self._main.reset()
         self._save_chat()
+        self.db.scrubbed()
 
     def _append(self, entries: list[dict], chat: PageChat | None = None) -> list[dict]:
         return (chat or self._main).append(entries)
@@ -533,7 +567,7 @@ class Workspace:
             if blank is not None:
                 return blank.listed()
             ident = secrets.token_hex(8)
-            chat = PageChat(self._history_path.with_name("chats") / f"{ident}.json", ident)
+            chat = PageChat(self.db, ident)
             if private:
                 chat.conversation = channels.PRIVATE_CHAT + secrets.token_hex(12)
             chat.at = _now_iso()
@@ -559,8 +593,7 @@ class Workspace:
             if chat is self._main:
                 raise ValueError("invalid_chat")
             del self._chats[chat.id]
-            chat.path.unlink(missing_ok=True)
-            self._prune_pictures()
+            self._prune_pictures(chat.delete())
             # Its chat record goes with it (what was kept about them stays), so no search of past chats finds it.
             try:
                 await self.character.forget_chat(chat.conversation, [c.conversation for c in self._all_chats()])
@@ -678,12 +711,14 @@ class Workspace:
         except OSError:
             return False
 
-    def _prune_pictures(self) -> None:
-        """Pictures and attached files no message shows any more are removed with the messages."""
+    def _prune_pictures(self, names: set | None = None) -> None:
+        """Pictures and attached files of `names` that no message shows any more are removed with the messages;
+        with no names (a start), every one stored that no chat shows, a 无痕对话's of before the start among them."""
         kept = set().union(*(_stored_names(m) for chat in self._all_chats() for m in chat.history))
         for folder, pattern in ((self._pictures, PICTURE_NAME), (self._files, FILE_NAME)):
             try:
-                stored = list(folder.iterdir()) if self._own_folder(folder) else []
+                stored = (list(folder.iterdir()) if names is None else [folder / name for name in names]) \
+                    if self._own_folder(folder) else []
             except OSError:
                 continue
             for path in stored:
@@ -694,25 +729,9 @@ class Workspace:
                         pass
 
     def _save_chat(self, chat: PageChat | None = None) -> None:
-        from . import person
-        chat = chat or self._main
-        if not chat.private:
-            # No ID or card number, password or code is kept in the page's copy (person.mask): not in a line, its
-            # steps or the chat's title, nor where a reply repeats a password of theirs without its word.
-            values = {k: v for m in chat.history if m.get("role") == "user" and isinstance(m.get("text"), str)
-                      for k, v in person.secret_values(m["text"]).items()}
-            chat.title = person.mask(chat.title, values)[0]
-            for m in chat.history:
-                if isinstance(m.get("text"), str):
-                    m["text"] = person.mask(m["text"], values)[0]
-                for step in m.get("trace") or []:
-                    for key in ("what", "out"):
-                        if isinstance(step.get(key), str):
-                            step[key] = person.mask(step[key], values)[0]
-                for entry in m.get("activity") or []:
-                    entry["line"] = person.mask(entry["line"], values)[0]
-        chat.save()
-        self._prune_pictures()
+        left = (chat or self._main).save()
+        if left:
+            self._prune_pictures(left)
         self.chat_changed()
 
     # The window app replaces these two to tell its pages at once (window.py); elsewhere nothing is told.
@@ -900,7 +919,7 @@ class Workspace:
             (said,) = room.append([asked])
             # Kept now, marked, so a page process that ends mid-reply leaves it to send again.
             said["pending"] = True
-            with contextlib.suppress(OSError):
+            with contextlib.suppress(sqlite3.Error):
                 room.save()
             self._replying = (room, said, asyncio.Event())
             try:
@@ -1042,13 +1061,14 @@ class Workspace:
         own copies. A forget (`mark`: its language) puts the forgotten mark in place
         of each sentence holding the words, in every chat, and of the lines it names
         in this one; a turn not to keep goes from this chat whole. The messages
-        `keep` names stay. How many changed."""
+        `keep` names stay. Every chat that changed is written in one transaction,
+        and the database keeps no older copy of the words. How many changed."""
         from . import person
         lines = {" ".join(part.split()) for x in scrub.get("lines") or [] for part in [str(x), *str(x).split("\n")]}
         lines.discard("")
         said = person.forget_hit(scrub.get("words") or [], scrub.get("texts") or [])
         mark = scrub.get("mark")
-        changed = 0
+        changed, touched = 0, []
         for chat in self._all_chats():
 
             def hit(text: str, chat=chat) -> bool:
@@ -1064,16 +1084,19 @@ class Workspace:
                     rows.append({**m, "text": person.scrub(text, hit, mark)})
             if len(rows) != len(chat.history) or any(a is not b for a, b in zip(rows, chat.history)):
                 chat.history = rows
-                if chat is not room:
-                    with contextlib.suppress(OSError):
-                        chat.save()
+                touched.append(chat)
+        if touched:
+            with self.db.write():
+                for chat in touched:
+                    self._save_chat(chat)
+            self.db.scrubbed()
         return changed
 
     def _unanswered(self, said: dict, code: str, room: PageChat) -> None:
         """Kept, marked, so the person can see which message went unanswered and send it again."""
         said.pop("pending", None)
         said["failed"] = code
-        with contextlib.suppress(OSError):
+        with contextlib.suppress(sqlite3.Error):
             self._save_chat(room)
 
     # -- what the character knows of the one person (person.json)
@@ -1162,14 +1185,15 @@ class Workspace:
             self._append(messages)
             self._save_chat()
             for rank, item in enumerate(items):
+                shaped = (served or {}).get(item.id, {})
                 await asyncio.to_thread(feed.remember, self._runtime(), item, "seen", surface="chat", rank=rank,
-                                        slot=(served or {}).get(item.id, {}).get("slot", ""))
+                                        slot=shaped.get("slot", ""), line=shaped.get("line", ""))
                 await self.mark_item(item.id, "told")
         return {"count": len(items), **self.history(since)}
 
     async def _share_due(self) -> bool:
         """Whether the share step brings something now, as the pacing says; never before the first run is done."""
-        if not app_settings(self._history_path.parent).get("toured"):
+        if not app_settings(self._desktop).get("toured"):
             return False
         return await self.pace.due("chat")
 

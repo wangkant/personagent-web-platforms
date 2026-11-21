@@ -39,7 +39,7 @@ from typing import Callable
 
 from ..web.pageops import SECRET_LABEL, STATE_MAX, clip, quote, well_formed
 from ..web.pageops import norm as _norm
-from . import win32
+from . import shape, win32
 
 ASSEMBLY = ", Version=4.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35"
 # At most this many elements are read of one look; a value is cut at these lengths.
@@ -64,6 +64,11 @@ WATCHED_MAX = 40
 LISTS = {"list", "tree", "table", "grid", "menu"}
 # A combo box's choices are printed with it, this many at most.
 OPTIONS_MAX = 12
+# A Chromium-drawn page asked for its tree is waited for this long at most.
+WAKE_S = 2.5
+# Nameless controls and pictures described in one look, and the smallest picture worth a line.
+UNNAMED_MAX = 12
+PICTURE_MIN = 16
 
 ROLES = {
     "Button": "button", "SplitButton": "button", "Edit": "textbox", "Document": "document", "Hyperlink": "link",
@@ -128,7 +133,8 @@ def _cache():
     for p in (E.RuntimeIdProperty, A.ScrollPattern.VerticallyScrollableProperty,
               A.ScrollPattern.VerticalViewSizeProperty, A.ScrollPattern.VerticalScrollPercentProperty,
               E.ControlTypeProperty, E.NameProperty, E.AutomationIdProperty, E.ClassNameProperty,
-              E.IsEnabledProperty, E.HasKeyboardFocusProperty, E.IsPasswordProperty, E.IsOffscreenProperty,
+              E.HelpTextProperty, E.IsEnabledProperty, E.HasKeyboardFocusProperty, E.IsPasswordProperty,
+              E.IsOffscreenProperty,
               E.BoundingRectangleProperty, E.ProcessIdProperty, E.IsKeyboardFocusableProperty,
               E.NativeWindowHandleProperty, E.IsInvokePatternAvailableProperty, E.IsValuePatternAvailableProperty,
               E.IsTogglePatternAvailableProperty, E.IsSelectionItemPatternAvailableProperty,
@@ -199,6 +205,11 @@ class View:
         self.own: set[int] | None = None
         # The menus `menu` opened, each with the control it was opened on, read with the window while they show.
         self.menus: dict[int, Node] = {}
+        # Chromium page windows already asked for their tree, and whether the last look had one that gave nothing.
+        self.woken: set[int] = set()
+        self.asleep = False
+        # The controls of the last look that have no name, described by where they are and how they look.
+        self.unnamed: list[str] = []
 
     # --- which windows are the program's
 
@@ -242,6 +253,35 @@ class View:
         new = set(self.windows()) - set(self.seen)
         return bool(new) and all(win32.class_of(h) == "#32768" or win32.popup(h) for h in new)
 
+    def wake(self, wins: list[int]) -> None:
+        """A Chromium-drawn page (Electron, WebView2, CEF) builds its accessibility tree only once a client asks for
+        it. Each page window not asked before is asked as assistive tools ask (the screen-reader probe, then its
+        root's name read through UI Automation, which Chromium takes as a client using the page), and waited for
+        until the page shows elements, WAKE_S at most. `asleep` is left true when one still shows none."""
+        A = automation()
+        pages = [h for top in wins for h in win32.chromium_pages(top) if h not in self.woken]
+        walker = A.TreeWalker.ControlViewWalker
+
+        def ready(h: int) -> bool:
+            try:
+                doc = walker.GetFirstChild(element(h))
+                if doc is None:
+                    return False
+                # Reading a name is what Chromium counts as a client using the page.
+                _ = doc.Current.Name
+                return walker.GetFirstChild(doc) is not None
+            except Exception:
+                return False
+        for h in pages:
+            self.woken.add(h)
+            win32.probe_page(h)
+        waiting = [h for h in pages if not ready(h)]
+        end = time.monotonic() + WAKE_S
+        while waiting and time.monotonic() < end and not self.halted():
+            time.sleep(0.1)
+            waiting = [h for h in waiting if not ready(h)]
+        self.asleep = bool(waiting)
+
     # --- looking
 
     def look(self, max: int = STATE_MAX) -> str:
@@ -256,12 +296,18 @@ class View:
         if not wins:
             raise Refused("[gone] the window is closed")
         self.seen = tuple(wins)
+        self.wake(wins)
         # How much of the target window the structure names: its small named controls, and its big nameless
         # areas (a canvas), as see/when.py counts them.
         frame = win32.rect(self.hwnd)
         area = (frame[2] - frame[0]) * (frame[3] - frame[1]) or 1
         small: list[tuple] = []
         blank: list[tuple] = []
+        # The target window's texts with their boxes, and its nameless controls and pictures: (line, head, box, kind).
+        texts: list[tuple[str, tuple]] = []
+        nameless: list[tuple[int, str, tuple, str]] = []
+        # The boxes of the web pages read by their controls: the surface Chromium draws them on is not a drawn area.
+        pages: list[tuple] = []
 
         def more(el, role: str, name: str, children) -> None:
             """A list's rows that are scrolled out of view are not printed: say how many, and how to reach one."""
@@ -331,10 +377,24 @@ class View:
                         patterns=patterns, readonly=bool(_get(el, A.ValuePattern.IsReadOnlyProperty)),
                         top=top, parent=parent, cells=[], where=where)
             acts = [p for p in patterns if p != "text" or role in ("document", "textbox")]
+            if role == "document" and _holds(el, CONTROLS - {"document"}):
+                # A web page (Electron, WebView2, CEF, a browser) is a document full of controls: read as a group of
+                # them, not as one text.
+                if top == self.hwnd:
+                    pages.append(box)
+                if name and name.lower() not in inside:
+                    lines.append(f"## {name}")
+                    inside = f"{inside} {name.lower()}"
+                    where = name
+                for child in el.CachedChildren:
+                    read(child, top, inside, parent, where)
+                return
             if role in ("text", "status") and name and len(self.shown) < WATCHED_MAX:
                 # A text the window shows (a display, a status line): read again after each action.
                 self.shown[_rid(el)] = (el, name)
             if role == "text" and not acts:
+                if name and top == self.hwnd:
+                    texts.append((name, box))
                 if name:
                     # A dialog's message, for the gate's reading of what its OK confirms.
                     self.words.setdefault(top, []).append(name)
@@ -342,6 +402,10 @@ class View:
                     lines.append(name)
                 return
             if not acts and not (role in CONTROLS and (focusable or name)):
+                if role == "img" and not name and top == self.hwnd and min(box[2], box[3]) >= PICTURE_MIN:
+                    # A picture with no name (an avatar, an icon): said where it is and how it looks.
+                    lines.append("(picture)")
+                    nameless.append((len(lines) - 1, "", box, "picture"))
                 if name and role in HEADED and name.lower() not in inside:
                     lines.append(f"## {name}")
                     inside = f"{inside} {name.lower()}"
@@ -376,12 +440,19 @@ class View:
                 if found:
                     options = " options: " + " | ".join(clip(o, 30) for o in found[:OPTIONS_MAX]) + (
                         f" | and {len(found) - OPTIONS_MAX} more" if len(found) > OPTIONS_MAX else "")
-            lines.append(("*" if previous and ident not in previous else "") + f"[{ident}] {role}"
+            # A tooltip or accessible description, when it says more than the name.
+            tip = norm(_get(el, A.AutomationElement.HelpTextProperty))
+            head = f"[{ident}] {role}"
+            lines.append(("*" if previous and ident not in previous else "") + head
                          + (" [secret]" if secret else "")
                          + (f' "{clip(name, 150)}"' if name else "")
                          + (f" = {quote(value)}" if value else "")
                          + (f" ({clip(', '.join(details), 150)})" if details else "")
-                         + (" " + " ".join(states) if states else "") + options)
+                         + (f" tip {quote(clip(tip, 80))}" if tip and tip != name else "")
+                         + (" " + " ".join(states) if states else "") + options
+                         + (f" @{shape.place(box, frame).replace(' ', '-')}" if top == self.hwnd and box[2] else ""))
+            if not name and top == self.hwnd and box[2]:
+                nameless.append((len(lines) - 1, head, box, "a picture" if _holds(el, {"img"}) else ""))
             if secret or role in ("document", "textbox"):
                 return
             inside = f"{inside} {name.lower()} {value.lower()}"
@@ -409,11 +480,14 @@ class View:
             for child in root.CachedChildren:
                 read(child, h, title.lower(), None)
         self.named = len(small)
+        self.unnamed = self._describe(lines, nameless, texts, frame)
+        blank = [b for b in blank if not any(shape.overlap(b, page) >= 0.5 * b[2] * b[3] for page in pages)]
         free = [b[2] * b[3] - sum(c[2] * c[3] for c in small if c[0] >= b[0] and c[1] >= b[1]
                                   and c[0] + c[2] <= b[0] + b[2] and c[1] + c[3] <= b[1] + b[3]) for b in blank]
         self.drawn = round(min(sorted(free)[-1], area) / area, 3) if free else 0.0
         header = f"[state] {clip(win32.title_of(self.hwnd), 120)}"
-        body = lines or ["(nothing in the accessibility tree: the window draws itself)"]
+        asked = ", even after its page was asked for it" if self.asleep else ""
+        body = lines or [f"(nothing in the accessibility tree{asked}: the window draws itself)"]
         if count >= NODES_MAX:
             body.append(f"... stopped reading at {NODES_MAX} elements")
 
@@ -429,6 +503,25 @@ class View:
             tail = fit(body[::-1], max * 0.2)
             body = [*body[:head], f"... {len(body) - head - tail} lines cut here", *body[len(body) - tail:]]
         return well_formed(f"{header}\n" + "\n".join(body) + "\n[/state]")
+
+    def _describe(self, lines: list[str], nameless: list[tuple], texts: list[tuple], frame: tuple) -> list[str]:
+        """Each nameless control and picture of the target window said by its size, shape and colour (read off the
+        window's own picture, which stays on this computer) and the text next to it; the controls' lines, for the
+        loop to name what it has not tried."""
+        if not nameless:
+            return []
+        image, origin = win32.capture(self.hwnd)
+        out = []
+        for at, head, box, kind in nameless[:UNNAMED_MAX]:
+            near = shape.label(box, texts)
+            said = (shape.looks(image, box, origin) + (f", {kind}" if kind and head else "")
+                    + (f"; {near}" if near else ""))
+            if head:
+                lines[at] = lines[at].replace(head, f"{head} (no name: {said})", 1)
+                out.append(lines[at].lstrip("*"))
+            else:
+                lines[at] = f"(picture, no name: {said}) @{shape.place(box, frame).replace(' ', '-')}"
+        return out
 
     def _handle(self, el) -> int:
         """A small number for an element, the same across looks while the element lives (its RuntimeId)."""
@@ -557,6 +650,10 @@ class View:
         for ident, n in self.nodes.items():
             if n.top != self.hwnd or not n.rect[2]:
                 continue
+            if n.secret:
+                # A password field goes painted over.
+                bx, by, bw, bh = n.rect
+                draw.rectangle((bx - left, by - top, bx - left + bw, by - top + bh), fill=(128, 128, 128))
             x, y = n.center()
             marks[str(ident)] = (x, y)
             self._mark(draw, x - left, y - top, str(ident), (230, 60, 40))
@@ -1186,6 +1283,21 @@ class View:
                     secret=f.Current.IsPassword, rect=(int(r.X), int(r.Y), int(r.Width), int(r.Height)),
                     hwnd=f.Current.NativeWindowHandle, patterns=[], readonly=False,
                     top=win32.top_of(f.Current.NativeWindowHandle or self.hwnd), parent=None, cells=[])
+
+
+def _holds(el, roles: set, most: int = 400) -> bool:
+    """Whether anything under `el` has one of `roles`, from the look's cache: a page's document holds controls (its
+    buttons, fields, list rows), a text document none."""
+    A = automation()
+    todo, seen = list(el.CachedChildren), 0
+    while todo and seen < most:
+        child = todo.pop()
+        seen += 1
+        ctype = _get(child, A.AutomationElement.ControlTypeProperty)
+        if ctype is not None and ROLES.get(ctype.ProgrammaticName.split(".")[-1]) in roles:
+            return True
+        todo.extend(child.CachedChildren)
+    return False
 
 
 def _rid(el) -> str:

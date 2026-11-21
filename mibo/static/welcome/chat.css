@@ -258,7 +258,7 @@
   color: var(--pa-ink);
   font-weight: 600;
 }
-.say.rich del {
+.say.rich s {
   color: var(--pa-muted);
 }
 .say.rich :not(pre) > code {
@@ -301,6 +301,13 @@
   text-align: left;
   vertical-align: top;
   overflow-wrap: normal;
+}
+/* A column's side, as the table's rule line set it. */
+.say-table [data-align="center"] {
+  text-align: center;
+}
+.say-table [data-align="right"] {
+  text-align: right;
 }
 .say-table th {
   background: var(--pa-sunken);
@@ -756,6 +763,13 @@ button.find-why:hover,
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
+}
+.find-reason {
+  margin: 2px 0 0;
+  color: var(--pa-muted);
+  font-size: var(--pa-fs-sm);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
 }
 .find-text {
   display: -webkit-box;
@@ -1579,6 +1593,13 @@ button.find-why:hover,
   padding: 8px 12px;
   border-radius: 10px;
   background: var(--pa-sunken);
+  overflow-wrap: anywhere;
+}
+/* Why the automatic review left this to the person: one muted line. */
+.op-card-why {
+  margin: 0 0 8px;
+  color: var(--pa-muted);
+  font-size: var(--pa-fs-sm);
   overflow-wrap: anywhere;
 }
 .op-card-facts {

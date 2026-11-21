@@ -8,17 +8,18 @@ at once. Only public addresses are read, every hop of a redirect included.
 """
 from __future__ import annotations
 
+import asyncio
 import html
-import json
 import re
 from urllib.parse import urljoin, urlsplit
 from xml.etree import ElementTree
 
+import feedparser
 import httpx
 
 from ..ingestion import _PinnedAsyncHTTPTransport, _resolve_public_target
 from ..roam import public_address, site_name, youtube_id
-from .base import PER_SOURCE, Find, Source, parse_feed, plain
+from .base import PER_SOURCE, Find, Source, feed_document, feed_finds, plain
 
 # A pasted address can be a large download; a page or feed is far smaller.
 BODY_MAX = 10_000_000
@@ -30,7 +31,6 @@ _FEED_TYPES = ("application/rss+xml", "application/atom+xml", "application/rdf+x
 _LINK = re.compile(r"<link\b[^>]*>", re.I)
 _ATTR = re.compile(r"""([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))""")
 _DECL = re.compile(r"^\s*<\?xml[^>]*\?>")
-_CHARSET = re.compile(rb"""(?:encoding|charset)\s*=\s*["']?([\w.:-]+)""", re.I)
 _YT = "https://www.youtube.com/feeds/videos.xml"
 _YT_CHANNEL = re.compile(r"^/channel/(UC[\w-]{22})")
 _YT_VIDEO_CHANNEL = re.compile(r'"videoDetails":\{[^{}]*?"channelId":"(UC[\w-]{22})"')
@@ -40,19 +40,15 @@ _GITHUB_NOT_USERS = {"about", "explore", "features", "marketplace", "orgs", "set
                      "trending", "collections", "events", "login", "pricing", "search", "notifications"}
 
 
-def _local(tag: str) -> str:
-    return tag.rsplit("}", 1)[-1]
-
-
 def _on(host: str, domain: str) -> bool:
     return host == domain or host.endswith("." + domain)
 
 
-async def _read(http: httpx.AsyncClient, url: str) -> tuple[str, str]:
-    """(final address, text) of a public address. Each hop, redirects included,
-    is resolved once and connected to that address, so neither a public page
-    nor a name that answers 127.0.0.1 on the second lookup (DNS rebinding)
-    can send the request into this network. `http` lends its timeouts and headers."""
+async def _read(http: httpx.AsyncClient, url: str) -> httpx.Response:
+    """The whole answer of a public address, at the address it ended at. Each hop,
+    redirects included, is resolved once and connected to that address, so neither
+    a public page nor a name that answers 127.0.0.1 on the second lookup (DNS
+    rebinding) can send the request into this network. `http` lends its timeouts and headers."""
     for _ in range(HOPS):
         target = await _resolve_public_target(url)
         if target is None:
@@ -70,78 +66,26 @@ async def _read(http: httpx.AsyncClient, url: str) -> tuple[str, str]:
                 body += chunk
                 if len(body) > BODY_MAX:
                     raise ValueError(f"too large to be a page or feed: {url}")
-            return url, _decode(bytes(body), answer.charset_encoding)
+            # httpx decodes a page's text by the charset its header names, else as UTF-8.
+            return httpx.Response(answer.status_code, content=bytes(body), request=answer.request,
+                                  headers=[pair for pair in answer.headers.items() if pair[0] == "content-type"])
     raise ValueError(f"more than {HOPS} redirects: {url}")
 
 
-def _decode(body: bytes, charset: str | None) -> str:
-    """The header's charset, else what the document declares, else UTF-8.
-    Some Chinese sites still serve GBK and only say so inside the page."""
-    if not charset:
-        match = _CHARSET.search(body[:2048])
-        charset = match.group(1).decode() if match else "utf-8"
+def _as_feed(answer: httpx.Response) -> feedparser.FeedParserDict | None:
+    """feedparser's reading of the answer when it is RSS or Atom, else None."""
     try:
-        return body.decode(charset, errors="replace")
-    except LookupError:
-        return body.decode("utf-8", errors="replace")
-
-
-def _as_feed(text: str) -> ElementTree.Element | None:
-    """The document's root when it is RSS or Atom, else None. The declaration
-    goes because the text is already decoded and may say another encoding."""
-    try:
-        root = ElementTree.fromstring(_DECL.sub("", text, count=1).encode("utf-8"))
-    except ElementTree.ParseError:
+        return feed_document(answer.content, str(answer.url), answer.headers.get("content-type", ""))
+    except ValueError:
         return None
-    return root if _local(root.tag) in ("rss", "feed", "RDF") else None
 
 
-def _describe(root: ElementTree.Element) -> tuple[str, str]:
-    """The feed's own title and the home page it names. The home names the
-    site better than the feed's host does (feedburner, simplecast)."""
-    channel = next((child for child in root if _local(child.tag) == "channel"), None)
-    title = home = ""
-    for node in (root, channel):
-        for child in node if node is not None else ():
-            tag = _local(child.tag)
-            if tag == "title" and not title and (child.text or "").strip():
-                title = plain(child.text, 120)
-            elif tag == "link" and not home and child.get("rel", "alternate") == "alternate":
-                href = (child.get("href") or child.text or "").strip()
-                home = href if href.startswith(("http://", "https://")) else ""
-    return title, home
-
-
-def _titled(text: str) -> str:
-    """The feed with a title on every entry. Mastodon and other short-post
-    feeds give none, and parse_feed passes over an entry without one; the
-    post's own opening words stand in."""
-    root = ElementTree.fromstring(_DECL.sub("", text, count=1).encode("utf-8"))
-    changed = False
-    for entry in root.iter():
-        if _local(entry.tag) not in ("item", "entry"):
-            continue
-        fields = {_local(child.tag): child for child in entry}
-        if (getattr(fields.get("title"), "text", "") or "").strip():
-            continue
-        body = next((words for words in (plain(getattr(fields.get(name), "text", ""), 100)
-                                         for name in ("description", "summary", "content")) if words), "")
-        if body:
-            title = fields.get("title")
-            if title is None:
-                ns = entry.tag[:-len(_local(entry.tag))]
-                title = ElementTree.SubElement(entry, ns + "title")
-            title.text = body
-            changed = True
-    return ElementTree.tostring(root, encoding="unicode") if changed else _DECL.sub("", text, count=1)
-
-
-def _entries(root: ElementTree.Element) -> int:
-    return sum(1 for node in root.iter() if _local(node.tag) in ("item", "entry"))
-
-
-def _entry(url: str, final: str, root: ElementTree.Element, title: str = "", name: str = "") -> dict:
-    own, home = _describe(root)
+def _entry(url: str, final: str, doc: feedparser.FeedParserDict, title: str = "", name: str = "") -> dict:
+    """The saved entry: the feed's own title, and the site its home page names, which names
+    the site better than the feed's host does (feedburner, simplecast)."""
+    own = plain(doc.feed.get("title", ""), 120)
+    home = doc.feed.get("link", "")
+    home = home if home.startswith(("http://", "https://")) else ""
     return {"url": url, "title": name or own or title or site_name(final), "site": site_name(home or final),
             "_final": final}
 
@@ -152,13 +96,13 @@ async def _feed(http: httpx.AsyncClient, url: str, *, title: str = "", name: str
     refuses simply has no feed here. `name` wins over the feed's own title,
     `title` only stands in for a missing one."""
     try:
-        final, text = await _read(http, url)
+        answer = await _read(http, url)
     except (httpx.HTTPError, ValueError):
         return None
-    root = _as_feed(text)
-    if root is None or (need_entries and not _entries(root)):
+    doc = await asyncio.to_thread(_as_feed, answer)
+    if doc is None or (need_entries and not doc.entries):
         return None
-    return _entry(url, final, root, title, name)
+    return _entry(url, str(answer.url), doc, title, name)
 
 
 def _alternates(page: str, base_url: str) -> list[tuple[str, str]]:
@@ -216,8 +160,8 @@ async def _known(http: httpx.AsyncClient, url: str, page: str) -> list[dict]:
         # Apple's directory names the show's own feed.
         ident = _APPLE_PODCAST.search(path).group(1)
         try:
-            _, text = await _read(http, f"https://itunes.apple.com/lookup?id={ident}&entity=podcast")
-            show = next((r for r in json.loads(text).get("results", []) if r.get("feedUrl")), None)
+            answer = await _read(http, f"https://itunes.apple.com/lookup?id={ident}&entity=podcast")
+            show = next((r for r in answer.json().get("results", []) if r.get("feedUrl")), None)
         except (httpx.HTTPError, ValueError):
             show = None
         if show:
@@ -257,14 +201,15 @@ async def discover(http: httpx.AsyncClient, address: str) -> list[dict]:
             found.append(entry)
 
     try:
-        final, page = await _read(http, url)
+        answer = await _read(http, url)
     except (httpx.HTTPError, ValueError):
-        final, page = url, ""
-    root = _as_feed(page)
-    if root is not None:
-        entry = _entry(url, final, root)
+        answer = None
+    doc = await asyncio.to_thread(_as_feed, answer) if answer else None
+    if doc is not None:
+        entry = _entry(url, str(answer.url), doc)
         del entry["_final"]
         return [entry]
+    final, page = (str(answer.url), answer.text) if answer else (url, "")
     for entry in await _known(http, final, page):
         keep(entry)
     for href, title in _alternates(page, final)[:ALTERNATES_MAX]:
@@ -285,8 +230,7 @@ def source_for(entry: dict) -> Source:
     site = entry.get("site") or title
 
     async def fetch(http: httpx.AsyncClient) -> list[Find]:
-        final, text = await _read(http, url)
-        return parse_feed(_titled(text), final, site=site)[:PER_SOURCE]
+        return (await feed_finds(await _read(http, url), site=site))[:PER_SOURCE]
 
     return Source(entry["key"], (title, title), (f"What {title} posts, from an address you added.",
                                                  f"你添加的地址：{title} 的新内容。"), "own", fetch, "all", "")

@@ -93,9 +93,9 @@ def test_allowing_the_start_takes_the_apps_own_page(client, workspace):
     assert next(t for t in view["servers"][0]["tools"] if t["name"] == "echo")["mode"] == "never"
     assert post(client, {"tool": {"server": "stand", "tool": "nope", "mode": "always"}}).json() == \
         {"error": "tools_unknown_tool"}
-    # Never: the character is not offered it at all.
-    offer = client.get("/api/mcp/offer", headers=HEADERS).json()
-    assert "echo" not in {t["tool"] for t in offer["direct"]}
+    # Never: the character's search does not find it at all, even in the server's whole list.
+    found = client.post("/api/mcp/find", headers=HEADERS, json={"query": "", "server": "stand"}).json()
+    assert found["status"] == "ok" and "echo" not in {t["tool"] for t in found["tools"]} and found["tools"]
     removed = post(client, {"remove": "stand"}).json()
     assert removed["servers"] == []
 

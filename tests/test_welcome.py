@@ -48,5 +48,5 @@ def test_a_memory_answer_is_marked_and_a_forget_marks_the_words_on_the_page(work
                      "Here's what I remember:", "(forgotten)", "Mira, forget Paris",
                      "nothing matching to forget", "Mira, forget Denver", "forgotten: your sister lives in Denver"]
     assert gone["forgotLines"] == 2 and gone["messages"] == workspace.history()["messages"]
-    assert "Denver" not in (workspace.home / "runtime" / "desktop" / "browser-chat.json").read_text(
-        encoding="utf-8").replace("forget Denver", "").replace("your sister lives in Denver", "")
+    kept = "".join(body for (body,) in workspace.db.read("SELECT body FROM page_messages"))
+    assert "Denver" not in kept.replace("forget Denver", "").replace("your sister lives in Denver", "")

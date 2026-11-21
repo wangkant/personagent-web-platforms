@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Town & Gown Weekly</title>
+    <link>https://towngown.example/</link>
+    <item>
+      <title>Bread & butter: the market returns</title>
+      <link>https://towngown.example/market?day=sat&stall=all</link>
+      <description>Farmers & bakers are back on Saturday.</description>
+      <pubDate>Thu, 19 Nov 2026 07:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Choir practice moves to Tuesday</title>
+      <link>https://towngown.example/choir</link>
+      <description>The hall is booked on Mondays.</description>
+      <pubDate>Wed, 18 Nov 2026 07:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

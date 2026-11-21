@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Awaitable, Callable
 
 from ..textproc import _WEB_DESC_CLOSE, _WEB_DESC_OPEN, _clean_prompt_source
-from .panel import CARD_S
+from ..cardwait import WAIT_S as CARD_S
 
 logger = logging.getLogger("mibo.desk")
 
@@ -50,12 +50,20 @@ UNCHANGING = ("look", "wait", "switch", "focus", "scroll")
 OTHER_SHOWN = 3000
 HELD = ("stopped", "paused", "handover", "refused", "declined")
 NUMBER = re.compile(r"\d[\d,.]*\d|\d")
+IDENT = re.compile(r"\[(\d+)\]")
+# Before an errand gives up on a name or asks, it hears once which nameless controls it has not tried.
+UNTRIED = ("[check] before saying it is not there, or asking: these controls have no name and you have not tried "
+           "them: {lines}. Any of them may be what the task names. Pressing one that only moves inside the program "
+           "(it opens a chat, a tab, a list or a page) changes nothing outside and asks nobody: press the likely one "
+           "by its id, then look. If none can be it, ask_person and say there what you see")
 
 RULES = """You operate one program's window on the person's Windows computer, for one task they asked for in the \
-chat. You see the window as lines: `[id] role "name" = "value" (columns) states`; `## ` lines are named groups; \
-other lines are text shown in the window; `--- window "title" (dialog|menu) ---` starts another window of the same \
-program; a `...` line says rows are scrolled out of view; `*` marks ids new since your last look; `[secret]` marks \
-a password field.
+chat. You see the window as lines: `[id] role "name" = "value" (columns) tip "..." states @place`; `## ` lines \
+are named groups; other lines are text shown in the window; `@place` is where a control sits in the window \
+(top-left, middle, bottom...); `tip` is its tooltip; a control without a name is said by how it looks, `(no name: \
+size, shape, colour; the text next to it)`, and a picture without a name likewise; `--- window "title" \
+(dialog|menu) ---` starts another window of the same program; a `...` line says rows are scrolled out of view; \
+`*` marks ids new since your last look; `[secret]` marks a password field.
 
 Each reply is ONE JSON object and nothing else:
 {"note": "<what you are doing now, a few words in the person's language>", "actions": [<the actions, in order>]}
@@ -63,6 +71,8 @@ A control is named by its "name", exactly as the latest look prints it. Add its 
 when several controls share the name or it has none; when you give both, they must be one line of the look. The \
 app checks every name against the window before it acts, and presses nothing else.
 {"do": "press", "name": "Seven"}  press a button, a menu item, a link or a tab, or open a list item
+{"do": "press", "name": "Send", "to": "<who or where it goes, as the window shows it>"}  a press that sends, posts \
+or submits says where it goes
 {"do": "press", "names": ["Three", "Seven", "Multiply by", "Four", "Eight", "Equals"]}  several presses in a row
 {"do": "set", "name": "Text editor", "text": "<text>"}  replace the whole text of a field or a document
 {"do": "append", "name": "Text editor", "text": "<text>"}  add text after what a field or a document holds
@@ -76,7 +86,7 @@ app checks every name against the window before it acts, and presses nothing els
 {"do": "paste", "name": "...", "text": "<text>"}  put text in at the caret as Ctrl+V does
 {"do": "key", "key": "Enter" | "Escape" | "Tab" | "F2" | "Delete" | "Ctrl+S" | ...}
 {"do": "wait", "until": "<words the window will show>", "seconds": 5}
-{"do": "ask_person", "question": "<what you need from them>"}
+{"do": "ask_person", "question": "<what you need from them, and what you see in the window>"}
 {"do": "done", "success": true, "result": "<what happened, or what you found, in the person's language>"}
 
 Rules:
@@ -151,7 +161,9 @@ def parse(answer: str) -> tuple[str, list[dict]]:
         if isinstance(names, list) and a["do"] in ("press", "invoke", "click"):
             out += [{"do": "press", "name": str(name)} for name in names]
         else:
-            out.append(a)
+            line = IDENT.match(str(a.get("name") or "").strip())
+            # A control named by copying its whole line of the look is the control of that id.
+            out.append({k: v for k, v in a.items() if k != "name"} | {"id": int(line.group(1))} if line else a)
     return " ".join(str(value.get("note") or "").split())[:80], out
 
 
@@ -162,6 +174,16 @@ def unshown(result: str, state: str, task: str) -> list[str]:
         return {m.group().replace(",", "").rstrip(".") for m in NUMBER.finditer(text)}
     have = numbers(state) | numbers(task)
     return sorted(n for n in numbers(result) if len(n) > 1 and n not in have)
+
+
+def plain(text: str) -> str:
+    """Words compared as a person reads them: case and spacing aside."""
+    return "".join(str(text).lower().split())
+
+
+def untried(look: dict, tried: set[str]) -> list[str]:
+    """The look's nameless controls that no action of the task has gone through on."""
+    return [line for line in look.get("unnamed") or [] if IDENT.match(line).group(1) not in tried]
 
 
 class Remote:
@@ -211,7 +233,11 @@ async def run(ask_model: Callable[[str, list[dict]], Awaitable[str]], hands, tas
     steps: list[str] = []
     said: list[str] = []
     calls = actions_used = stuck = bad = 0
-    checked = asked_again = changed = False
+    checked = asked_again = changed = explored = addressed = False
+    # Ids of the controls an action of this task went through on, and whether the window's pictures may go with
+    # the look (None until asked, when a look shows something with no name and the model takes pictures).
+    tried: set[str] = set()
+    pictured: bool | None = None
     begun = await hands.begin(task, program, model if eyes else "", tuple(also))
     if begun.get("status") != "ok":
         return {"status": begun.get("status") or "failed", "result": begun.get("line", ""), "steps": steps,
@@ -219,9 +245,10 @@ async def run(ask_model: Callable[[str, list[dict]], Awaitable[str]], hands, tas
     steps.append(begun.get("line", ""))
     program = begun.get("program") or program
 
-    def finish(status: str, result: str = "", kind: str = "", why: dict | None = None) -> dict:
+    def finish(status: str, result: str = "", kind: str = "", why: dict | None = None,
+               seen: list | None = None) -> dict:
         return {"status": status, "result": result, "steps": steps, "said": said, "calls": calls, "kind": kind,
-                "why": why or {}, "program": program}
+                "why": why or {}, "program": program, "seen": seen or []}
 
     async def end(outcome: dict) -> dict:
         await hands.end(outcome["status"], outcome.get("result", "")[:200])
@@ -277,8 +304,24 @@ async def run(ask_model: Callable[[str, list[dict]], Awaitable[str]], hands, tas
                      + "\n".join(f"- {line}" for line in steps[-HISTORY_SHOWN:]) + "\n" if steps else "")
                   + "The window now:\n" + fence(look["state"])
                   + (DRAWN if look.get("drawn", 0.0) > 0 else "") + "\nReply with one JSON object.")
+        content: str | list = prompt
+        if look.get("unnamed") and eyes in ("act", "look") and pictured is not False:
+            # Something has no name: the window's picture goes with its lines, the ids marked on it, once the person
+            # let its pictures go to their model service.
+            if pictured is None:
+                allowed = await asyncio.to_thread(hands._post, "see_allow", 2 * CARD_S + 30, look=False)
+                if allowed.get("status") in ("stopped", "paused", "handover"):
+                    return await end(finish(allowed["status"], allowed.get("line", "")))
+                # A no keeps the pictures home; the task goes on by the lines alone.
+                pictured = allowed.get("status") == "ok"
+            shot = await asyncio.to_thread(hands._post, "picture", 60) if pictured else {}
+            if shot.get("picture"):
+                content = [{"type": "text", "text": prompt.removesuffix("Reply with one JSON object.")
+                            + "The window's picture, each id marked at its control:"},
+                           {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + shot["picture"]}},
+                           {"type": "text", "text": "Reply with one JSON object."}]
         calls += 1
-        answer = await ask_model(RULES + (ACROSS if others else ""), [{"role": "user", "content": prompt}])
+        answer = await ask_model(RULES + (ACROSS if others else ""), [{"role": "user", "content": content}])
         note, planned = parse(answer)
         if not planned:
             bad += 1
@@ -292,6 +335,18 @@ async def run(ask_model: Callable[[str, list[dict]], Awaitable[str]], hands, tas
             await hands.step(len(said) + 1, note)
         cut = next((i for i, a in enumerate(planned) if a.get("do") in ENDS), len(planned))
         acts, last = planned[:cut], planned[cut] if cut < len(planned) else None
+        # A send goes to the one the task names: addressed by other words than the task's, it is held once, for the
+        # model to tell the two are one, with the nameless controls it has not tried beside them.
+        other = next((str(a["to"]) for a in acts if a.get("to") and plain(a["to"]) not in plain(task)), "")
+        if other and not addressed:
+            addressed = True
+            left = untried(look, tried)
+            steps.append(f"[check] nothing was sent: this send goes to {other[:40]!r}, and the task says: {task[:120]}. "
+                         + (f"These controls have no name and you have not tried them: {'; '.join(left[:6])}. "
+                            if left else "")
+                         + "Send only where the window shows the one the task names; if it is elsewhere, open it "
+                           "first; if you cannot tell, ask_person and say what you see")
+            continue
         proved = True
         if acts:
             # A reply that ends in done needs no new look when the app reads every action back.
@@ -311,6 +366,8 @@ async def run(ask_model: Callable[[str, list[dict]], Awaitable[str]], hands, tas
                 if status in HELD:
                     return await end(finish(status, line, result.get("kind", "")))
                 actions_used += status != "skipped"
+                if status == "ok" and a.get("id") is not None:
+                    tried.add(str(a["id"]))
                 moved = moved or (status == "ok" and a.get("do") != "switch"
                                   and "the window shows no change yet" not in line)
                 changed = changed or (status == "ok" and a.get("do") not in UNCHANGING)
@@ -323,6 +380,11 @@ async def run(ask_model: Callable[[str, list[dict]], Awaitable[str]], hands, tas
                              f"{ACTIONS_A_CALL} actions in one reply")
                 proved = False
             stuck = 0 if moved else stuck + 1
+            left = untried(look, tried)
+            if stuck >= STUCK_AFTER and left and not explored:
+                # Stuck is giving up too: not while nameless controls are untried.
+                explored, stuck = True, 0
+                steps.append(UNTRIED.format(lines="; ".join(left[:6])))
             if stuck >= STUCK_AFTER:
                 return await end(finish("handover", "nothing changed three times running"))
         for a in planned[cut + 1:]:
@@ -339,8 +401,15 @@ async def run(ask_model: Callable[[str, list[dict]], Awaitable[str]], hands, tas
                 continue
             # The task is inside the drawn part: for this task the structure is poor, whatever share it covers.
             return await end(await by_sight({**look, "drawn": 1.0}))
+        giving_up = last["do"] == "ask_person" or (last["do"] == "done" and last.get("success") is False)
+        left = untried(look, tried)
+        if giving_up and left and not explored:
+            explored = True
+            steps.append(UNTRIED.format(lines="; ".join(left[:6])))
+            continue
         if last["do"] == "ask_person":
-            return await end(finish("asked", " ".join(str(last.get("question") or "").split())[:300]))
+            return await end(finish("asked", " ".join(str(last.get("question") or "").split())[:300],
+                                    seen=look.get("unnamed")))
         if acts and not proved:
             # Done is taken on what the program shows, never on the reply that acted.
             steps.append("[look] done is taken only once the lines above or the window below show the task done: "

@@ -343,7 +343,7 @@ class Parser:
         return subprocess.Popen(
             [running.POWERSHELL, "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
             cwd=os.environ.get("TEMP") or None, env=running.environment(), stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
     def read(self, command: str, cwd: str) -> dict | None:
         """The parse of `command` as parse.ps1 answers it, or None when the parser gave no answer in time."""

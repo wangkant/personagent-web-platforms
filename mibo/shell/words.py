@@ -39,6 +39,19 @@ def quote(text: str, lang: str) -> str:
     return f"「{text}」" if lang == "zh" else f"“{text}”"
 
 
+def always_folders(folders: list[str], write: bool, lang: str) -> dict:
+    """The card's 始终允许 for places outside the granted folders: the button and what is said once pressed."""
+    what = quote(folder_name(folders[0], lang), lang) if len(folders) == 1 else (
+        f"这 {len(folders)} 个文件夹" if lang == "zh" else f"these {len(folders)} folders")
+    if lang == "zh":
+        verb = "更改" if write else "读取"
+        return {"always": f"始终允许{verb}{what}",
+                "always_told": f"已授权{verb}{what}，可在「设置 › 文件与命令」中撤销。"}
+    verb = "changing" if write else "reading"
+    return {"always": f"Always allow {verb} {what}",
+            "always_told": f"Granted {verb} {what}. You can take it back in Settings › Files and commands."}
+
+
 def shown(path: str, raw: str, lang: str) -> str:
     """One place, short: a pattern as the files it means, a folder by its name, a file by its name."""
     if raw and any(c in raw for c in "*?"):

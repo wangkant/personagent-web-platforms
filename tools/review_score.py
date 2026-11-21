@@ -119,6 +119,7 @@ def table(model: str, rows: list[dict], usage: dict, seconds: float) -> str:
              f"| tokens in / out | {usage.get('prompt_tokens', 0)} / {usage.get('completion_tokens', 0)} |",
              f"| tokens per reviewed action, in / out | {usage.get('prompt_tokens', 0) // max(1, len(reviewed))} / "
              f"{usage.get('completion_tokens', 0) // max(1, len(reviewed))} |",
+             f"| cost the provider reported | ${usage.get('cost', 0):.4f} |",
              f"| wall time | {seconds:.0f} s |", ""]
     by_group: dict[str, list] = {}
     for r in rows:
@@ -166,7 +167,8 @@ async def main() -> None:
                 kept[row["id"]] = row
 
     def ask_for(counted: dict):
-        return review.endpoint(env["LLM_BASE_URL"], env["LLM_API_KEY"], model, usage=counted, max_tokens=4000)
+        # Called as the app calls it (acting.reviewer): its own answer budget and reasoning setting.
+        return review.endpoint(env["LLM_BASE_URL"], env["LLM_API_KEY"], model, usage=counted)
 
     gate = asyncio.Semaphore(max(1, args.jobs))
 

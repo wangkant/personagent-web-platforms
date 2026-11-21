@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="GBK"?>
+<rss version="2.0">
+  <channel>
+    <title>江南日报</title>
+    <link>https://jiangnan.example/</link>
+    <item>
+      <title>西湖迎来初雪</title>
+      <link>https://jiangnan.example/news/1</link>
+      <description>今晨西湖下起了今年第一场雪。</description>
+      <author>记者 王明</author>
+      <pubDate>Thu, 19 Nov 2026 08:00:00 +0800</pubDate>
+    </item>
+  </channel>
+</rss>

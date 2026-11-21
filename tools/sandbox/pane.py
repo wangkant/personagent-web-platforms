@@ -2,7 +2,9 @@
 new home with its stand-in model and practice site: a page of tools/opsite opened and a request typed beside it done
 in the page (panedock.py), the one compact bar at four window widths (panebar.py), tabs, a sign-in popup and the
 private tab (panetabs.py), and the sign-in wait card with its 前往登录 and the character never typing a password
-(signincheck.py). Their pictures and results.json are kept under <out>/<script>.
+(signincheck.py), a card pressed with the real pointer where the chat lies over the page (panecard.py), and a
+profile above an endless feed read for its numbers in one call with nothing scrolled (panereading.py). Their
+pictures and results.json are kept under <out>/<script>.
 
     python tools/sandbox/pane.py --out <folder>
 
@@ -22,6 +24,8 @@ SCRIPTS = [
     ("compact bar", "panebar.py", ["--site-port", "59751", "--model-port", "59752"], 59752),
     ("tabs", "panetabs.py", ["--site-port", "59647", "--model-port", "59649"], 59649),
     ("sign-in wait card", "signincheck.py", ["--ports", "59740"], 59744),
+    ("a card pressed over the page", "panecard.py", ["--site-port", "59411", "--model-port", "59410"], 59410),
+    ("a page read in one call", "panereading.py", ["--site-port", "59413", "--model-port", "59412"], 59412),
 ]
 
 
@@ -54,6 +58,16 @@ def judge(suite: Suite, feature: str, script: str, r: dict) -> None:
                     and keys.get("after_ctrl_w") == keys.get("strip_before") and keys.get("a_reopened") is True, keys)
         suite.check(feature, "the run's tab is the one in front, paused when another is chosen", r.get("bound", {}).get("ok") is True,
                     r.get("bound"))
+    elif script == "panecard.py":
+        suite.check(feature, "a card pressed with the real pointer where the chat lies over the page is answered",
+                    r.get("answered") is True, {k: r.get(k) for k in ("card", "pressed_at", "cut_under_the_card")})
+        suite.check(feature, "that press never pauses the run", r.get("paused") == [], r.get("paused"))
+        suite.check(feature, "the site gets the message", r.get("site_got_it") is True)
+    elif script == "panereading.py":
+        suite.check(feature, "a profile's numbers above an endless feed are read in one reading call",
+                    r.get("reading_calls") == 1 and r.get("numbers_in_first_read") is True,
+                    {k: r.get(k) for k in ("reading_calls", "numbers_in_first_read", "seconds")})
+        suite.check(feature, "nothing on the page scrolls while it is read", r.get("scrolled_px") == 0, r.get("scrolled_px"))
     else:
         b, c, d = r.get("b", {}), r.get("c", {}), r.get("d", {})
         suite.check(feature, "a page behind a sign-in raises the wait card with its sentence",

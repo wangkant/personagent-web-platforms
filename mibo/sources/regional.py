@@ -15,7 +15,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 
-from .base import PER_SOURCE, Find, Source, find, get_text, parse_feed
+from .base import PER_SOURCE, Find, Source, find, read_feed
 
 # Query parameters that only tell the publisher where a click came from (utm_ on Habr and
 # Qiita, at_ on the BBC); dropped so the same story from two places is one item.
@@ -38,7 +38,7 @@ def _feed(key: str, name: tuple[str, str], about: tuple[str, str], group: str, u
     """One feed address. `site` names the outlet; without it each link keeps its own site,
     as for a bookmark or vote list that points elsewhere."""
     async def fetch(http: httpx.AsyncClient) -> list[Find]:
-        found = parse_feed(await get_text(http, url), url, site=site)[:PER_SOURCE]
+        found = (await read_feed(http, url, site=site))[:PER_SOURCE]
         for one in found:
             one.item.url = link(one.item.url)
         return found

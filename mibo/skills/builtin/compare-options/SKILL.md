@@ -5,8 +5,6 @@ license: Apache-2.0
 metadata:
   mibo-title-zh: 比较几个选项
   mibo-description-zh: 依据最新来源比较几个选项（商品、地点、课程、方案），列出关键差异并给出明确建议；不代为购买。
-  mibo-words: 比较 对比 哪个好 哪个更好 选哪个 怎么选 值不值 值得买 区别 优缺点 compare comparison versus vs which better worth choose options pros cons
-  mibo-asks: 哪个更, 哪个好, 选哪个, 怎么选, 值不值, 值得买, 比较一下, 对比一下, 这两款, which is better, which one should, worth it, worth buying, versus
 ---
 
 # Comparing options

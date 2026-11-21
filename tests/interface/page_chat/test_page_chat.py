@@ -92,7 +92,8 @@ def test_what_is_not_a_picture_is_neither_kept_nor_shown_as_an_empty_one(client,
         ("user", "hi", None), ("assistant", "here", None)]
     # Only the chat record itself was written.
     written = {path for path in workspace.home.rglob("*") if path.is_file()} - before
-    assert [path.name for path in written if path.suffix not in (".json", ".jsonl", ".lock")] == []
+    assert [path.name for path in written
+            if path.suffix not in (".json", ".jsonl", ".lock") and not path.name.startswith("mibo.db")] == []
 
 
 def test_pictures_leave_with_the_messages_that_showed_them(client, workspace, monkeypatch):
@@ -129,18 +130,13 @@ def test_a_character_that_does_not_start_keeps_the_message(client, workspace, mo
     assert _messages(client)[-1]["failed"] == "agent_failed"
 
 
-def test_the_kept_chat_starts_at_a_turn_and_says_it_was_cut(client, workspace, monkeypatch):
+def test_a_long_chat_is_shown_whole_and_the_same_after_a_restart(client, workspace, monkeypatch):
     _replying(monkeypatch, workspace, [{"type": "text", "text": word} for word in ("one", "two", "three")])
-    for n in range(13):
+    for n in range(40):
         _said(client, f"m{n}")
     seen = client.get("/api/chat/history", headers=HEADERS).json()
-    assert seen["trimmed"] is True
-    assert seen["messages"][0]["role"] == "user", "never the tail of a reply"
-    assert len(seen["messages"]) <= welcome.CHAT_KEPT == seen["kept"]
-    again = _again(workspace)
-    assert again["trimmed"] is True and again["messages"] == seen["messages"]
-    client.post("/api/chat/reset", headers=HEADERS, json={})
-    assert client.get("/api/chat/history", headers=HEADERS).json()["trimmed"] is False
+    assert len(seen["messages"]) == 160 and seen["messages"][0]["text"] == "m0"
+    assert _again(workspace)["messages"] == seen["messages"]
 
 
 def test_the_page_asks_only_for_what_came_since_the_last_message_it_has(client, workspace, monkeypatch):

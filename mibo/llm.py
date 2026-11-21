@@ -14,20 +14,15 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from . import abilities, schedule_tool, spend
+from . import abilities, context, schedule_tool, spend
 from .endpoints import (PROBLEMS, adapt_rejected_payload, chat_completions_url, endpoint_for,
                         model_problem, without_pictures)
 from .usage import USAGE_FILE, UsageBook
 
 logger = logging.getLogger("agent")
 
-# The reply's room in tokens: an eighth of the context window the host states (abilities.py), within these.
-ANSWER_TOKENS = (8192, 32768)
-
-
-def answer_tokens(record: dict | None) -> int:
-    low, high = ANSWER_TOKENS
-    return max(low, min(high, int((record or {}).get("context") or 0) // 8))
+# max_tokens for `_call_llm` that means the answer's room in the model's budget (context.budget), thinking included.
+FROM_BUDGET = 0
 
 # What the calls in this task are for, as counted in the usage tally
 # (usage.PURPOSES); a context, so no fake `_call_llm` needs a new argument.
@@ -219,6 +214,9 @@ class _PooledHTTP:
 
 
 class ModelCalls:
+    # The context window the person set (CONTEXT_WINDOW); 0 when they did not.
+    context_window = 0
+
     def _http(self, **kwargs) -> "_PooledHTTP":
         """Pooled httpx client, used like an ``AsyncClient`` context; identical
         kwargs share one process-lived keep-alive pool."""
@@ -317,6 +315,13 @@ class ModelCalls:
             return None
         return abilities.reply_effort(abilities.runtime_of(self), url, model)
 
+    def _budget(self, url: str, model: str, effort=None) -> context.Budget:
+        """The request budget of `model` at `url` (context.py), replies thinking at `effort`'s level; the person's
+        CONTEXT_WINDOW is the window of every model but a fallback served apart (endpoints.endpoint_for)."""
+        apart = model == self.llm_fallback_model and model != self.model
+        window, _ = context.known_window(self, url, model, 0 if apart else self.context_window)
+        return context.budget(window, effort[0] if effort else "")
+
     def _shows_pictures(self) -> bool:
         """Whether a turn's pictures go to the reply model itself: not while a
         vision model captions them (VISION_*), nor to one that refused them."""
@@ -388,8 +393,8 @@ class ModelCalls:
         """One reply-model call that may call `tools`, with no response_format
         (with it, models stop calling tools), thinking at the person's effort
         where the model was measured to think (abilities.reply_effort), and room
-        for the answer from the context window its host states: the answer's
-        message. A call that fails is retried and moved to the fallback model
+        for the answer from the model's budget (context.budget): the answer's
+        message. A reply's reported prompt tokens feed the count (context.measured). A call that fails is retried and moved to the fallback model
         as every model call is (`_recovered`), and raises when that fails too.
         None when the endpoint takes no tool calls (`_refuses_tools`) or model
         spending is paused.
@@ -403,17 +408,16 @@ class ModelCalls:
         def refused(resp) -> bool:
             return getattr(resp, "status_code", 200) in (400, 404, 422)
 
-        async def ask(mdl: str, more: int = 1) -> dict | None:
+        async def ask(mdl: str, room: int = 0) -> dict | None:
             url, key = self._endpoint_for(mdl)
             if ("tools", url, mdl) in self._api_quirks:
                 return None
-            room = more * answer_tokens(abilities.record(abilities.runtime_of(self), url, mdl))
-            payload = {"model": mdl, "max_tokens": room, "tools": tools,
+            effort = self._reply_effort(url, mdl)
+            payload = {"model": mdl, "max_tokens": room or self._budget(url, mdl, effort).answer, "tools": tools,
                        "tool_choice": "auto" if ("tool_choice", url, mdl) in self._api_quirks else choice,
                        "messages": ([{"role": "system", "content": system}] if system else []) + list(messages)}
-            effort = self._reply_effort(url, mdl)
             if effort:
-                payload["max_tokens"] += abilities.thinking_on(payload, url, *effort)
+                abilities.thinking_on(payload, url, *effort)
             else:
                 self._thinking_off(payload, url)
             resp = await self._post_chat(url, key, payload, timeout=timeout)
@@ -437,13 +441,18 @@ class ModelCalls:
             body = resp.json()
             if not isinstance(body, dict) or body.get("error") or not body.get("choices"):
                 raise ProviderError(body if isinstance(body, dict) else {})
+            if _call_purpose.get() == "reply":
+                context.measured(self, url, mdl, payload, body.get("usage"))
             return body
 
         body, used = await self._recovered(ask, model)
         if body is not None and body["choices"][0].get("finish_reason") == "length":
-            # Cut off at the token cap: asked once more with four times the room.
+            # Cut off at the token cap: asked once more with four times the room, within what the window leaves.
+            url = self._endpoint_for(used)[0]
+            plan = self._budget(url, used, self._reply_effort(url, used))
+            room = plan.retry(int((body.get("usage") or {}).get("prompt_tokens") or 0))
             try:
-                body = await ask(used, 4) or body
+                body = (await ask(used, room) if room > plan.answer else None) or body
             except Exception as e:
                 logger.warning("[Agent] tool round not asked again with more room (model=%s): %s",
                                used, type(e).__name__)
@@ -662,6 +671,9 @@ class ModelCalls:
                 if problem:
                     # For the page to name in the chat (abilities.problem_since).
                     abilities.note_problem(self, problem, self._endpoint_for(cur_model)[0])
+                if problem == "context":
+                    # The window the error states is the model's from now on.
+                    context.overflowed(self, self._endpoint_for(cur_model)[0], cur_model, _provider_message(e))
                 if problem in ("not_found", "context", "refused"):
                     logger.warning("[Agent] %s", PROBLEMS[problem][0])
                 raise
@@ -678,33 +690,41 @@ class ModelCalls:
     ) -> str:
         """OpenAI-compatible chat completion with jittered retry and
         error-driven fallback. `json_object` sets response_format, for the
-        inner calls that answer in JSON."""
+        inner calls that answer in JSON. `max_tokens` FROM_BUDGET: the
+        answer's room in the model's budget, thinking included."""
         if not (self.base_url and self.api_key):
             logger.warning("[Agent] missing base_url/api_key; cannot call LLM")
             return ""
         if spend.paused_for(self, _call_purpose.get()):
             return ""
         began = time.monotonic()
+        sent = {"room": max_tokens}
 
-        async def _do_call(mtok: int, mdl: str, force_disable_thinking: bool = False):
-            # Per call: `mdl` changes across the rungs, and the endpoint with it.
+        async def _do_call(mtok: int, mdl: str, force_disable_thinking: bool = False, total: int = 0):
+            # Per call: `mdl` changes across the rungs, and the endpoint with it. `total`: max_tokens as it is.
             _url, _key = self._endpoint_for(mdl)
-            payload = {"model": mdl, "max_tokens": mtok, "messages": _oai_messages}
+            effort = None if force_disable_thinking else self._reply_effort(_url, mdl)
+            payload = {"model": mdl, "max_tokens": total or mtok or self._budget(_url, mdl, effort).answer,
+                       "messages": _oai_messages}
             if temperature is not None:
                 payload["temperature"] = temperature
             if json_object:
                 payload["response_format"] = {"type": "json_object"}
-            effort = None if force_disable_thinking else self._reply_effort(_url, mdl)
             if effort:
-                payload["max_tokens"] = mtok + abilities.thinking_on(payload, _url, *effort)
+                thought = abilities.thinking_on(payload, _url, *effort)
+                if mtok and not total:
+                    payload["max_tokens"] = mtok + thought
             elif disable_thinking or force_disable_thinking:
                 self._thinking_off(payload, _url)
+            sent["room"] = payload["max_tokens"]
             resp = await self._post_chat(_url, _key, payload,
                                          timeout=self.llm_timeout_s)
             resp.raise_for_status()
             body = resp.json()
             if isinstance(body, dict) and (body.get("error") or not body.get("choices")):
                 raise ProviderError(body)
+            if _call_purpose.get() == "reply":
+                context.measured(self, _url, mdl, payload, body.get("usage"))
             return body
 
         # OpenAI endpoint uses a single system message; provider auto prefix-caches.
@@ -766,23 +786,27 @@ class ModelCalls:
             # Thinking may have used the whole budget: with it off the answer fits.
             logger.warning(
                 "[Agent] empty reply, finish_reason=length (model=%s, max_tokens=%d); "
-                "retrying once with thinking disabled", used_model, max_tokens)
+                "retrying once with thinking disabled", used_model, sent["room"])
             again = await _once_more("retry with thinking disabled", max_tokens,
                                      force_disable_thinking=True)
             if again is not None:
                 text, finish = again
         if _budget_starved(text, finish):
             # A reasoning model can spend the whole budget thinking: retry once
-            # with a bigger one, then say plainly what happened.
-            retry_tokens = max_tokens * 4
+            # with four times the room, within what the window leaves, then say
+            # plainly what happened.
+            used_url = self._endpoint_for(used_model)[0]
+            retry_tokens = min(4 * sent["room"], self._budget(used_url, used_model).window
+                               - int((data.get("usage") or {}).get("prompt_tokens") or 0))
             logger.warning(
                 "[Agent] empty reply, finish_reason=length (model=%s, "
                 "max_tokens=%d) — retrying once at %d. If this repeats, the "
                 "model is likely a reasoning model whose thinking tokens "
                 "exhaust the budget before the answer; pick a non-reasoning "
                 "model or raise the cap.",
-                used_model, max_tokens, retry_tokens)
-            again = await _once_more("retry at a larger budget", retry_tokens)
+                used_model, sent["room"], retry_tokens)
+            again = (await _once_more("retry at a larger budget", max_tokens, total=retry_tokens)
+                     if retry_tokens > sent["room"] else None)
             if again is not None:
                 text, finish = again
             if not text:

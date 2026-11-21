@@ -1,11 +1,14 @@
 """Settings › tuning: the backup model and the models for other uses, saved the way the page saves the rest."""
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from harness.app import TOKEN
+from mibo import abilities, drafting, welcome
 from mibo import setup_wizard as sw
-from mibo import welcome
+from mibo.endpoints import chat_completions_url
 from mibo.panels import tuning
 
 HEADERS = {welcome.TOKEN_HEADER: TOKEN}
@@ -65,6 +68,7 @@ def test_nothing_changed_writes_nothing(client, configured):
 @pytest.mark.parametrize("key, value", [
     ("LLM_FALLBACK_MODEL", "two words"), ("LLM_FALLBACK_BASE_URL", "ftp://x"),
     ("LLM_JUDGE_MODEL", "${LLM_API_KEY}"), ("LLM_DM_MODEL", "x" * 257),
+    ("CONTEXT_WINDOW", "128k"), ("CONTEXT_WINDOW", "512"),
 ])
 def test_a_bad_value_is_refused_naming_its_field(client, configured, key, value):
     before = configured.env.read_bytes()
@@ -72,6 +76,19 @@ def test_a_bad_value_is_refused_naming_its_field(client, configured, key, value)
     assert response.status_code == 400
     assert response.json()["error"] == f"tuning_invalid:{key}"
     assert configured.env.read_bytes() == before and configured.restarts == []
+
+
+def test_the_context_window_says_where_it_comes_from_and_a_typed_one_is_saved(client, configured):
+    # Nothing states it: an assumption, which the page says.
+    assert client.get("/api/tuning", headers=HEADERS).json()["contextWindow"] == {"tokens": 32768, "from": "assumed"}
+    url = chat_completions_url("https://api.deepseek.com")
+    path = drafting.usage_path(configured.home, configured.config()).with_name(abilities.FILE)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"models": {abilities.key_of(url, "deepseek-chat"): {"context": 131072}}}),
+                    encoding="utf-8")
+    assert client.get("/api/tuning", headers=HEADERS).json()["contextWindow"] == {"tokens": 131072, "from": "host"}
+    assert post(client, {"values": {"CONTEXT_WINDOW": " 65536 "}}).json()["changed"]
+    assert configured.config()["CONTEXT_WINDOW"] == "65536"
 
 
 def test_other_refusals(client, configured):

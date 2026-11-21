@@ -8,14 +8,16 @@ with the walks' finds.
 """
 from __future__ import annotations
 
+import asyncio
 import html
+import io
 import re
 from dataclasses import dataclass, replace
-from email.utils import parsedate_to_datetime
+from datetime import datetime, timezone
 from typing import Awaitable, Callable, Optional
 from urllib.parse import urljoin, urlsplit
-from xml.etree import ElementTree
 
+import feedparser
 import httpx
 
 from ..library import Item
@@ -35,13 +37,6 @@ GROUPS = ("news", "tech", "video", "community", "science", "culture", "own")
 _TAG = re.compile(r"<[^>]+>")
 # A post's own stylesheet, script or comment reads as code once the tags are gone.
 _HIDDEN = re.compile(r"<(style|script)\b.*?</\1\s*>|<!--.*?-->", re.S | re.I)
-# The text is already decoded, so a declared encoding (ISO-8859-1, GBK) no longer holds.
-_DECLARATION = re.compile(r"^\s*<\?xml[^>]*\?>")
-_RSS10 = "{http://purl.org/rss/1.0/}"
-_ATOM = "{http://www.w3.org/2005/Atom}"
-_MEDIA = "{http://search.yahoo.com/mrss/}"
-_CONTENT = "{http://purl.org/rss/1.0/modules/content/}"
-_DC = "{http://purl.org/dc/elements/1.1/}"
 _IMG = re.compile(r"""<img[^>]+src=["']([^"']+)["']""", re.I)
 
 
@@ -142,70 +137,86 @@ def find(url: str, title: str, *, site: str = "", kind: str = "", text: str = ""
                 smaller(picture) if picture.startswith("https://") else "")
 
 
-def _when(text: str) -> str:
-    """A feed's date as ISO 8601, or as it was written."""
-    text = (text or "").strip()
-    try:
-        return parsedate_to_datetime(text).isoformat()
-    except (TypeError, ValueError):
-        return text
+def feed_document(body: bytes, base_url: str, content_type: str = "") -> feedparser.FeedParserDict:
+    """feedparser's reading of a fetched RSS or Atom document: broken markup, odd dates and the
+    encoding the document declares included. It gets the bytes as a stream, so it never opens an
+    address or a file itself. ValueError when the bytes are no feed."""
+    # The answer's type and charset weigh in as RFC 3023 says; its address is the base of relative links.
+    # The HTML is never shown, only taken down to text (`plain`), so feedparser need not clean it.
+    doc = feedparser.parse(io.BytesIO(body), resolve_relative_uris=False, sanitize_html=False,
+                           response_headers={"content-location": base_url, "content-type": content_type})
+    if not doc.version:
+        raise ValueError(f"not a feed: {base_url}")
+    return doc
 
 
-def parse_feed(text: str, base_url: str, *, site: str = "") -> list[Find]:
-    """The entries of an RSS 2.0, RSS 1.0 or Atom document, newest as the feed has them."""
-    root = ElementTree.fromstring(_DECLARATION.sub("", text, count=1).encode("utf-8"))
+def _picture(entry: dict) -> str:
+    """The picture the entry names: an image media:content, else its thumbnail, else an image enclosure."""
+    for media in entry.get("media_content", []):
+        if media.get("url") and (media.get("medium") == "image" or media.get("type", "image").startswith("image")):
+            return media["url"]
+    for media in entry.get("media_thumbnail", []):
+        if media.get("url"):
+            return media["url"]
+    for enclosure in entry.get("enclosures", []):
+        if enclosure.get("href") and enclosure.get("type", "").startswith("image"):
+            return enclosure["href"]
+    return ""
+
+
+def parse_feed(body: bytes, base_url: str, *, site: str = "", content_type: str = "",
+               text: Optional[Callable[[dict], str]] = None) -> list[Find]:
+    """The entries of an RSS 2.0, RSS 1.0 or Atom document, in the feed's order. `text`
+    picks an entry's description where a source knows better than the feed's own."""
+    doc = feed_document(body, base_url, content_type)
+    atom = doc.version.startswith("atom")
     found: list[Find] = []
-    for entry in root.iter():
-        tag = entry.tag.rsplit("}", 1)[-1]
-        if tag not in ("item", "entry"):
-            continue
-        # RSS 1.0 puts link and title in its own namespace; read them as RSS 2.0's.
-        fields = {child.tag.removeprefix(_RSS10): child for child in entry}
-
-        def first(*names: str) -> str:
-            for name in names:
-                node = fields.get(name)
-                if node is not None and (node.text or "").strip():
-                    return node.text.strip()
-            return ""
-
-        link = first("link", f"{_ATOM}id") if not any(c.tag == f"{_ATOM}link" for c in entry) else ""
-        for child in entry:
-            if child.tag == f"{_ATOM}link" and child.get("rel", "alternate") == "alternate" and child.get("href"):
-                link = child.get("href")
-                break
-        link = urljoin(base_url, link or first("guid"))
-        title = first("title", f"{_ATOM}title")
+    for entry in doc.entries:
+        link = urljoin(base_url, entry.get("link") or entry.get("id") or "")
+        # An RSS item's content:encoded is the story and its description often a stub; an Atom
+        # summary is meant as one. feedparser also files a media caption as plain-text content and
+        # an author's note as HTML beside the story, so the story is the longest HTML part.
+        content = max((part.value for part in entry.get("content", []) if part.type == "text/html"),
+                      key=len, default="")
+        summary = entry.get("summary", "")
+        words = (summary or content) if atom else (content or summary)
+        # Mastodon and other short-post feeds give no title; the post's opening words stand in.
+        title = entry.get("title") or plain(words, 100)
         if not link.startswith(("http://", "https://")) or not title:
             continue
-        body = first(f"{_CONTENT}encoded", "description", f"{_ATOM}summary", f"{_ATOM}content")
-        picture = ""
-        # YouTube and some publishers keep the picture one level down, in media:group.
-        group = entry.find(f"{_MEDIA}group")
-        for child in [*entry, *(group if group is not None else ())]:
-            if child.tag in (f"{_MEDIA}thumbnail", f"{_MEDIA}content", "enclosure"):
-                kind = child.get("type", "image") if child.tag != f"{_MEDIA}thumbnail" else "image"
-                if child.get("url") and kind.startswith("image"):
-                    picture = child.get("url")
-                    break
+        picture = _picture(entry)
         if not picture:
             # NPR opens some stories with a one-pixel tracking image; the picture is the first real one.
-            shown = [src for src in _IMG.findall(body) if "/tracking/" not in src]
+            shown = [src for src in _IMG.findall(words) if "/tracking/" not in src]
             picture = urljoin(link, html.unescape(shown[0])) if shown else ""
-        author = first("author", f"{_DC}creator")
-        if not author:
-            node = fields.get(f"{_ATOM}author")
-            name = node.find(f"{_ATOM}name") if node is not None else None
-            author = (name.text or "").strip() if name is not None else ""
-        found.append(find(link, title, site=site, text=body, author=author, picture=picture,
-                          published=_when(first("pubDate", f"{_DC}date", f"{_ATOM}published", f"{_ATOM}updated"))))
+        when = entry.get("published_parsed") or entry.get("updated_parsed")
+        published = (datetime(*when[:6], tzinfo=timezone.utc).isoformat() if when
+                     else entry.get("published") or entry.get("updated", ""))
+        found.append(find(link, title, site=site, text=text(entry) if text else words,
+                          author=entry.get("author_detail", {}).get("name", ""), picture=picture,
+                          published=published))
     return found
+
+
+async def feed_finds(answer: httpx.Response, *, site: str = "",
+                     text: Optional[Callable[[dict], str]] = None) -> list[Find]:
+    """The finds in a fetched feed, parsed off the event loop: a large feed takes feedparser a second."""
+    return await asyncio.to_thread(parse_feed, answer.content, str(answer.url), site=site,
+                                   content_type=answer.headers.get("content-type", ""), text=text)
+
+
+async def read_feed(http: httpx.AsyncClient, url: str, *, site: str = "",
+                    text: Optional[Callable[[dict], str]] = None, **params) -> list[Find]:
+    """The finds of the feed at `url`, read through the sources' client."""
+    answer = await http.get(url, params=params or None)
+    answer.raise_for_status()
+    return await feed_finds(answer, site=site, text=text)
 
 
 def feed_source(key: str, name: tuple[str, str], about: tuple[str, str], group: str, url: str, *,
                 site: str = "", default: str = "") -> Source:
     """A source that is one feed address."""
     async def fetch(http: httpx.AsyncClient) -> list[Find]:
-        return parse_feed(await get_text(http, url), url, site=site or name[0])[:PER_SOURCE]
+        return (await read_feed(http, url, site=site or name[0]))[:PER_SOURCE]
 
     return Source(key, name, about, group, fetch, default)

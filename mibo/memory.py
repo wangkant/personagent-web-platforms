@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import random
 import re
+import sqlite3
 import time
 from typing import Callable, Iterable, Optional
 
@@ -58,7 +59,6 @@ _SENTENCE_END = re.compile(r"(?<=[.!?;])\s+|(?<=[。！？；\n])\s*")
 
 # Beside memory.json, so a home moved by MEMORY_FILE keeps them together.
 STATE_FILE = "memory_state.json"
-LOG_DIR = "log"
 
 
 def _shapes(*patterns: str) -> tuple[re.Pattern, ...]:
@@ -210,10 +210,10 @@ class Memory:
         s = getattr(self, "settings", None)
         days = int(getattr(s, "memory_log_days", 30) or 0) \
             if getattr(s, "memory_keep_recent", True) else 0
-        folder = self.memory_file.with_name(LOG_DIR)
+        runtime = self.memory_file.parent
         log = self.__dict__.get("_chat_log")
-        if log is None or log.folder != folder:
-            log = self.__dict__["_chat_log"] = chatlog.ChatLog(folder, days)
+        if log is None or log.runtime != runtime:
+            log = self.__dict__["_chat_log"] = chatlog.ChatLog(runtime, days)
         log.days = float(days)
         return log
 
@@ -399,7 +399,7 @@ class Memory:
         those it returns words for those words; how many changed."""
         try:
             return self.chat_log.forget(conv, gone)
-        except (OSError, chatlog.LockUnavailable) as e:
+        except sqlite3.Error as e:
             logger.warning("[Agent] chat log not rewritten: %s", e)
             return 0
 
@@ -429,7 +429,7 @@ class Memory:
                 dirty.add(conv)
         try:
             changed = self.chat_log.drop(conv) or changed
-        except (OSError, chatlog.LockUnavailable) as e:
+        except sqlite3.Error as e:
             logger.warning("[Agent] chat log not removed: %s", e)
         self._final_copies()
         return changed
@@ -478,10 +478,7 @@ class Memory:
         recent = getattr(self, "_recent", None)
         if recent is not None:
             keys |= set(recent.convs)
-        try:
-            keys |= self.chat_log.private_chats(PAGE_PLATFORM)
-        except OSError as e:
-            logger.warning("[Agent] chat logs not listed: %s", e)
+        keys |= self.chat_log.private_chats(PAGE_PLATFORM)
         return {k for k in keys if self._person_chat(k)}
 
     def _tell_profile(self, rows: list[dict], now: float) -> None:

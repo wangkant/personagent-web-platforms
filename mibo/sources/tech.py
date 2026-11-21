@@ -7,9 +7,8 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 
-from .base import PER_SOURCE, Find, Source, find, get_json, get_text, local_to, parse_feed, plain, written_in
+from .base import PER_SOURCE, Find, Source, find, get_json, local_to, plain, read_feed, written_in
 
-_MAILBOX = re.compile(r"^\S+@\S+\s+\((.+)\)$")
 # A post that opens with its own <style> block reads as CSS once the tags are gone.
 _CSS = re.compile(r"^(?:/\*|[.#]?[A-Za-z][\w-]*(?:[.#:\[][^{}\s]*)?(?:\s+[.#]?[A-Za-z][^{}\s]*)*\s*\{)")
 # Upgraded to https: these sites serve it, their feeds still say http.
@@ -18,7 +17,7 @@ _PLAIN_HTTP = ("http://bair.berkeley.edu/", "http://www.ruanyifeng.com/")
 
 def _tidy(found: list[Find], *, bare: bool, cut: str, covers: bool) -> list[Find]:
     """Tracking parameters off links (the whole query when `bare`), `cut` out of
-    each summary, a "mail (Name)" author down to the name, dates without line breaks."""
+    each summary."""
     for each in found:
         item = each.item
         if item.url.startswith(_PLAIN_HTTP):
@@ -31,12 +30,6 @@ def _tidy(found: list[Find], *, bare: bool, cut: str, covers: bool) -> list[Find
             item.description = ""
         if cut:
             item.description = re.sub(cut, "", item.description).strip()
-        mailbox = _MAILBOX.match(item.author)
-        if mailbox:
-            item.author = mailbox.group(1)
-        elif "@" in item.author:
-            item.author = ""
-        item.published = "".join(item.published.split())
         if not covers:
             each.picture = ""
     return found
@@ -48,7 +41,7 @@ def _feed(key: str, name: tuple[str, str], about: tuple[str, str], url: str, *, 
     `cut` is boilerplate the feed puts in every summary; `covers` is False where the
     first image is a site icon."""
     async def fetch(http: httpx.AsyncClient) -> list[Find]:
-        found = _newest(parse_feed(await get_text(http, url), url, site=name[0]))[:PER_SOURCE]
+        found = _newest(await read_feed(http, url, site=name[0]))[:PER_SOURCE]
         return _tidy(found, bare=bare, cut=cut, covers=covers)
 
     return Source(key, name, about, group, fetch, default)
@@ -58,8 +51,7 @@ def _newest(found: list[Find]) -> list[Find]:
     """Newest first, for the few feeds (Product Hunt) that mix old entries in;
     left as the feed has them when a date will not read."""
     try:
-        when = [datetime.fromisoformat("".join(f.item.published.split()).replace("Z", "+00:00")) for f in found]
-        when = [w if w.tzinfo else w.replace(tzinfo=timezone.utc) for w in when]
+        when = [datetime.fromisoformat(f.item.published) for f in found]
     except ValueError:
         return found
     return [f for _, f in sorted(zip(when, found), key=lambda pair: pair[0], reverse=True)]
@@ -192,7 +184,7 @@ def _arxiv(subject: str, name: tuple[str, str], about: tuple[str, str]) -> Sourc
     url = f"https://rss.arxiv.org/rss/{subject}"
 
     async def fetch(http: httpx.AsyncClient) -> list[Find]:
-        found = parse_feed(await get_text(http, url), url, site="arXiv")
+        found = await read_feed(http, url, site="arXiv")
         fresh = []
         for each in found:
             announce = _ANNOUNCE.match(each.item.description)

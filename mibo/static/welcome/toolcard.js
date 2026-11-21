@@ -147,6 +147,8 @@
     } else {
       node.append(head("tool", fill(t.toolTitle, { tool: card.title || card.tool }), fill(t.toolMeta, card)
         + (card.title && card.title !== card.tool ? ` · ${card.tool}` : "")));
+      // Why the automatic review did not pass it, in one line (mcp_hub.py).
+      if (card.review) node.append(el("p", "op-card-why", card.review));
       if (card.changed) node.append(el("p", "op-card-never", t.changed));
       if (card.destructive) node.append(el("p", "op-card-never", t.destructive));
       else if (card.readonly) node.append(el("p", "op-card-meta", t.readonly));

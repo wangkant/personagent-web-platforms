@@ -32,7 +32,6 @@ from fastapi.responses import JSONResponse
 from types import SimpleNamespace
 
 from ..cardwait import Card
-from ..cardwait import WAIT_S as CARD_S  # noqa: F401  operate.py sizes its waits for a step by it
 from . import grants as g
 
 LAUNCH_S = 15.0
@@ -365,25 +364,47 @@ class Desk:
                                          attended=window is not None and window.attended(), lang=self.lang))
 
     def _pictures(self, hands, look: bool) -> dict:
-        """On the worker thread, before the first picture of a task goes to the model service: the person's yes
-        on a card that shows the window (this once, always, or no), unless they said always for this service.
-        `look`: the model only looks and tells them, and the card says so."""
+        """On the worker thread, before the first picture of a task goes to the model service the person chose:
+        in automatic review the reviewer passes it when their words of this turn name or point at this program;
+        else a card that shows the window (this once, always, or no), unless they said always for this service. A
+        password manager's, a bank's or a mail client's window always asks, with no always. `look`: the model only
+        looks and tells them, and the card says so."""
+        from .. import acting
+        from ..acting import Modes
         from ..see import when, words
+        from . import win32
         service, switch = self.service(), when.Switch(self.desktop)
-        if not switch.on(service):
-            name = hands.program["name"]
-            answer = (self.ask({"id": secrets.token_urlsafe(8), "type": "see_grant", "program": name,
-                                "exe": hands.program["exe"], "window": name, "task": hands.task,
-                                "text": words.say(words.LOOK if look else words.ASK, self.lang, window=name, service=service,
-                                                   who=words.spaced(self.lang, self.who())),
-                                "picture": hands.sent_picture(), "choices": ["once", "always", "no"]}) or {}
-                      ).get("answer")
+        name = hands.program["name"]
+        title = win32.title_of(hands.view.hwnd) if hands.view else ""
+        sensitive = acting.sensitive_window(name, os.path.basename(hands.program["exe"]), title)
+        if sensitive or not switch.on(service):
+            verdict = None
+            if not sensitive and acting.decide(Modes(self.desktop).mode(), "picture", "", "programs") == "review":
+                verdict = self.review({"kind": "picture", "where": service, "target": [name, title[:120]], "text": ""})
+                if verdict.decision == "refuse":
+                    self.grants.log({"do": "review", "program": name, "exe": hands.program["exe"], "status": "refused",
+                                     "line": f"pictures to {service}: {verdict.reason}"})
+                    return {"status": "declined", "line": "[declined] the window's pictures were not sent: "
+                                                          + verdict.declined()}
+            if verdict is not None and verdict.decision == "go":
+                answer = "once"
+            else:
+                pressed = self.ask({"id": secrets.token_urlsafe(8), "type": "see_grant", "program": name,
+                                    "exe": hands.program["exe"], "window": name, "task": hands.task,
+                                    "text": words.say(words.LOOK if look else words.ASK, self.lang, window=name,
+                                                      service=service, who=words.spaced(self.lang, self.who())),
+                                    **({"review": verdict.line(self.lang)} if verdict is not None else {}),
+                                    "picture": hands.sent_picture(),
+                                    "choices": ["once", "no"] if sensitive else ["once", "always", "no"]}) or {}
+                answer = pressed.get("answer") or ("once" if pressed.get("yes") else None)
             self.grants.log({"do": "ask", "program": name, "exe": hands.program["exe"], "status": answer or "unanswered",
-                             "line": f"pictures to {service}"})
+                             "line": f"pictures to {service}",
+                             **({"review": {"decision": verdict.decision, "by": verdict.by, "reason": verdict.reason}}
+                                if verdict is not None else {})})
             if answer not in ("once", "always"):
                 return {"status": "declined", "line": "[declined] the person did not let the window's pictures go to "
                                                       "their model service; nothing was sent"}
-            if answer == "always":
+            if answer == "always" and not sensitive:
                 switch.set(service)
         self.pictured = hands
         return {"status": "ok"}

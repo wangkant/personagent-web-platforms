@@ -24,7 +24,7 @@ PLACES = ("static/welcome", "panels", "web", "desk", "shell", "see", "skills", "
 # Not interface text: marks, shipped skills, and the modules whose Chinese is words for the model or
 # patterns that match what a person types.
 SKIP = ("providermarks.js", "/builtin/",
-        "desk/tool.py", "shell/tool.py", "skills/pick.py", "skills/tool.py")
+        "desk/tool.py", "shell/tool.py", "skills/tool.py")
 SPOKEN = (
     # Particles, and verbs of speech rather than of writing.
     r"[吧啦呀哦嘛呗]", r"呢[。？！”\"]", r"一下", r"看看|试试|瞧瞧|问问", r"看一眼|看不出|看不懂|读不懂", r"做了什么|干了什么|干什么|干嘛",

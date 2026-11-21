@@ -123,6 +123,50 @@ window.paChat = (() => {
   addEventListener("pagehide", tellAll);
   const IDEA_ICONS = { main: [I.compass, I.calendar, I.talk], plain: [I.talk, I.calendar, I.help] };
   const PLAY = '<path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5z"/>';
+  // The character's words are Markdown, read by markdown-it (markdown-it.umd.min.js, vendored): CommonMark with
+  // GitHub's tables and struck text. No HTML in a reply is drawn; only web addresses become links, bare ones
+  // too (README.md and mail addresses stay words); a picture is a link to it and is never loaded. Lines indented
+  // four spaces are not code, and dashes under a paragraph are a rule, not a heading. Underscores never mark
+  // emphasis (__init__); an asterisk or tilde run marks it only with no letter or digit outside it and no space
+  // inside (2 * 3, x**2 + y**2 stay as written), so bold that ends in Chinese punctuation closes (**注意：**明天).
+  const MD = (() => {
+    const md = window.markdownit({ html: false, linkify: true });
+    md.linkify.set({ fuzzyLink: false, fuzzyEmail: false });
+    md.disable(["code", "lheading"]);
+    md.validateLink = (url) => /^https?:\/\//i.test(url);
+    const word = /[A-Za-z0-9]/;
+    const space = /\s/;
+    md.inline.State = class extends md.inline.State {
+      scanDelims(start) {
+        const marker = this.src[start];
+        let end = start;
+        while (end < this.posMax && this.src[end] === marker) end += 1;
+        const before = this.src[start - 1] || " ";
+        const after = end < this.posMax ? this.src[end] : " ";
+        const marks = marker !== "_";
+        return { can_open: marks && !space.test(after) && !word.test(before),
+          can_close: marks && !space.test(before) && !word.test(after), length: end - start };
+      }
+    };
+    md.renderer.rules.image = (tokens, n, options, env, self) => {
+      const src = md.utils.escapeHtml(tokens[n].attrGet("src"));
+      return `<a href="${src}">${md.utils.escapeHtml(self.renderInlineAsText(tokens[n].children, options, env)) || src}</a>`;
+    };
+    // Headings start at h3 under the chat's own; a column's side is a data attribute (no inline styles here);
+    // a bare address is marked to be named by its site.
+    md.core.ruler.push("chat", (state) => {
+      for (const token of state.tokens) {
+        if (token.type === "heading_open" || token.type === "heading_close") token.tag = `h${Math.min(6, +token.tag[1] + 2)}`;
+        else if ((token.type === "th_open" || token.type === "td_open") && token.attrGet("style"))
+          token.attrs = [["data-align", token.attrGet("style").split(":")[1]]];
+        else if (token.type === "inline")
+          for (const child of token.children) if (child.type === "link_open" && child.markup in { linkify: 1, autolink: 1 }) child.attrSet("data-bare", "");
+      }
+    });
+    return md;
+  })();
+  // Block elements: the line breaks markdown-it writes beside them are its own, not the reply's.
+  const BLOCK = /^(P|UL|OL|LI|BLOCKQUOTE|TABLE|THEAD|TBODY|TR|TH|TD|PRE|HR|H[1-6]|DIV)$/;
 
   function el(tag, className = "", text = "") {
     const node = document.createElement(tag);
@@ -777,168 +821,39 @@ window.paChat = (() => {
       box.append(head, pre);
       return box;
     }
-    // The character's words are Markdown. Blocks: paragraphs, headings, lists, quotes, tables, rules and
-    // fenced code. Inside them: code spans, links, bold, italic and struck text. All of it is drawn as text
-    // nodes, so a tag in a reply shows as written; a picture is a link and is never loaded. Underscores,
-    // backslashes and an asterisk beside a space or inside a word stay as written (__init__, C:\Users,
-    // 2 * 3, x**2).
-    const FENCE = /^(\s*)(`{3,}|~{3,})[ \t]*([^`\s]*)[^`]*$/;
-    const HEADING = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
-    const RULE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
-    const QUOTE = /^ {0,3}>[ \t]?/;
-    const ITEM = /^(\s*)([-*+•]|\d{1,9}[.)])[ \t]+(.*)$/;
-    const TABLE_RULE = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/;
-    const INLINE = new RegExp(
-      [
-        /(?<!`)(`+)(?!`)([\s\S]*?[^`])\1(?!`)/,
-        /!?\[([^\]\n]+)\]\((https?:\/\/[^\s()]*(?:\([^\s()]*\)[^\s()]*)*)(?:[ \t]+"[^"\n]*")?\)/,
-        /<(https?:\/\/[^\s<>]+)>/,
-        /https?:\/\/[^\s<>"'，。！？；）】」]+/,
-        /(?<![A-Za-z0-9*])\*\*(?=[^\s*])([^\n]*?[^\s*])\*\*(?![A-Za-z0-9*])/,
-        /~~(?=\S)([^\n]*?\S)~~/,
-        /(?<![A-Za-z0-9*])\*(?=[^\s*])([^\n*]*?[^\s*])\*(?![A-Za-z0-9*])/,
-      ]
-        .map((part) => part.source)
-        .join("|"),
-      "g",
-    );
-    function inlineInto(node, text) {
-      let at = 0;
-      for (const match of text.matchAll(INLINE)) {
-        const [whole, ticks, code, label, target, pointed, strong, struck, em] = match;
-        node.append(text.slice(at, match.index));
-        at = match.index + whole.length;
-        if (ticks) node.append(el("code", "", code.replace(/^ ([\s\S]*) $/, "$1")));
-        else if (target) {
-          const link = linkNode(target);
-          link.textContent = label;
-          link.title = target;
-          node.append(link);
-        } else if (pointed) node.append(window.paLinks.inline(pointed, links));
-        else if (strong !== undefined) node.append(inlineInto(el("strong"), strong));
-        else if (struck !== undefined) node.append(inlineInto(el("del"), struck));
-        else if (em !== undefined) node.append(inlineInto(el("em"), em));
-        else {
-          // A bare address, without the sentence's punctuation after it.
-          const url = whole.replace(/[.,;:!?)\]*]+$/, "");
-          node.append(window.paLinks.inline(url, links), whole.slice(url.length));
-        }
-      }
-      node.append(text.slice(at));
-      return node;
-    }
-    // The cells of a table row: cut at the bars outside code spans, the outer bars dropped.
-    function cellsOf(line) {
-      const row = line.trim().replace(/^\|/, "").replace(/(?<!\\)\|$/, "");
-      const cells = [];
-      let cell = "";
-      let code = false;
-      for (let n = 0; n < row.length; n += 1) {
-        if (row[n] === "\\" && row[n + 1] === "|") {
-          cell += "|";
-          n += 1;
-        } else if (row[n] === "|" && !code) {
-          cells.push(cell.trim());
-          cell = "";
-        } else {
-          if (row[n] === "`") code = !code;
-          cell += row[n];
-        }
-      }
-      cells.push(cell.trim());
-      return cells;
-    }
-    const tableAt = (lines, n) =>
-      lines[n].includes("|") && TABLE_RULE.test(lines[n + 1] || "") && cellsOf(lines[n]).length === cellsOf(lines[n + 1]).length;
-    // A table from lines[n] on; the line after it.
-    function tableInto(node, lines, n) {
-      const sides = cellsOf(lines[n + 1]).map((rule) => (!rule.endsWith(":") ? "" : rule.startsWith(":") ? "center" : "right"));
-      const table = el("table");
-      const row = (cells, tag) => {
-        const line = el("tr");
-        sides.forEach((side, column) => {
-          const cell = inlineInto(el(tag), cells[column] || "");
-          if (side) cell.style.textAlign = side;
-          line.append(cell);
-        });
-        return line;
-      };
-      table.createTHead().append(row(cellsOf(lines[n]), "th"));
-      const body = table.createTBody();
-      let end = n + 2;
-      for (; end < lines.length && lines[end].includes("|"); end += 1) body.append(row(cellsOf(lines[end]), "td"));
-      const box = el("div", "say-table");
-      box.append(table);
-      node.append(box);
-      return end;
-    }
-    // A list from lines[n] on: the items at its indent, each with the lines indented under it; the line after it.
-    function listInto(node, lines, n) {
-      const [, indent, mark] = lines[n].match(ITEM);
-      const ordered = /\d/.test(mark);
-      const list = el(ordered ? "ol" : "ul");
-      if (ordered) list.start = parseInt(mark, 10);
-      const under = (line) => line.search(/\S/) >= indent.length + 2;
-      while (n < lines.length) {
-        const item = lines[n].match(ITEM);
-        if (!item || Math.abs(item[1].length - indent.length) > 1 || /\d/.test(item[2]) !== ordered) break;
-        const inner = [item[3]];
-        const width = item[1].length + item[2].length + 1;
-        for (n += 1; n < lines.length; n += 1) {
-          // A blank line stays in the item only when what follows it is still under the item.
-          const next = lines[n].trim() ? lines[n] : lines.slice(n).find((line) => line.trim()) || "";
-          if (!under(next)) break;
-          inner.push(lines[n].replace(new RegExp(`^\\s{0,${width}}`), ""));
-        }
-        const li = blocksInto(el("li"), inner);
-        // An item of one paragraph is its words alone.
-        if (li.children.length === 1 && li.firstChild.tagName === "P") li.replaceChildren(...li.firstChild.childNodes);
-        list.append(li);
-        while (n < lines.length && !lines[n].trim() && ITEM.test(lines.slice(n).find((line) => line.trim()) || "")) n += 1;
-      }
-      node.append(list);
-      return n;
-    }
-    const startsBlock = (lines, n) =>
-      FENCE.test(lines[n]) || HEADING.test(lines[n]) || RULE.test(lines[n]) || QUOTE.test(lines[n]) || ITEM.test(lines[n]) || tableAt(lines, n);
-    function blocksInto(node, lines) {
-      for (let n = 0; n < lines.length; ) {
-        const line = lines[n];
-        const fence = line.match(FENCE);
-        const heading = line.match(HEADING);
-        if (!line.trim()) n += 1;
-        else if (fence) {
-          const close = new RegExp(`^\\s*${fence[2][0]}{${fence[2].length},}\\s*$`);
-          let end = n + 1;
-          while (end < lines.length && !close.test(lines[end])) end += 1;
-          const dent = new RegExp(`^\\s{0,${fence[1].length}}`);
-          node.append(codeNode(fence[3], lines.slice(n + 1, end).map((inner) => inner.replace(dent, "")).join("\n")));
-          n = end + 1;
-        } else if (heading) {
-          node.append(inlineInto(el(`h${Math.min(6, heading[1].length + 2)}`), heading[2]));
-          n += 1;
-        } else if (RULE.test(line)) {
-          node.append(el("hr"));
-          n += 1;
-        } else if (tableAt(lines, n)) n = tableInto(node, lines, n);
-        else if (QUOTE.test(line)) {
-          let end = n;
-          while (end < lines.length && QUOTE.test(lines[end])) end += 1;
-          node.append(blocksInto(el("blockquote"), lines.slice(n, end).map((inner) => inner.replace(QUOTE, ""))));
-          n = end;
-        } else if (ITEM.test(line)) n = listInto(node, lines, n);
-        else {
-          let end = n + 1;
-          while (end < lines.length && lines[end].trim() && !startsBlock(lines, end)) end += 1;
-          node.append(inlineInto(el("p"), lines.slice(n, end).join("\n")));
-          n = end;
-        }
-      }
-      return node;
-    }
-    // The character's words, drawn (see above).
+    // The character's words, drawn from their Markdown (MD above): markdown-it's blocks without the line breaks it
+    // writes between them (the words keep their own), code with its copy button, a table in a box that scrolls,
+    // each link opened as every link in the app opens and a bare address named by its site.
     function sayNode(text) {
-      return blocksInto(el("div", "say rich"), String(text || "").split("\n"));
+      const node = el("div", "say rich");
+      node.innerHTML = MD.render(String(text || ""));
+      const walk = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+      const texts = [];
+      while (walk.nextNode()) if (!walk.currentNode.parentNode.closest("pre")) texts.push(walk.currentNode);
+      for (const words of texts) {
+        if (BLOCK.test(words.nextSibling?.tagName || "")) words.data = words.data.replace(/\n$/, "");
+        if (BLOCK.test(words.previousSibling?.tagName || "")) words.data = words.data.replace(/^\n/, "");
+        if (!words.data) words.remove();
+      }
+      for (const pre of node.querySelectorAll("pre")) {
+        const code = pre.firstChild;
+        pre.replaceWith(codeNode(code.className.replace(/^language-/, ""), code.textContent.replace(/\n$/, "")));
+      }
+      for (const table of node.querySelectorAll("table")) {
+        const box = el("div", "say-table");
+        table.replaceWith(box);
+        box.append(table);
+      }
+      for (const link of node.querySelectorAll("a")) {
+        if (link.hasAttribute("data-bare")) link.replaceWith(window.paLinks.inline(link.textContent, links));
+        else {
+          link.className = "say-link";
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          link.title = link.getAttribute("href");
+        }
+      }
+      return node;
     }
     // The words with the lines their link cards say taken out; fenced code keeps every line.
     function wordsOf(text) {
@@ -1184,6 +1099,8 @@ window.paChat = (() => {
       link.textContent = card.title || site;
       heading.append(link);
       body.append(top, heading);
+      // Why it was shown, in words (panels/feed.py page): the 推荐记录 list's rows carry it.
+      if (card.reason) body.append(el("p", "find-reason", card.reason));
       if (card.excerpt) body.append(el("p", "find-text", card.excerpt));
 
       // The cover and the site's icon already say what kind it is: the foot says only how old.
@@ -1680,6 +1597,8 @@ window.paChat = (() => {
       node.append(folder ? cardHead(I.folder, said.title, card.folder)
         : own ? cardHead(card.feature === "programs" ? I.window : I.terminal, said.title)
         : cardHead(I.terminal, said.title, say("shellAsk")));
+      // Why the automatic review did not pass it, in one line (shell/panel.py).
+      if (said.review) node.append(el("p", "op-card-why", said.review));
       const lines = el("ul", "shell-card-lines");
       for (const line of said.lines || []) lines.append(el("li", "", line));
       if (lines.childElementCount) node.append(lines);
@@ -1698,7 +1617,9 @@ window.paChat = (() => {
       const answer = async (yes, how = {}) => {
         for (const b of node.querySelectorAll("button")) b.disabled = true;
         node.classList.add("answered");
+        // A card's own words for its 始终允许 (folders outside, granted) come with it.
         const told = el("p", "op-card-told", own ? (yes ? said.on : said.off)
+          : how.scope === "always" && said.always_told ? said.always_told
           : say(how.read ? "folderReadAllowed" : how.other ? "shellOtherAsked"
             : how.scope === "chat" ? "shellChatAllowed" : how.scope === "always" ? "shellAlwaysAllowed"
             : folder ? (yes ? "folderAllowed" : "folderDenied") : (yes ? "shellAllowed" : "shellDenied")));
@@ -1732,7 +1653,7 @@ window.paChat = (() => {
         if (card.choices?.includes("chat"))
           buttons.append(button("pa-btn pa-btn-secondary pa-btn-sm", say("shellChat"), () => answer(true, { scope: "chat" })));
         if (card.choices?.includes("always"))
-          buttons.append(button("pa-btn pa-btn-secondary pa-btn-sm", say("shellAlways"), () => answer(true, { scope: "always" })));
+          buttons.append(button("pa-btn pa-btn-secondary pa-btn-sm", said.always || say("shellAlways"), () => answer(true, { scope: "always" })));
       }
       buttons.append(button("pa-btn pa-btn-ghost pa-btn-sm", own ? said.no : say(folder ? "folderNo" : "shellNo"), () => answer(false)));
       node.append(buttons);
@@ -1762,6 +1683,8 @@ window.paChat = (() => {
       if (String(card.type).startsWith("see_") && (card.text || card.said)) {
         // Working the window by its picture (see/): the app's own sentence, and the picture with the spot ringed.
         node.append(cardHead(I.window, card.said || card.text, card.window));
+        // Why the automatic review did not pass it, in one line (desk/panel.py, see/act.py).
+        if (card.review) node.append(el("p", "op-card-why", card.review));
         if (card.said && card.text) node.append(el("p", "op-card-quote", card.text));
         if (card.picture) {
           const shot = el("img", "op-card-shot");
@@ -1772,6 +1695,7 @@ window.paChat = (() => {
       } else {
         const kind = words().deskKinds[card.kind] || card.kind;
         node.append(cardHead(I.window, say("deskAsk").replace("{program}", card.program).replace("{kind}", kind), card.window));
+        if (card.review) node.append(el("p", "op-card-why", card.review));
         fact("deskTarget", card.target);
         fact(card.kind === "file" && card.files?.length ? "deskNewName" : "deskText", card.text, "op-card-text");
         fact("deskFiles", (card.files || []).join("\n"), "op-card-text");

@@ -8,10 +8,10 @@ version = "0.1.0"
 description = "A companion on your desktop: one character that talks with you, remembers you, brings you one thing worth your time, and acts for you on the web, in programs and in files, behind cards you approve."
 readme = "README.md"
 requires-python = ">=3.10"
-# Code adapted from MIT projects keeps their licence (NOTICE), and the three
+# Code taken from MIT and BSD projects keeps their licence (NOTICE), and the three
 # character portraits are CC BY-NC-SA 4.0 (no commercial use).
-license = "Apache-2.0 AND MIT AND CC-BY-NC-SA-4.0"
-license-files = ["LICENSE", "NOTICE", "mibo/static/characters/LICENSE.md"]
+license = "Apache-2.0 AND MIT AND BSD-2-Clause AND CC-BY-NC-SA-4.0"
+license-files = ["LICENSE", "NOTICE", "mibo/static/characters/LICENSE.md", "mibo/static/welcome/markdown-it.LICENSE.txt"]
 authors = [{ name = "Qiankang Wang" }]
 keywords = [
     "llm", "agent", "desktop", "companion", "persona", "memory", "recommender",
@@ -50,8 +50,12 @@ dependencies = [
     "Pillow>=10.4,<14",
     # The no-key web search backend (DuckDuckGo).
     "ddgs>=9,<10",
+    # Direct, not transitive: search.py gives ddgs's primp client the system's DNS resolver (dns_resolver, primp 2).
+    "primp>=2,<3",
     # Reads robots.txt as Scrapy does, wildcards and a group for Mibo before the one for all (web/sites.py).
     "protego>=0.7,<1",
+    # Reads RSS and Atom feeds, broken markup, odd dates and declared encodings included (sources/base.py).
+    "feedparser>=6.0.14,<7",
     # Reads the YAML front matter of a skill's SKILL.md, as other agents' hosts do (skills/store.py).
     "pyyaml>=6,<7",
     # The person's MCP servers, through the official SDK (mcp_client.py); jsonschema checks a call's

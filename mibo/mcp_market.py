@@ -30,7 +30,9 @@ from . import mcp_tools as mt
 from . import reach, secretstore
 from .storage import atomic_write_text
 
-REGISTRY = "https://registry.modelcontextprotocol.io/v0/servers"
+# The registry's frozen API (v0.1), and where each answer says whether a version is active, deprecated or deleted.
+REGISTRY = "https://registry.modelcontextprotocol.io/v0.1/servers"
+OFFICIAL = "io.modelcontextprotocol.registry/official"
 MODELSCOPE = "https://www.modelscope.cn/api/v1/mcp/services/operational"
 LATEST = {"npm": "https://registry.npmjs.org/{}/latest", "pypi": "https://pypi.org/pypi/{}/json"}
 COMMANDS = {"npm": "npx", "pypi": "uvx"}
@@ -325,10 +327,18 @@ def view(home: Path) -> dict:
             "synced": bool(secretstore.get(home, TOKEN_KEY))}
 
 
+def _active(item) -> bool:
+    """Whether a registry answer's version is active: one its publisher deprecated or deleted is not offered."""
+    meta = item.get("_meta") if isinstance(item, dict) and isinstance(item.get("_meta"), dict) else {}
+    return isinstance(meta.get(OFFICIAL), dict) and meta[OFFICIAL].get("status") == "active"
+
+
 async def search(home: Path, query: str) -> list[dict]:
-    """The official registry's entries whose names hold `query`, latest versions only, without those shipped."""
+    """The official registry's active entries whose names hold `query`, latest versions only, without those
+    shipped."""
     query = " ".join(query.split())[:60]
-    if len(query) < 2 or not query.isascii():
+    # The registry answers a search of fewer than three characters with an error.
+    if len(query) < 3 or not query.isascii():
         return []
     hit = _searched.get(query.lower())
     if hit is None or time.time() - hit[0] > SEARCH_S:
@@ -342,21 +352,23 @@ async def search(home: Path, query: str) -> list[dict]:
             rows = json.loads(result.content).get("servers") or []
         except (ValueError, AttributeError):
             raise mt.ToolsError("market_search_failed") from None
-        hit = _searched[query.lower()] = (time.time(), [e for e in (entry(r) for r in rows[:40]) if e])
+        hit = _searched[query.lower()] = (time.time(), [e for e in (entry(r) for r in rows[:40] if _active(r)) if e])
     have = {e["id"] for e in shipped()["servers"]}
     config = mt.load_config(home)["mcpServers"]
     return [_with_installed(one, config) for one in hit[1] if one["id"] not in have][:30]
 
 
 async def by_id(ident: str) -> dict:
-    """A shipped entry, or the registry's latest version of one; the page's copy is never trusted."""
+    """A shipped entry, or the registry's latest version of one while it is active; the page's copy is never
+    trusted."""
     one = next((e for e in shipped()["servers"] if e["id"] == ident), None)
     if one is None and _ID.match(ident):
         result = await _get(f"{REGISTRY}/{quote(ident, safe='')}/versions/latest")
         try:
-            one = entry(json.loads(result.content)) if result is not None else None
+            item = json.loads(result.content) if result is not None else None
         except ValueError:
-            one = None
+            item = None
+        one = entry(item) if _active(item) else None
     if one is None:
         raise mt.ToolsError("market_gone")
     return one

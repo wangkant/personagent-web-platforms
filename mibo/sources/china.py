@@ -16,11 +16,10 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
-from .base import PER_SOURCE, Find, Source, find, get_json, get_text, local_to, parse_feed, plain, written_in
+from .base import PER_SOURCE, Find, Source, find, get_json, get_text, local_to, plain, read_feed, written_in
 
 # The places below date things in Beijing time.
 _CST = timezone(timedelta(hours=8))
-_SPACED_DATE = re.compile(r"^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})\s+([+-]\d{4})$")
 
 
 def _stamp(seconds: object) -> str:
@@ -46,16 +45,12 @@ def _feed(key: str, name: tuple[str, str], about: tuple[str, str], group: str, u
     """A feed whose links are tidied: https, and no tracking query unless the query is the page (`bare=False`).
     `cut` is boilerplate the feed opens every summary with."""
     async def fetch(http: httpx.AsyncClient) -> list[Find]:
-        found = parse_feed(await get_text(http, url), url, site=name[1])[:PER_SOURCE]
+        found = (await read_feed(http, url, site=name[1]))[:PER_SOURCE]
         for one in found:
             link = _https(one.item.url)
             one.item.url = _bare(link) if bare else link
             if cut:
                 one.item.description = re.sub(cut, "", one.item.description).strip()
-            # 36Kr writes "2026-11-18 18:18:30  +0800", which the RFC 822 reader leaves alone.
-            spaced = _SPACED_DATE.match(one.item.published)
-            if spaced:
-                one.item.published = datetime.strptime(" ".join(spaced.groups()), "%Y-%m-%d %H:%M:%S %z").isoformat()
         return found
 
     return Source(key, name, about, group, fetch, default)

@@ -102,9 +102,8 @@ def test_an_mcp_tool_marked_destructive_asks_every_time_and_on_no_the_server_get
     assert [(c["card"]["type"], c["card"]["choices"]) for c in first.cards] == \
         [("mcp_start", ["once", "always"]), ("mcp_tool", ["once"])]
     assert log.read_text(encoding="utf-8").splitlines() == [attack["tool"]]
-    # Connected and small, the server's tools are now offered by name.
-    direct = call(f"mcp__notes__{attack['tool']}", title="shopping")
-    again = turn("Delete it again", direct, say("I left it."), cards="no")  # copy: voice
+    # Connected now, the same call asks again.
+    again = turn("Delete it again", use, say("I left it."), cards="no")  # copy: voice
     assert [(c["card"]["type"], c["answer"]) for c in again.cards] == [("mcp_tool", "no")]
     assert log.read_text(encoding="utf-8").splitlines() == [attack["tool"]]
     assert first.asked("reviewer") == again.asked("reviewer") == []

@@ -12,6 +12,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import time
@@ -21,7 +22,7 @@ from pathlib import Path
 from dotenv import dotenv_values
 from fastapi import Request
 
-from .. import __version__, autostart
+from .. import __version__, autostart, db
 from .. import setup_wizard as sw
 from ..storage import atomic_write_text
 
@@ -37,13 +38,15 @@ PREFIX = "mibo-backup-"
 BACKUP_NAME = re.compile(r"mibo-backup-[0-9A-Za-z_-]{1,64}\.zip")
 MANIFEST = "mibo-backup.json"
 # Never in an archive: the archives themselves, the built-in browser's own storage (its sign-ins
-# hold only on this computer), the walks' throwaway profile, and the chat record, which a forget
-# must reach in full.
-LEFT_OUT = ("backups", "runtime/desktop/webview", "runtime/visitor", "runtime/log")
+# hold only on this computer) and the walks' throwaway profile.
+LEFT_OUT = ("backups", "runtime/desktop/webview", "runtime/visitor")
 # Nor what means something only to the app that is running: its link and token, locks, logs and
 # half-written files.
 LEFT_OUT_NAMES = frozenset({"welcome.json", "__pycache__"})
-LEFT_OUT_SUFFIXES = (".lock", ".tmp", ".part", ".pyc", ".log")
+LEFT_OUT_SUFFIXES = (".lock", ".tmp", ".part", ".pyc", ".log", "-wal", "-shm", "-journal")
+# The runtime database, copied whole and consistent through SQLite's backup API, without the chat
+# record, which a forget must reach in full (db.snapshot); a restore takes it back table by table.
+DB = f"runtime/{db.FILE}"
 # A setting that holds a key, a token or a password: blank in an archive made without secrets.
 SECRET = re.compile(r"(_KEY|_TOKEN|_SECRET)$|PASSWORD|^MIBO_MCP_")
 # What the next start does ({"restore": path} or {"reset": true}), and what a restore came to.
@@ -104,7 +107,7 @@ def members(home: Path) -> list[tuple[Path, str]]:
         dirs[:] = [d for d in dirs if not _left_out(prefix + d)]
         for name in files:
             path = Path(folder) / name
-            if not path.is_symlink() and not _left_out(prefix + name):
+            if not path.is_symlink() and not _left_out(prefix + name) and prefix + name != DB:
                 found.append((path, prefix + name))
     return sorted(found, key=lambda pair: pair[1])
 
@@ -140,8 +143,14 @@ def write(home: Path, folder: Path, secrets: bool, tag: str = "") -> Path:
                 except FileNotFoundError:
                     # Replaced mid-walk by an atomic write; nothing to copy.
                     continue
+            copy = home / "runtime" / f"{db.FILE}.part"
+            try:
+                if db.snapshot(home / "runtime", copy):
+                    archive.write(copy, DB)
+            finally:
+                copy.unlink(missing_ok=True)
         partial.replace(path)
-    except OSError:
+    except (OSError, sqlite3.Error):
         # The folder itself may be what is wrong, so tidying up can fail too.
         with contextlib.suppress(OSError):
             partial.unlink()
@@ -181,12 +190,17 @@ def _unpack(home: Path, path: Path, plan: list[zipfile.ZipInfo], kept: dict) -> 
             # Only the ones the archive's members left empty go.
             with contextlib.suppress(OSError):
                 Path(folder).rmdir()
+    archived = home / "runtime" / f"{db.FILE}.part"
     with zipfile.ZipFile(path) as archive:
         for info in plan:
-            target = home.joinpath(*info.filename.split("/"))
+            target = archived if info.filename == DB else home.joinpath(*info.filename.split("/"))
             target.parent.mkdir(parents=True, exist_ok=True)
             with archive.open(info) as source, open(target, "wb") as out:
                 shutil.copyfileobj(source, out)
+    try:
+        db.take_back(home / "runtime", archived if archived.is_file() else None)
+    finally:
+        archived.unlink(missing_ok=True)
     restored = dotenv_values(home / ".env") if (home / ".env").is_file() else {}
     missing = {k: v for k, v in kept.items() if not restored.get(k)}
     if missing:
@@ -205,10 +219,10 @@ def _restore(home: Path, path: Path) -> str:
     kept = {} if manifest.get("secrets") else {k: v for k, v in present.items() if v and SECRET.search(k)}
     try:
         _unpack(home, path, plan, kept)
-    except (OSError, zipfile.BadZipFile):
+    except (OSError, sqlite3.Error, zipfile.BadZipFile):
         try:
             _unpack(home, safety, check(safety)[0], {})
-        except (OSError, ValueError, zipfile.BadZipFile):
+        except (OSError, ValueError, sqlite3.Error, zipfile.BadZipFile):
             return "desk_restore_failed"
         return "desk_restore_undone"
     return ""
@@ -216,6 +230,7 @@ def _restore(home: Path, path: Path) -> str:
 
 def _reset(home: Path) -> None:
     """Everything of the home but its archives, as before the first run."""
+    db.close(home / "runtime")
     for folder, _, files in os.walk(home, topdown=False):
         here = Path(folder)
         if here.relative_to(home).parts[:1] == ("backups",):

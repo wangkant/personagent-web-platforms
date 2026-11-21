@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from mibo import catalog, mcp_hub, mcp_offer, mcp_tools
+from mibo import mcp_hub, mcp_tools
 from mibo.mcp_client import Connection, McpError
 from mibo.textproc import _WEB_DESC_CLOSE, _WEB_DESC_OPEN
 
@@ -326,7 +326,7 @@ async def test_a_local_program_starts_only_once_allowed_and_each_call_asks(tmp: 
         await _stop(hub)
 
 
-async def test_the_offer_lists_few_tools_directly_and_many_behind_a_search(tmp: Path) -> None:
+async def test_the_offer_names_the_servers_and_a_search_finds_the_few_tools_with_their_parameters(tmp: Path) -> None:
     mcp_tools.write_servers(tmp, {"stand": {**STDIO}}, _env_writer(tmp))
     turn = _Turn(tmp)
     hub = mcp_hub.Hub(turn.workspace)
@@ -335,13 +335,7 @@ async def test_the_offer_lists_few_tools_directly_and_many_behind_a_search(tmp: 
     try:
         await _state(hub, "stand", "connected")
         offer = hub.offer()
-        assert offer["total"] == len(mcp_standin.TOOLS) and len(offer["direct"]) == offer["total"]
-        assert all(t["fn"].startswith("mcp__stand__") for t in offer["direct"])
-        mcp_hub.DIRECT_TOOLS, was = 3, mcp_hub.DIRECT_TOOLS
-        try:
-            assert hub.offer()["direct"] == []
-        finally:
-            mcp_hub.DIRECT_TOOLS = was
+        assert offer["names"] == ["stand"] and offer["servers"][0]["tools"] == len(mcp_standin.TOOLS)
         found = hub.find("add two integers")
         assert found["tools"][0]["tool"] == "add" and len(found["tools"]) <= 5
         assert found["tools"][0]["parameters"]["required"] == ["a", "b"]
@@ -366,16 +360,6 @@ async def test_a_server_that_dies_is_started_again(tmp: Path, monkeypatch) -> No
         await _state(hub, "stand", "connected")
     finally:
         await _stop(hub)
-
-
-async def test_the_reply_model_is_offered_the_servers_only_through_the_page(monkeypatch) -> None:
-    monkeypatch.setattr(mcp_offer, "offer_source", None)
-    names = {t["function"]["name"] for t in catalog.offered()}
-    assert not names & {"find_tools", "use_tool"}
-    offer = {"servers": [{"name": "notes", "about": "Notes", "tools": 40}], "total": 40, "direct": []}
-    monkeypatch.setattr(mcp_offer, "offer_source", lambda: offer)
-    names = {t["function"]["name"] for t in catalog.offered()}
-    assert {"find_tools", "use_tool"} <= names and "web_search" in names
 
 
 @pytest.mark.skipif(os.name != "nt", reason="batch files run through cmd.exe on Windows only")

@@ -115,7 +115,8 @@ KEPT = "kept.json"
 # to FIT_MIN, below which text stops being easy to read and the site lays out narrower instead.
 FIT_WIDTH = 1024
 FIT_MIN = 0.67
-# What a page read for a tool gives: its text clipped to this, and a list's rows.
+# What a page's facts keep of its text when it is read off as the person reads it (a read for the character
+# hands over all it read), and a list's rows.
 TEXT_MAX = 6000
 ROWS_MAX = 40
 # Reading out of sight: how long a page may take.
@@ -137,7 +138,7 @@ VK_ESCAPE = 0x1B
 # The steps of a run the column beside the page lists (browse.js), the ends after which the page is the person's
 # until they say to go on, and for how long a run going on from one of those keeps its steps.
 STEPS_KEPT = 40
-THEIRS = ("handover", "asked", "paused", "cap")
+THEIRS = ("handover", "asked", "paused", "cap", "waiting")
 GO_ON_S = 30 * 60.0
 
 
@@ -200,6 +201,16 @@ def handed(status: str, note: str) -> str:
     return "drawn" if "almost nothing to work with" in note or "drawn" in note else "stuck"
 
 
+def on_page(x: float, y: float, wide: float, high: float, cuts: list, scale: float) -> bool:
+    """Whether a point in the pane's own px (from its top left) is on the page: inside the pane and not under a
+    part of the app page laid over it (`cuts`, CSS px: the chat beside the page with its cards, the bar's
+    suggestions), which is cut out of the pane and pressed there, not on the page."""
+    if not (0 <= x < wide and 0 <= y < high):
+        return False
+    return not any(cx * scale <= x < (cx + cw) * scale and cy * scale <= y < (cy + ch) * scale
+                   for cx, cy, cw, ch in cuts)
+
+
 def tell_script(state: dict) -> str:
     """What the app page runs to show `state` in the pane's bar (browse.js)."""
     return f"window.paBrowse && paBrowse({json.dumps(state)})"
@@ -211,10 +222,9 @@ def facts_script() -> str:
     return f"({READER})({{}})"
 
 
-def page_of(url: str, data, rows: list | None = None, start: int = 0) -> dict:
+def page_of(url: str, data, rows: list | None = None, start: int = 0, most: int = TEXT_MAX) -> dict:
     """What a read page gives: title, declared facts and readable text, as roam.py reads them, and for a list
-    its rows (title, link, author, time, counts). The text is the TEXT_MAX characters from `start`; where the
-    page has more, "of" says how many there are in all."""
+    its rows (title, link, author, time, counts). The text is the `most` characters from `start`."""
     from .roam import facts_from
     data = data if isinstance(data, dict) else {}
     facts = facts_from(data, url)
@@ -225,7 +235,7 @@ def page_of(url: str, data, rows: list | None = None, start: int = 0) -> dict:
     return {"url": url, "title": facts.get("title") or str(data.get("title") or ""),
             "site": facts.get("site", ""), "kind": facts.get("kind", ""), "author": facts.get("author", ""),
             "published": facts.get("published", ""), "description": facts.get("description", ""),
-            "text": text[start:start + TEXT_MAX], **({"from": start, "of": len(text)} if len(text) > TEXT_MAX else {}),
+            "text": text[start:start + most],
             **({"rows": [row for row in listed if row.get("title")][:ROWS_MAX]}
                if data.get("kind") == "list" else {})}
 
@@ -1505,18 +1515,30 @@ class Pane:
 
     def op_end(self, status: str, note: str, unfinished: str = "") -> None:
         """The run ended: the column says how, and stays until the person closes it. A step it never finished
-        says `unfinished`."""
+        says `unfinished`; ended waiting on a card, the card and its step stay, to be answered."""
         op = self.op
         if op is None:
             return
         self.ui(self._unwatch_input)
+        waiting = status == "waiting" and op["card"] is not None
         for step in op["steps"]:
-            if step["state"] in ("doing", "waiting"):
+            if step["state"] == "doing" or step["state"] == "waiting" and not waiting:
                 step.update(state="done" if status == "done" else "stopped", why="" if status == "done" else unfinished)
-        op.update(end=status, note=note[:300], why=handed(status, note), card=None)
+        op.update(end=status, note=note[:300], why=handed(status, note), card=op["card"] if waiting else None)
         self._tell_op()
         self._op_last = {**op, "at": time.monotonic()}
         self.op = None
+
+    def op_kept(self, yes: bool) -> None:
+        """The card a run ended waiting on was answered: it goes, and a no ends the run as declined."""
+        last = self._op_last
+        if self.op is None and last and last["card"] is not None:
+            for step in last["steps"]:
+                if step["state"] == "waiting":
+                    step["state"] = "done" if yes else "cancelled"
+            last.update(card=None, **({} if yes else {"end": "declined"}))
+            self.tell({"operating": {k: last.get(k) for k in ("task", "step", "note", "held", "end", "why", "steps",
+                                                              "card", "wait")}})
 
     def op_steps(self) -> list:
         """The steps of the run under way, else of the last one."""
@@ -1544,9 +1566,8 @@ class Pane:
             self._op_timer = None
 
     def _input_tick(self) -> None:
-        """The person's own click or key in the pane (a pointer only passing over it does not count): Esc
-        stops the run, anything else pauses it."""
-        from System.Drawing import Rectangle
+        """The person's own click or key on the page in the pane (a pointer only passing over it does not count,
+        nor a press on the chat or a card laid over it): Esc stops the run, anything else pauses it."""
         from System.Windows.Forms import Cursor
         seen, where = _last_input_tick(), (Cursor.Position.X, Cursor.Position.Y)
         moved, self._op_seen = seen != self._op_seen, seen
@@ -1554,8 +1575,10 @@ class Pane:
         if not moved or self.op is None or self._view is None or self.op.get("held") or not self._view.Visible:
             return
         keys = ctypes.windll.user32.GetAsyncKeyState
-        box = self._view.RectangleToScreen(Rectangle(0, 0, self._view.Width, self._view.Height))
-        clicked = box.Contains(Cursor.Position) and any(keys(button) & 0x8001 for button in (0x01, 0x02, 0x04))
+        point = self._view.PointToClient(Cursor.Position)
+        clicked = (on_page(point.X, point.Y, self._view.Width, self._view.Height, [] if self._full else self._cuts,
+                           self._scale)
+                   and any(keys(button) & 0x8001 for button in (0x01, 0x02, 0x04)))
         typed = self._view.ContainsFocus and where == before
         if not (clicked or typed):
             return
@@ -1714,7 +1737,8 @@ class Reader:
             self.pace.done(url, wall if wall in ("verification", "sign_in", "sign_in_overlay") else "")
             if wall:
                 return {"error": wall}
-            return page_of(page.url, page.data, page.rows, start)
+            # The whole text it read: the character's reader (web/pagetext.py) fits it to the model.
+            return page_of(page.url, page.data, page.rows, start, most=len(page.data.get("text") or ""))
 
 
 class Feeds:

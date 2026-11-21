@@ -13,11 +13,12 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from harness.model import call, fail, hang, say
+from harness.model import call, fail, hang, say, tokens
 from harness.page import measured
 from harness.turn import run_turn
 from mibo import acting, loop
 from mibo.review import Verdict
+from mibo.shell import tool as shell_tool
 from mibo.shell.grants import Grants
 
 
@@ -68,6 +69,31 @@ def test_the_loops_own_errors_are_said_in_one_wording(turn):
     activity = done.entries[-1]["activity"]
     assert [(a["mark"], a["line"], a["status"]) for a in activity] == [
         ("", "no_such_tool", "error"), ("web", "read_page", "error"), ("web", "read_page", "error")]
+
+
+def test_on_a_small_window_a_deferred_tool_is_found_then_called_through_use_tool_with_its_own_schema(app, turn):
+    app.model.window = 16384
+    measured(app, context=16384)
+    steps = [{"step": "pick a beach", "status": "in_progress"}]
+    done = turn("Plan the weekend", call("find_tools", query="update_plan"),
+                call("use_tool", tool="update_plan", arguments={"steps": "pick a beach"}),
+                call("use_tool", tool="no_such_tool", arguments={}),
+                call("use_tool", tool="update_plan", arguments={"steps": steps}), say("Planned."))
+    bodies = done.asked()
+    sent = {t["function"]["name"] for t in bodies[0]["tools"]}
+    assert "update_plan" not in sent and {"find_tools", "use_tool"} <= sent
+    # The same tools block in every round, and every request fits the window with its answer's room.
+    assert len({_tools_hash(b) for b in bodies}) == 1
+    assert all(tokens(b) + b["max_tokens"] <= 16384 for b in bodies)
+    find, wrong, unknown, plan = done.calls()
+    found = json.loads(done.result_of(find["id"]).split("\n", 1)[1])
+    assert [(f["tool"], f["parameters"]) for f in found] == [
+        ("update_plan", shell_tool.PLAN_TOOL["function"]["parameters"])]
+    assert done.result_of(wrong["id"]) == "Error: invalid arguments: steps must be an array"
+    assert done.result_of(unknown["id"]).startswith('Error: unknown tool "no_such_tool"')
+    assert next(s for s in done.trace if s["tool"] == "plan")["what"] == "pick a beach"
+    # The call through use_tool is marked as the tool's own.
+    assert [(a["mark"], a["status"]) for a in done.entries[-1]["activity"]][-1] == ("computer", "ok")
 
 
 def test_calls_past_ten_at_once_are_answered_without_running(turn):
