@@ -69,7 +69,7 @@ def main() -> None:
     home = Path(a.home).resolve()
     os.environ["AGENT_HOME"] = str(home)
     os.environ.setdefault("AGENT_LANG", "zh")
-    from mibo import channels, context
+    from mibo import channels, context, turnctx
     from mibo.agent import Agent
     agent = Agent(api_key="x", base_url="https://openrouter.ai/api/v1", model=MODEL, llm_dm_model=MODEL,
                   agent_lang="zh", memory_file=str(home / "runtime" / "memory.json"), embedding_model="")
@@ -86,7 +86,9 @@ def main() -> None:
         # As a turn of the chat builds it (dm._chat_dm).
         plan, _ = agent._turn_plan(agent._dm_system(), tools=True)
         prompt = agent._build_dm_prompt(list(history), room=plan.turn / ratio, pkey=channels.dm_routing_key(user))
-        tokens = round(ratio * context.text_tokens(prompt.turn_context))
+        # The lists modules add (skills, open places) come last and are not charged to the share.
+        added = "".join(f"\n\n{line}" for line in turnctx.lines("", channels.dm_routing_key(user)))
+        tokens = round(ratio * context.text_tokens(prompt.turn_context.removesuffix(added)))
         row = {"window": window, "C": plan.turn, "turn_context": tokens, "within": tokens <= plan.turn,
                "chars": len(prompt.turn_context)}
         for name, (opening, closing) in PARTS.items():

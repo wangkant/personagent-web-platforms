@@ -220,9 +220,11 @@ class PromptBuilder:
         choices = "" if follow_up else _choices_note()
         gap = "" if follow_up else _dm_gap_note(history)
         clock = (f"[Current local time] {TextProcessing._current_time_str()}\n\n"
-                 "Answer in plain text, as <output_protocol> says."
-                 # The lines modules add for the turn (turnctx.py), in the order they registered.
-                 + "".join(f"\n\n{line}" for line in turnctx.lines(last_user, pkey)))
+                 "Answer in plain text, as <output_protocol> says.")
+        # The lines modules add for the turn (turnctx.py), in the order they registered: the skills that can be
+        # loaded, the places that are open. Each is capped where it is built and is not charged to the turn
+        # context's share, which is for what the turn knows of the person and the day.
+        added = "".join(f"\n\n{line}" for line in turnctx.lines(last_user, pkey))
         # The day says what they did with each find; its head, the truth that it stayed in or where it went, is
         # part of the frame.
         day = today.Day(self, last_user, time.time())
@@ -256,6 +258,7 @@ class PromptBuilder:
             f"{gap}"
             f"{_recent_steps(history, left)}"
             f"{clock}"
+            f"{added}"
         )
         system = self._dm_system()
         # The person's turns are framed data; the persona's turns and the engine's proactive cue are not.

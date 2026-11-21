@@ -41,7 +41,7 @@ def main() -> None:
     import httpx
     import uvicorn
 
-    from mibo import context, paths, welcome
+    from mibo import context, paths, turnctx, welcome
     from mibo.dm import chat_key
     from mibo.prompt import _CHECKPOINT_OPEN, _TURN_CONTEXT_OPEN
 
@@ -79,7 +79,9 @@ def main() -> None:
         pkey = chat_key(workspace._main.conversation)[1]
         plan = agent._turn_plan(agent._dm_system(), tools=True)[0]
         users = [m["content"] for m in row["body"]["messages"] if m.get("role") == "user"]
-        held = users[-1][users[-1].index(_TURN_CONTEXT_OPEN):]
+        # Without the lists modules add (skills, open places), which come last and are not charged to the share.
+        held = users[-1][users[-1].index(_TURN_CONTEXT_OPEN):].removesuffix(
+            "".join(f"\n\n{line}" for line in turnctx.lines("", pkey)))
         ratio = agent._chat_requests[pkey]["ratio"]
         sent = "".join(str(m.get("content") or "") for m in row["body"]["messages"])
         print(json.dumps({

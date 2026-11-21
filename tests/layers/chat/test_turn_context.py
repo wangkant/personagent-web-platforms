@@ -17,7 +17,7 @@ from harness.app import App
 from harness.model import call, fail, say, tokens
 from harness.page import measured
 from harness.turn import run_turn
-from mibo import context, pastchats, person
+from mibo import context, pastchats, person, turnctx
 from mibo.dm import chat_key
 from mibo.prompt import _CHECKPOINT_OPEN, _TURN_CONTEXT_OPEN
 
@@ -72,7 +72,10 @@ def test_the_turn_context_stays_within_its_share_memory_first_at_any_window(app,
     agent = _agent(app)
     plan = agent._turn_plan(agent._dm_system(), tools=True)[0]
     held = _turn_context(body)
-    assert agent._chat_requests[_pkey(app)]["ratio"] * context.text_tokens(held) <= plan.turn
+    # The lists modules add (the skills that can be loaded, the open places) come last and keep their own room.
+    added = "".join(f"\n\n{line}" for line in turnctx.lines("", _pkey(app)))
+    assert added and held.endswith(added)
+    assert agent._chat_requests[_pkey(app)]["ratio"] * context.text_tokens(held.removesuffix(added)) <= plan.turn
     # The memory block is filled first: at the smallest window it still holds what they told it.
     assert "<about_them>" in held and sum(fact in held for fact in FACTS) >= 3
     # With room left, the steps of the newest replies follow.

@@ -283,9 +283,9 @@ class ModelCalls:
                 if field:
                     # The service named the field it refuses: known from now on, to a call made beside this one too.
                     self._remember_refusal(url, model, field)
-                elif asking and "thinking" in payload:
+                elif asking and "thinking" in payload and model_problem(e.status_code, e.response.text) != "context":
                     # An endpoint being asked may refuse it in words of its own: a guess, kept once the resend is
-                    # answered.
+                    # answered. A request past the window refused no field: the turn fits it again (loop._reply).
                     payload.pop("thinking")
                     field = "thinking"
                     refused.append(field)
