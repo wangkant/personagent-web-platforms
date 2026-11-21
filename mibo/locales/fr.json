@@ -938,6 +938,8 @@
       ]
     ],
     "linksOnlyWindow": "Le navigateur propre à l'application n'est disponible que dans la fenêtre de l'application Windows ; ailleurs, les liens s'ouvrent dans le navigateur du système.",
+    "sideFoldTitle": "Replier la barre latérale à l'ouverture d'une page",
+    "sideFoldText": "Tant qu'une page web est affichée dans la fenêtre, la barre latérale complète se replie en barre d'icônes et revient à la fermeture de la page.",
     "bgTitle": "Continuer après la fermeture de la fenêtre",
     "bgText": "La fenêtre passe dans la zone de notification en bas à droite et le personnage continue de répondre. Ouvrez ou quittez Mibo depuis son icône à cet endroit.",
     "bgOnlyWindow": "Disponible dans la fenêtre de l'application sous Windows.",

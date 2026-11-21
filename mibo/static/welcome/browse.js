@@ -738,11 +738,12 @@
     layout();
     room(on);
   }
-  // A screen with no room for the sidebar, a site laid out for a desktop and the chat beside it: the sidebar folds
-  // to its rail while the page is in front, and unfolds when it leaves (app.js keeps the person's own choice).
+  // The sidebar folds to its rail while the page is in front, and unfolds when it leaves (app.js decides, by the
+  // person's setting): told here whether the screen has no room for the sidebar, a site laid out for a desktop
+  // and the chat beside it.
   function fold(on) {
     const side = parseFloat(getComputedStyle(document.body).getPropertyValue("--pa-side-width"));
-    window.paSideFold?.(on && side + PAGE_WIDE + (choice === "closed" ? 0 : BESIDE) > screen.availWidth);
+    window.paSideFold?.(on, side + PAGE_WIDE + (choice === "closed" ? 0 : BESIDE) > screen.availWidth);
   }
   function show() {
     post("browser/do", { action: "return" });

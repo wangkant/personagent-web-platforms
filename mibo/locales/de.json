@@ -938,6 +938,8 @@
       ]
     ],
     "linksOnlyWindow": "Der eigene Browser der App ist nur im Windows-App-Fenster verfügbar; sonst öffnen sich Links im Systembrowser.",
+    "sideFoldTitle": "Seitenleiste einklappen, wenn eine Seite geöffnet wird",
+    "sideFoldText": "Solange eine Webseite im Fenster angezeigt wird, klappt die vollständige Seitenleiste zur Symbolleiste ein und kehrt zurück, wenn die Seite geschlossen wird.",
     "bgTitle": "Nach dem Schließen des Fensters weiterlaufen",
     "bgText": "Das Fenster wandert in den Infobereich unten rechts, und die Figur antwortet weiter. Öffnen oder beenden Sie Mibo über das Symbol dort.",
     "bgOnlyWindow": "Im App-Fenster unter Windows verfügbar.",

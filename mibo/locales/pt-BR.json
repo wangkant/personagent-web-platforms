@@ -938,6 +938,8 @@
       ]
     ],
     "linksOnlyWindow": "O navegador próprio do aplicativo só existe na janela do aplicativo para Windows; nos demais casos os links abrem no navegador do sistema.",
+    "sideFoldTitle": "Recolher a barra lateral ao abrir uma página",
+    "sideFoldText": "Enquanto uma página da web é exibida na janela, a barra lateral completa é recolhida para a faixa de ícones e volta quando a página é fechada.",
     "bgTitle": "Continuar em execução após fechar a janela",
     "bgText": "A janela vai para a área de notificação, no canto inferior direito, e o personagem continua respondendo. Abra ou encerre o Mibo pelo ícone dele ali.",
     "bgOnlyWindow": "Disponível na janela do aplicativo no Windows.",

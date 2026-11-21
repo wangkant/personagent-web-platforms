@@ -939,6 +939,8 @@
       ]
     ],
     "linksOnlyWindow": "The app's own browser is there only in the Windows app window; elsewhere links open in the system browser.",
+    "sideFoldTitle": "Fold the sidebar when a page opens",
+    "sideFoldText": "While a web page is shown in the window, the full sidebar folds to its icon rail and comes back when the page closes.",
     "bgTitle": "Keep running after the window closes",
     "bgText": "The window goes to the notification area at the bottom right and the character keeps answering. Open or quit Mibo from its icon there.",
     "bgOnlyWindow": "Available in the app window on Windows.",

@@ -808,12 +808,14 @@
   // ---- The rail: below 1000px, or folded by hand, the sidebar is a strip of icons;
   // opening it from there lays the whole sidebar over the page.
   let collapsed = stored("mibo-side") === "collapsed";
-  // A page in front on a screen with no room for the sidebar beside it folds the sidebar too (browse.js), unless
-  // the person folded or unfolded it themselves once; not kept, and the fold button unfolds it.
+  // A page in front folds the whole sidebar to its rail while it is there (browse.js), and the sidebar comes back
+  // when the page leaves: by the switch in Settings (setup/device.js; on unless turned off there), and with it off
+  // only on a screen with no room for the sidebar beside the page (`tight`), unless the person folded or unfolded
+  // it themselves once. Not kept, and the fold button unfolds it.
   let paged = false;
   const railed = () => NARROW.matches || collapsed || paged;
-  window.paSideFold = (on) => {
-    paged = on && !stored("mibo-side");
+  window.paSideFold = (on, tight) => {
+    paged = on && (stored("mibo-side-page") !== "keep" || (tight && !stored("mibo-side")));
     renderSideState();
   };
   function renderSideState() {

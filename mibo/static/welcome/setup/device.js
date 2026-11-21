@@ -17,7 +17,7 @@
     const box = kit.card();
     box.classList.add("setup-options");
     const pet = { saving: false };
-    box.append(buildStart(), buildLinks(), buildBackground(), buildPet(), buildUpdates());
+    box.append(buildStart(), buildLinks(), buildSideFold(), buildBackground(), buildPet(), buildUpdates());
     const data = { place: "", targets: [], backups: [], working: false };
     node.append(box, buildData());
 
@@ -117,6 +117,17 @@
       }
       links.saving = false;
       links.choice.set(links.value);
+    }
+
+    // ---- A page in front folds the whole sidebar to its rail (app.js paSideFold): kept in this window's own
+    // storage as the sidebar's fold is, on unless turned off here.
+    function buildSideFold() {
+      const { row, box: on } = kit.switchRow("side-fold", t.sideFoldTitle, t.sideFoldText, (node) => {
+        if (node.checked) localStorage.removeItem("mibo-side-page");
+        else localStorage.setItem("mibo-side-page", "keep");
+      });
+      on.checked = localStorage.getItem("mibo-side-page") !== "keep";
+      return row;
     }
 
     // ---- Keep running when the window closes.

@@ -938,6 +938,8 @@
       ]
     ],
     "linksOnlyWindow": "El navegador propio de la aplicación solo está disponible en la ventana de la aplicación para Windows; en los demás casos los enlaces se abren en el navegador del sistema.",
+    "sideFoldTitle": "Plegar la barra lateral al abrir una página",
+    "sideFoldText": "Mientras se muestra una página web en la ventana, la barra lateral completa se pliega a su tira de iconos y vuelve al cerrar la página.",
     "bgTitle": "Seguir ejecutándose al cerrar la ventana",
     "bgText": "La ventana pasa al área de notificación, abajo a la derecha, y el personaje sigue respondiendo. Abra o cierre Mibo desde su icono allí.",
     "bgOnlyWindow": "Disponible en la ventana de la aplicación para Windows.",
