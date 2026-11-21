@@ -364,19 +364,8 @@ def shortcuts() -> list[tuple[str, str, str]]:
     Desktop, and every .lnk in Start's Programs folders that starts no program (a script, a folder). As (name,
     the file, what it opens): the name is the file's without its extension; a shortcut's target is read through
     the shell's own object, as Explorer reads it ("" when it names none)."""
-    import clr  # noqa: F401  pythonnet, which pywebview has loaded
-    from System import Activator, Type
-    from System.Reflection import BindingFlags
-
     from ..shell.grants import KNOWN, known_folder
-    shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell"))
-
-    def target(path: str) -> str:
-        if path.lower().endswith(".exe"):
-            return path
-        link = shell.GetType().InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, None, shell, [path])
-        return str(link.GetType().InvokeMember("TargetPath", BindingFlags.GetProperty, None, link, None) or "")
-
+    target = link_reader()
     out = []
     for folder in (known_folder(KNOWN[2][1]), known_folder(PUBLIC_DESKTOP)):
         if folder and os.path.isdir(folder):
@@ -392,6 +381,22 @@ def shortcuts() -> list[tuple[str, str, str]]:
                     if aim and not aim.lower().endswith(".exe"):
                         out.append((os.path.splitext(name)[0], path, aim))
     return out
+
+
+def link_reader():
+    """A reader of what a shortcut (.lnk, .url) opens, through the shell's own object as Explorer reads it ("" when
+    it names none); a program file opens itself."""
+    import clr  # noqa: F401  pythonnet, which pywebview has loaded
+    from System import Activator, Type
+    from System.Reflection import BindingFlags
+    shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell"))
+
+    def target(path: str) -> str:
+        if path.lower().endswith(".exe"):
+            return path
+        link = shell.GetType().InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, None, shell, [path])
+        return str(link.GetType().InvokeMember("TargetPath", BindingFlags.GetProperty, None, link, None) or "")
+    return target
 
 
 def open_app(aumid: str) -> bool:

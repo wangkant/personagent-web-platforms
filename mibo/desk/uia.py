@@ -1299,16 +1299,19 @@ class View:
 
 def _holds(el, roles: set, most: int = 400) -> bool:
     """Whether anything under `el` has one of `roles`, from the look's cache: a page's document holds controls (its
-    buttons, fields, list rows), a text document none."""
+    buttons, fields, list rows), a text document none. A scroll bar and its arrow buttons are the frame, not what
+    the element holds: an edit control's document has them too."""
     A = automation()
     todo, seen = list(el.CachedChildren), 0
     while todo and seen < most:
         child = todo.pop()
         seen += 1
         ctype = _get(child, A.AutomationElement.ControlTypeProperty)
-        if ctype is not None and ROLES.get(ctype.ProgrammaticName.split(".")[-1]) in roles:
+        role = ROLES.get(ctype.ProgrammaticName.split(".")[-1]) if ctype is not None else None
+        if role in roles:
             return True
-        todo.extend(child.CachedChildren)
+        if role not in SKIPPED:
+            todo.extend(child.CachedChildren)
     return False
 
 

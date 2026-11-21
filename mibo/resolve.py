@@ -65,8 +65,9 @@ def score(asked: str, text: str) -> float:
 
 @dataclass
 class Resolved:
-    """kind: tab (target a tab id), window (a window handle), program (a name Start or the Desktop lists), page (a
-    web address), file or folder (a path), several (candidates to pick from) or none."""
+    """kind: tab (target a tab id), window (a window handle), program (a name Start or the Desktop lists, or the
+    path of a shortcut in the person's own folders), page (a web address), file or folder (a path), several
+    (candidates to pick from) or none."""
     kind: str
     target: object = ""
     title: str = ""
@@ -102,6 +103,12 @@ def known_site(name: str) -> tuple[str, str]:
     rows = json.loads(PLACES.read_text(encoding="utf-8"))
     best = max(rows, key=lambda r: score(name, r["name"]), default=None)
     return (best["home"], best["name"]) if best and score(name, best["name"]) >= 0.95 else ("", "")
+
+
+def inside(path: str, folder: str) -> bool:
+    """Whether `path` lies in `folder` or under it."""
+    path, folder = os.path.normcase(os.path.abspath(path)), os.path.normcase(os.path.abspath(folder))
+    return path.startswith(folder.rstrip("\\/") + os.sep)
 
 
 def _in_folder(name: str, folder: str) -> list[str]:
@@ -154,8 +161,11 @@ def pick(name: str, near: str = "", as_: str = "", *, tabs: list[dict] = (),
     if found:
         path = found[0]
         stem, ext = os.path.splitext(os.path.basename(path))
+        if ext.lower() in (".lnk", ".url") and as_ != "file" and any(inside(path, f) for f in folders.values()):
+            # A shortcut in one of the person's own folders opens itself (desk/names.find takes it by its path).
+            return Resolved("program", path, stem)
         if ext.lower() in (".lnk", ".url", ".exe") and as_ != "file":
-            # A shortcut or a program on the Desktop: Start and the Desktop's own list open it.
+            # A shortcut or a program elsewhere: only what Start and the Desktop list opens, by its name.
             name = stem
         else:
             return Resolved("folder" if os.path.isdir(path) else "file", path, os.path.basename(path))

@@ -5,8 +5,9 @@ is Start's own list (win32.start_apps): each entry's name in this Windows' langu
 the shortcuts on the Desktop and in Start, by their file names (win32.shortcuts). A name is matched against
 those names, against what each open window's program says of itself (its file description, product and file
 name) and against the window's title. A window already open is taken before a program is started; an entry no
-window shows is the one to open. No path ever comes from the model: only what Start and the Desktop list is
-started, and only a window's title is read here, never what it shows.
+window shows is the one to open. No program's path ever comes from the model: only what Start and the Desktop
+list is started, and a shortcut the person keeps in their own folders; only a window's title is read here, never
+what it shows.
 
 `resolve` is the matching alone, over rows it is given, so it can be measured on a recorded Start menu
 (tools/desk_names.py); `find` runs it on this computer.
@@ -176,8 +177,26 @@ def open_windows() -> list[Window]:
     return out
 
 
+def own_link(asked: str) -> App | None:
+    """A shortcut (.lnk, .url) given by its full path in one of the person's own folders (the known folders the
+    file tools use): that shortcut, as the Desktop's own are listed. None for any other path or name."""
+    from ..resolve import inside, profile_folders
+    path = os.path.normpath(asked.strip().strip('"'))
+    if not (os.path.isabs(path) and path.lower().endswith((".lnk", ".url")) and os.path.isfile(path)):
+        return None
+    if not any(inside(path, folder) for folder in profile_folders().values()):
+        return None
+    return App(Path(path).stem, "", win32.link_reader()(path), path)
+
+
 def find(asked: str) -> Found:
-    """`resolve` on this computer; Start's list is read again when the name is not in an older one."""
+    """`resolve` on this computer; Start's list is read again when the name is not in an older one. A shortcut in
+    the person's own folders by its full path (resolve.pick gives one it found there) is that shortcut, or the
+    window of the program it starts when one is open."""
+    link = own_link(asked)
+    if link is not None:
+        hwnd = next((w.hwnd for w in open_windows() if link.target and runs(link, w.exe)), 0)
+        return Found(hwnd=hwnd) if hwnd else Found(app=link)
     found = resolve(asked, open_windows(), apps())
     if not (found.hwnd or found.app or found.several) and time.monotonic() - _apps[0] > 10:
         found = resolve(asked, open_windows(), apps(fresh=True))

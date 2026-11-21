@@ -141,6 +141,8 @@ ASIDE = (1280, 800)
 BROWSER_ARGS = ("--disable-background-timer-throttling --disable-renderer-backgrounding "
                 "--disable-backgrounding-occluded-windows")
 VK_ESCAPE = 0x1B
+# The pointer's buttons (left, right, middle, the two side buttons) among the virtual keys.
+POINTER_BUTTONS = {0x01, 0x02, 0x04, 0x05, 0x06}
 # The steps of a run the column beside the page lists (browse.js), the ends after which the page is the person's
 # until they say to go on, and for how long a run going on from one of those keeps its steps.
 STEPS_KEPT = 40
@@ -215,6 +217,15 @@ def on_page(x: float, y: float, wide: float, high: float, cuts: list, scale: flo
         return False
     return not any(cx * scale <= x < (cx + cw) * scale and cy * scale <= y < (cy + ch) * scale
                    for cx, cy, cw, ch in cuts)
+
+
+def went_to_page(pressed: bool, at_page: bool, typed: bool, focus_in_page: bool) -> bool:
+    """Whether the person's input went to the page in the pane: a pointer press goes where the pointer is (a press
+    on the chat, a card or the bar laid over the page is on the app's own page, whatever holds the focus), keys go
+    where the keyboard focus is."""
+    if pressed:
+        return at_page
+    return typed and focus_in_page
 
 
 def tell_script(state: dict) -> str:
@@ -1644,26 +1655,26 @@ class Pane:
             self._op_timer = None
 
     def _input_tick(self) -> None:
-        """The person's own click or key on the page in the pane (a pointer only passing over it does not count,
-        nor a press on the chat or a card laid over it): Esc stops the run, anything else pauses it."""
+        """The person's own click or key on the page in the pane (a pointer passing over it or its wheel does not
+        count, nor a press on the chat or a card laid over it): Esc stops the run, anything else pauses it."""
         from System.Windows.Forms import Cursor
-        seen, where = _last_input_tick(), (Cursor.Position.X, Cursor.Position.Y)
+        seen = _last_input_tick()
         moved, self._op_seen = seen != self._op_seen, seen
-        before, self._op_where = getattr(self, "_op_where", where), where
         if not moved or self.op is None or self._view is None or self.op.get("held") or not self._view.Visible:
             return
+        # The keys and buttons down or pressed since the last tick, read once (reading clears "pressed since").
         keys = ctypes.windll.user32.GetAsyncKeyState
+        down = {k for k in range(0x01, 0xFF) if keys(k) & 0x8001}
         point = self._view.PointToClient(Cursor.Position)
-        clicked = (on_page(point.X, point.Y, self._view.Width, self._view.Height, [] if self._full else self._cuts,
-                           self._scale)
-                   and any(keys(button) & 0x8001 for button in (0x01, 0x02, 0x04)))
-        typed = self._view.ContainsFocus and where == before
-        if not (clicked or typed):
+        at_page = on_page(point.X, point.Y, self._view.Width, self._view.Height, [] if self._full else self._cuts,
+                          self._scale)
+        if not went_to_page(bool(down & POINTER_BUTTONS), at_page, bool(down - POINTER_BUTTONS),
+                            self._view.ContainsFocus):
             return
         # Waiting for their sign-in, the page is theirs to type in: only Esc stops the run.
-        if self.op.get("wait") and not keys(VK_ESCAPE) & 0x8001:
+        if self.op.get("wait") and VK_ESCAPE not in down:
             return
-        self.op["held"] = "stopped" if keys(VK_ESCAPE) & 0x8001 else "paused"
+        self.op["held"] = "stopped" if VK_ESCAPE in down else "paused"
         self._tell_op()
 
     def _shut(self, forget: bool = True) -> dict | None:
