@@ -61,7 +61,8 @@ def test_a_private_chat_opened_from_its_toggle_keeps_nothing_and_is_left_from_th
     page.page.locator(".chat-empty .chat-private:visible").wait_for()
     (opened,) = [chat for chat in app.get("/api/chats").json()["chats"] if chat.get("private")]
     box = page.page.locator(".chat-input:visible")
-    box.fill("My locker code is 4512")
+    # Words found nowhere else in a home (a port, a time or an id may hold any four digits).
+    box.fill("My locker tag says QZXV-4512")
     box.press("Enter")
     page.page.get_by_text("Noted, and only here.").wait_for()
 
@@ -69,6 +70,6 @@ def test_a_private_chat_opened_from_its_toggle_keeps_nothing_and_is_left_from_th
     page.page.get_by_role("menuitemcheckbox", name="Temporary chat").click()
     page.page.locator(".chat-private:visible").wait_for(state="detached")
     assert page.page.locator(".chat-input:visible").count() == 1
-    kept = [path for path in app.home.rglob("*") if path.is_file() and b"4512" in path.read_bytes()]
+    kept = [path for path in app.home.rglob("*") if path.is_file() and b"QZXV-4512" in path.read_bytes()]
     assert kept == [] and opened["id"] in {chat["id"] for chat in app.get("/api/chats").json()["chats"]}
     assert page.errors == []

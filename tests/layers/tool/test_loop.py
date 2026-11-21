@@ -2,18 +2,23 @@
 errors and reminders, the ceilings, and a stop."""
 from __future__ import annotations
 
+import base64
 import hashlib
+import io
 import json
 import threading
 import time
+from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from harness.model import call, fail, hang, say
 from harness.page import measured
 from harness.turn import run_turn
-from mibo import loop
+from mibo import acting, loop
 from mibo.review import Verdict
+from mibo.shell.grants import Grants
 
 
 def _tools_hash(body: dict) -> str:
@@ -121,18 +126,62 @@ def test_older_results_are_pruned_in_the_middle_and_the_newest_kept_whole():
     assert convo[0]["content"].startswith("0") and convo[0]["content"].endswith("0")
 
 
-def test_pictures_older_than_the_latest_two_become_a_line():
+def test_pictures_the_tools_returned_older_than_the_latest_two_become_a_line():
     picture = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA"}}
-    convo = [{"role": "user", "content": [{"type": "text", "text": "look"}, picture, picture]},
-             {"role": "user", "content": [picture]}]
+    returned = {"type": "text", "text": loop.TOOL_PICTURES}
+    convo = [{"role": "user", "content": [{"type": "text", "text": "compare"}, picture, picture, picture]},
+             {"role": "user", "content": [returned, picture, picture]},
+             {"role": "user", "content": [returned, picture]}]
     loop.prune(convo, 60_000)
-    kinds = [p["type"] for m in convo for p in m["content"]]
-    assert kinds == ["text", "text", "image_url", "image_url"]
+    kinds = [[p["type"] for p in m["content"]] for m in convo]
+    # Their own pictures stay whatever the tools brought after them.
+    assert kinds == [["text", "image_url", "image_url", "image_url"], ["text", "text", "image_url"],
+                     ["text", "image_url"]]
 
 
-def test_a_stop_ends_the_turn_with_what_was_said_and_done(app):
+def test_the_pictures_they_attach_reach_the_model_whole(turn):
+    shots = []
+    for shade in range(4):
+        out = io.BytesIO()
+        Image.new("L", (8, 8), shade * 60).save(out, "PNG")
+        shots.append({"kind": "picture", "data": base64.b64encode(out.getvalue()).decode()})
+    done = turn("Which of these four is sharpest?", say("The third."), attachments=shots)
+    parts = done.asked()[0]["messages"][-1]["content"]
+    assert [p["type"] for p in parts].count("image_url") == 4
+
+
+def test_two_reads_with_acting_off_ask_one_card_at_a_time_and_each_press_grants_what_it_showed(app, turn, tmp_path):
+    acting.Modes(app.home / "runtime" / "desktop").set("off")
+    for name, words in (("a", "alpha"), ("b", "beta")):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "note.txt").write_text(words, encoding="utf-8")
+    done = turn("Read both notes", [call("read_file", path="note.txt", folder=str(tmp_path / "a")),
+                                    call("read_file", path="note.txt", folder=str(tmp_path / "b"))], say("Read."))
+    first, second = done.calls()
+    assert "alpha" in done.result_of(first["id"]) and "beta" in done.result_of(second["id"])
+    # One card for each folder, each shown before its press; the first also turned acting on.
+    shown = sorted(Path(c["card"]["folder"]).name for c in done.cards)
+    granted = sorted(Path(f).name for f in Grants(app.home / "runtime" / "desktop", app.home).folders()
+                     if Path(f).parent.resolve() == tmp_path.resolve())
+    assert shown == granted == ["a", "b"]
+
+
+_STEPS = '[{"step": "pick a beach", "status": "in_progress"}]'
+# The same first round three ways: a native call, a call written in a <tool_call> block, and in DeepSeek's markup.
+_FIRST_ROUNDS = {
+    "native": [{"content": "Let me plan it first."}, _plan("pick a beach")],
+    "written": {"content": 'Let me plan it first. <tool_call>{"name": "update_plan", "arguments": {"steps": '
+                           + _STEPS + "}}</tool_call>"},
+    "deepseek": {"content": 'Let me plan it first.\n<｜DSML｜function_calls>\n<｜DSML｜invoke name="update_plan">'
+                            '<｜DSML｜parameter name="steps" string="false">' + _STEPS + "</｜DSML｜parameter>"
+                            "</｜DSML｜invoke>\n</｜DSML｜function_calls>"},
+}
+
+
+@pytest.mark.parametrize("how", sorted(_FIRST_ROUNDS))
+def test_a_stop_ends_the_turn_with_what_was_said_and_done(app, how):
     done: dict = {}
-    first = [{"content": "Let me plan it first."}, _plan("pick a beach")]
+    first = _FIRST_ROUNDS[how]
     worker = threading.Thread(target=lambda: done.update(result=run_turn(app, "Plan the weekend", first, hang())),
                               daemon=True)
     worker.start()
@@ -159,3 +208,11 @@ def test_arguments_are_checked_against_the_tools_parameters(arguments, error):
     schema = {"type": "object", "properties": {"url": {"type": "string"},
                                                "sort": {"type": "string", "enum": ["name", "size", "date"]}}}
     assert loop.invalid(arguments, schema) == ({}, error)
+
+
+def test_a_nested_object_or_list_sent_as_json_text_is_taken_as_it():
+    schema = {"type": "object", "properties": {"arguments": {"type": "object"}, "paths": {"type": "array"}}}
+    sent = json.dumps({"arguments": json.dumps({"q": "tide"}), "paths": json.dumps(["a.txt"])})
+    assert loop.invalid(sent, schema) == ({"arguments": {"q": "tide"}, "paths": ["a.txt"]}, "")
+    assert loop.invalid(json.dumps({"arguments": "tide"}), schema) == (
+        {}, "Error: invalid arguments: arguments must be an object")

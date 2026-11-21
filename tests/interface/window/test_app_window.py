@@ -19,12 +19,16 @@ def webview(monkeypatch):
     return stand_in_webview(monkeypatch)
 
 
-def _frame_watch_ends() -> bool:
-    """Wait for the window's watch on whether its page drew the bar to finish; False when none was running."""
-    watches = [thread for thread in threading.enumerate() if thread.name == "mibo-frame"]
+def _frame_watches() -> list[threading.Thread]:
+    """The window's watches on whether its page drew the bar, taken while the window is up and they run."""
+    return [thread for thread in threading.enumerate() if thread.name == "mibo-frame"]
+
+
+def _ended(watches: list[threading.Thread]) -> bool:
+    """Each watch finished within 5 seconds; False when none was running."""
     for thread in watches:
         thread.join(5)
-    return bool(watches)
+    return bool(watches) and not any(thread.is_alive() for thread in watches)
 
 
 def test_the_page_opens_in_a_private_window_with_the_app_icon(webview, tmp_path) -> None:
@@ -221,13 +225,14 @@ def test_a_webview_whose_page_cannot_move_the_window_keeps_the_title_bar(webview
 def test_a_page_that_never_draws_the_bar_gives_the_window_its_own_back(webview, tmp_path, monkeypatch,
                                                                          asks, undone) -> None:
     done = _frameless(monkeypatch, regions=True)
-    monkeypatch.setattr(window, "PAGE_WITHIN", 0.1)
+    monkeypatch.setattr(window, "PAGE_WITHIN", 1.0)
     seen = {}
 
     def person(shown) -> None:
+        watches = _frame_watches()
         if asks:
             app.frame_seen()
-        seen["watched"] = _frame_watch_ends()
+        seen["watched"] = _ended(watches)
         seen["frameless"] = app.frameless
         shown.press_close()
 
@@ -270,8 +275,15 @@ def test_the_pages_buttons_do_what_a_title_bars_do(webview, tmp_path) -> None:
 
 def test_a_window_closed_before_its_page_asked_is_left_alone(webview, tmp_path, monkeypatch) -> None:
     done = _frameless(monkeypatch, regions=True)
-    monkeypatch.setattr(window, "PAGE_WITHIN", 0.2)
+    monkeypatch.setattr(window, "PAGE_WITHIN", 1.0)
+    watches: list = []
+
+    def person(shown) -> None:
+        watches.extend(_frame_watches())
+        shown.press_close()
+
+    webview.person = person
     app = window.AppWindow("http://127.0.0.1:1/", storage=tmp_path)
     assert app.run() is True
-    assert _frame_watch_ends()
+    assert _ended(watches)
     assert done["undone"] == 0, "nothing is done to a window that is gone"

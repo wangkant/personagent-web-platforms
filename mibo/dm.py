@@ -53,9 +53,11 @@ def _with_found(messages: list[dict], found: str) -> list[dict]:
 
 
 def _done_so_far(lookups: ChatLookups) -> str:
-    """What a turn had done when its time ran out: the steps in its trace."""
+    """What a turn had done when its time ran out: the steps in its trace and each call it made."""
     steps = "; ".join(f"{step['tool']} {step['what']}".strip() for step in lookups.trace)
-    return f"(the time for this message ran out while you were working; steps taken: {steps or 'none finished'})"
+    calls = "; ".join(f"{entry['line']} ({entry['status']})" for entry in lookups.activity)
+    return (f"(the time for this message ran out while you were working; steps taken: {steps or 'none finished'}"
+            + (f"; calls made: {calls}" if calls else "") + ")")
 
 
 def _trimmed_history(history: list[dict]) -> list[dict]:
@@ -241,11 +243,14 @@ class DirectMessages:
                     try:
                         reply = await self._within_turn_budget(self._chat_dm(history, pkey=pkey, **cue))
                     except OutOfTime:
-                        if not lookups.trace:
+                        if not (lookups.trace or lookups.activity):
                             raise
                         # Work was under way: one more call says what was done, in place of a failure line.
                         reply = await asyncio.wait_for(self._chat_dm(
                             history, pkey=pkey, out_of_time=True, **cue), self.llm_timeout_s)
+                    if not reply:
+                        # No words even when asked without tools: the excuse below, and their words wait.
+                        raise ValueError("the answer had no words")
                 finally:
                     stoppable = lookups.work
                     lookups.work = None
@@ -267,8 +272,6 @@ class DirectMessages:
                 # error; not committed to the history.
                 for item in self._say(self._model_failure_excuse(text)):
                     item["reason"] = "excuse"
-                return
-            if not reply:
                 return
 
             final = self._final_reply(reply, log_ctx=f"chat={conversation}")

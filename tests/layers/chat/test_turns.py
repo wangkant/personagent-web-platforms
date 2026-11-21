@@ -2,14 +2,19 @@
 what a failure leaves, and the lines the app adds to the turn."""
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import json
+import os
 import time
+from pathlib import Path
 
 import pytest
 
-from harness.model import fail, say, think
-from mibo import abilities, decision, dm, turnctx
+from harness.app import App, quiet_start
+from harness.model import call, fail, say, think
+from harness.turn import run_turn
+from mibo import abilities, decision, dm, loop, schedule_tool, turnctx
 from mibo.endpoints import chat_completions_url
 from mibo.prompts import PersonaStyle, dm_style_guide
 from mibo.textproc import ReplyStyle
@@ -94,12 +99,60 @@ def test_a_model_measured_to_think_is_asked_to_at_the_standard_level_and_its_rea
 
 
 def test_what_was_said_during_an_outage_waits_whole_for_the_next_turn(turn):
-    lines = [f"line {n} of what happened" for n in range(3)]
+    lines = [f"line {n} of what happened" for n in range(5)]
     failed = [turn(line, fail(500)) for line in lines]
-    assert [t.status for t in failed] == [502] * 3 and all(t.reply == "" for t in failed)
+    assert [t.status for t in failed] == [502] * 5 and all(t.reply == "" for t in failed)
     done = turn("hello?", say("sorry, I'm back"))
     assert "\n".join([*lines, "hello?"]) in _context(done.asked()[0])
     assert done.reply == "sorry, I'm back"
+
+
+def test_an_answer_with_no_words_is_asked_again_without_tools_and_the_turn_ends_in_words(turn):
+    done = turn("hello", say(""), say("Hello again."))
+    first, second = done.asked()
+    assert first["tools"] and "tools" not in second
+    assert (done.status, done.reply) == (200, "Hello again.")
+    # No words twice: the failure line, and their words wait for the next turn.
+    silent = turn("are you there?", say(""), say(""))
+    assert (silent.status, silent.reply) == (502, "")
+    assert "are you there?\nstill there?" in _context(turn("still there?", say("Yes.")).asked()[0])
+
+
+@pytest.fixture
+def hurried(model, monkeypatch, tmp_path):
+    """The app with one second for a model answer and the least tool time two rounds need, where schedule_edit
+    stands in for a command that runs past the turn's whole time."""
+    quiet_start(monkeypatch)
+    monkeypatch.setattr(loop, "WITHIN_S", 6.0)
+    real = schedule_tool.use
+
+    async def use(agent, called, lookups):
+        if called["name"] == "schedule_edit":
+            await asyncio.Event().wait()
+        return await real(agent, called, lookups)
+
+    monkeypatch.setattr(schedule_tool, "use", use)
+    served = App(Path(os.environ["AGENT_HOME"]), model, PERSONA_BROWSER_PATH=str(tmp_path / "no-browser"),
+                 LLM_MAX_RETRIES="0", LLM_TIMEOUT_S="1").open()
+    yield served
+    served.close()
+
+
+def test_out_of_time_with_nothing_done_the_failure_line_is_said_and_the_words_wait(hurried):
+    late = run_turn(hurried, "pause my morning task", call("schedule_edit", id="t1", action="pause"))
+    assert (late.status, late.reply) == (502, "")
+    # The chat is free again, and the words come with the next turn.
+    done = run_turn(hurried, "hello?", say("Sorry, that took too long."))
+    assert "pause my morning task\nhello?" in _context(done.asked()[0])
+    assert done.reply == "Sorry, that took too long."
+
+
+def test_out_of_time_after_calls_were_made_the_reply_says_what_was_done(hurried):
+    done = run_turn(hurried, "show my tasks, then pause the morning one", call("schedule_list"),
+                    call("schedule_edit", id="t1", action="pause"), say("I listed them; the pause did not finish."))
+    assert (done.status, done.reply) == (200, "I listed them; the pause did not finish.")
+    last = done.asked()[-1]
+    assert "tools" not in last and "schedule_list" in _context(last)
 
 
 def test_past_sixty_turns_forty_are_kept_and_the_dropped_ones_wait_for_the_fold(app, turn):

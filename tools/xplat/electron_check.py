@@ -198,14 +198,15 @@ def first_start(check: Check, home: Path) -> None:
         return got
 
     ingestion.safe_fetch_url = keeping
-    began = time.monotonic()
+    # The fetch's own clock: `began` stays the wall time the per-user folders' times are read against.
+    fetch_began = time.monotonic()
     try:
         program = asyncio.run(launch.fetch(home))
         error = ""
     except launch.LaunchError as failed:
         program, error = None, str(failed)
     ingestion.safe_fetch_url = real_fetch
-    measures["fetch_s"] = round(time.monotonic() - began, 1)
+    measures["fetch_s"] = round(time.monotonic() - fetch_began, 1)
     measures["zip_mb"] = round(build[0][2] / 2**20, 1)
     if program is None:
         check.record("fetch", False, error)

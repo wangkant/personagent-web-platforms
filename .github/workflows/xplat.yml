@@ -86,6 +86,9 @@ jobs:
       - name: Operate pages in an Electron view
         run: python tools/xplat/epane_check.py --google --out epane-out
       - name: Download Cua Driver and check it against the published checksum
+        id: cua
+        # Run whatever the checks above did: Cua Driver's runs stand apart from them.
+        if: ${{ !cancelled() }}
         run: |
           mkdir -p cua && cd cua
           curl -fsSLO "https://github.com/trycua/cua/releases/download/$CUA_TAG/$CUA_ASSET"
@@ -97,12 +100,15 @@ jobs:
           echo "CUA_DRIVER=$(cygpath -w "$(find "$PWD/bin" -name cua-driver.exe | head -1)")" >> "$GITHUB_ENV"
           du -sh bin
       - name: Cua Driver, fixture in Tk
+        if: ${{ !cancelled() && steps.cua.outcome == 'success' }}
         continue-on-error: true
         run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --toolkit tk
       - name: Cua Driver, fixture in Qt
+        if: ${{ !cancelled() && steps.cua.outcome == 'success' }}
         continue-on-error: true
         run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --toolkit qt
       - name: Cua Driver on Notepad, beside desk/uia.py
+        if: ${{ !cancelled() && steps.cua.outcome == 'success' }}
         continue-on-error: true
         run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --program notepad --uia
       - name: Cua Driver summary
@@ -166,6 +172,9 @@ jobs:
       - name: Operate pages in an Electron view
         run: python tools/xplat/epane_check.py --google --out epane-out
       - name: Download Cua Driver and check it against the published checksum
+        id: cua
+        # Run whatever the checks above did: Cua Driver's runs stand apart from them.
+        if: ${{ !cancelled() }}
         run: |
           mkdir -p cua && cd cua
           curl -fsSLO "https://github.com/trycua/cua/releases/download/$CUA_TAG/$CUA_ASSET"
@@ -180,6 +189,7 @@ jobs:
           du -sh bin; codesign -dv "$driver" 2>&1 | head -8 || true
       # The Cua Driver steps change the runner's privacy grants, so they come after every other check.
       - name: The grants the image already holds
+        if: ${{ !cancelled() && steps.cua.outcome == 'success' }}
         run: |
           sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
             "SELECT service, client, auth_value FROM access WHERE service IN \
@@ -189,59 +199,75 @@ jobs:
       # Which process must hold the grant when Mibo's python starts Cua Driver? The image grants its own
       # agent, so those rows go first; then the driver alone, python alone, and both.
       - name: The processes above this step
+        if: ${{ !cancelled() && steps.cua.outcome == 'success' }}
         run: |
           pid=$$
           while [ "$pid" -gt 1 ]; do ps -o pid=,ppid=,comm= -p "$pid"; pid=$(ps -o ppid= -p "$pid" | tr -d ' '); done
       - name: A. The image's own grants, fixture in Qt
+        if: ${{ !cancelled() && steps.cua.outcome == 'success' }}
         continue-on-error: true
         run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --toolkit qt --label macos-A-image
       - name: A. Fixture in Tk
+        if: ${{ !cancelled() && steps.cua.outcome == 'success' }}
         continue-on-error: true
         run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --toolkit tk
       - name: A. TextEdit
+        if: ${{ !cancelled() && steps.cua.outcome == 'success' }}
         continue-on-error: true
         run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --program TextEdit
       - name: Remove the image's grants
+        if: ${{ !cancelled() && steps.cua.outcome == 'success' }}
         run: |
           sudo sqlite3 -cmd ".timeout 10000" "/Library/Application Support/com.apple.TCC/TCC.db" \
             "DELETE FROM access WHERE service IN ('kTCCServiceAccessibility','kTCCServicePostEvent','kTCCServiceScreenCapture')"
           sudo launchctl stop com.apple.tccd || true
           sleep 2
       - name: B. No grant at all
+        if: ${{ !cancelled() && steps.cua.outcome == 'success' }}
         continue-on-error: true
         run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --toolkit qt --label macos-B-none
       - name: C. Grant Cua Driver alone
+        if: ${{ !cancelled() && steps.cua.outcome == 'success' }}
         run: bash tools/xplat/grant_tcc.sh "$CUA_DRIVER"
       - name: C. Fixture with Cua Driver granted
+        if: ${{ !cancelled() && steps.cua.outcome == 'success' }}
         continue-on-error: true
         run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --toolkit qt --label macos-C-driver
       - name: D. Grant python alone, the parent that starts Cua Driver
+        if: ${{ !cancelled() && steps.cua.outcome == 'success' }}
         run: |
           sudo sqlite3 -cmd ".timeout 10000" "/Library/Application Support/com.apple.TCC/TCC.db" \
             "DELETE FROM access WHERE client='$CUA_DRIVER'"
           bash tools/xplat/grant_tcc.sh "$PYTHON_REAL"
       - name: D. Fixture with python granted
+        if: ${{ !cancelled() && steps.cua.outcome == 'success' }}
         continue-on-error: true
         run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --toolkit qt --label macos-D-python
       - name: E. Grant both
+        if: ${{ !cancelled() && steps.cua.outcome == 'success' }}
         run: bash tools/xplat/grant_tcc.sh "$CUA_DRIVER"
       - name: E. Fixture with both granted
+        if: ${{ !cancelled() && steps.cua.outcome == 'success' }}
         continue-on-error: true
         run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --toolkit qt --label macos-E-both
       # The process launchd started for the job is the responsible one: give it back its grant alone.
       - name: F. Grant the runner's agent alone
+        if: ${{ !cancelled() && steps.cua.outcome == 'success' }}
         run: |
           sudo sqlite3 -cmd ".timeout 10000" "/Library/Application Support/com.apple.TCC/TCC.db" \
             "DELETE FROM access WHERE client IN ('$CUA_DRIVER','$PYTHON_REAL')"
           bash tools/xplat/grant_tcc.sh /opt/hca/hosted-compute-agent
       - name: F. Fixture with the agent granted
+        if: ${{ !cancelled() && steps.cua.outcome == 'success' }}
         continue-on-error: true
         run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --toolkit qt --label macos-F-agent
       - name: G. Grant the shell launchd started, and its script
+        if: ${{ !cancelled() && steps.cua.outcome == 'success' }}
         run: |
           bash tools/xplat/grant_tcc.sh /bin/bash
           bash tools/xplat/grant_tcc.sh /opt/hca/start_hca.sh
       - name: G. Fixture with the launchd shell granted
+        if: ${{ !cancelled() && steps.cua.outcome == 'success' }}
         continue-on-error: true
         run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --toolkit qt --label macos-G-launchd
       - name: Cua Driver summary
@@ -344,6 +370,9 @@ jobs:
       - name: Operate pages in an Electron view
         run: python tools/xplat/epane_check.py --google --out epane-out
       - name: Download Cua Driver and check it against the published checksum
+        id: cua
+        # Run whatever the checks above did: Cua Driver's runs stand apart from them.
+        if: ${{ !cancelled() }}
         run: |
           mkdir -p cua && cd cua
           curl -fsSLO "https://github.com/trycua/cua/releases/download/$CUA_TAG/$CUA_ASSET"
@@ -355,12 +384,15 @@ jobs:
           echo "CUA_DRIVER=$(find "$PWD/bin" -type f -name cua-driver | head -1)" >> "$GITHUB_ENV"
           du -sh bin
       - name: Cua Driver, fixture in Tk
+        if: ${{ !cancelled() && steps.cua.outcome == 'success' }}
         continue-on-error: true
         run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --toolkit tk
       - name: Cua Driver, fixture in Qt
+        if: ${{ !cancelled() && steps.cua.outcome == 'success' }}
         continue-on-error: true
         run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --toolkit qt
       - name: Cua Driver on gedit
+        if: ${{ !cancelled() && steps.cua.outcome == 'success' }}
         continue-on-error: true
         run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --program gedit
       - name: Cua Driver summary

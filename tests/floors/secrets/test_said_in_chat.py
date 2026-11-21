@@ -13,6 +13,7 @@ from harness import attacks
 from harness.home import holding, restarted
 from harness.model import call, say
 from harness.turn import run_turn
+from mibo import person
 
 ROWS = [param.values[0] for param in attacks.load("secrets")]
 
@@ -85,3 +86,22 @@ def test_a_number_already_in_the_chat_record_never_comes_back_from_a_search(app)
     assert holding(app.home, card["raw"])[card["raw"][1]]
     found = recall(app)[card["id"]]
     assert not any(w in found for w in card["raw"]) and card["masked"][0] in found, found
+
+
+# Talk about keys and codes with no key or code in it: this app's people set up model keys all the time.
+SPOKEN_OF = ["my API key is not working", "我的 API key 余额还剩 5000，够用到月底",  # copy: voice
+             "密钥是什么意思？", "the api key is in Settings, right?"]  # copy: voice
+
+
+@pytest.mark.parametrize("said", SPOKEN_OF)
+def test_talk_about_a_key_with_no_key_in_it_is_kept_as_said(said):
+    assert not person.secret(said) and person.mask(said) == (said, False)
+
+
+@pytest.mark.parametrize("said, shown", [
+    ("my api key is sk-proj-Rk82Jd0aQm4Lw9Zt5Vb1", "my api key is ****"),
+    ("密钥：AKIA1234567890ABCDEF", "密钥：****"),
+    ("api_key=sk-abcdefgh12345678ijkl", "api_key=****"),
+])
+def test_a_key_after_its_word_is_masked(said, shown):
+    assert person.secret(said) and person.mask(said) == (shown, True)

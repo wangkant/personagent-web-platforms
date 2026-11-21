@@ -87,7 +87,7 @@ BRIDGE = """
 
 
 # Text and labels on the page that say "undefined": a word looked up that was not there.
-SHOWN_UNDEFINED = """
+SHOWN_UNDEFINED = r"""
 (() => {
   const found = [];
   const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
