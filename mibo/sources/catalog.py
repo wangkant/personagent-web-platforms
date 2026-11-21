@@ -31,7 +31,6 @@ import httpx
 from .. import langs, quiet, roam, situation
 from ..library import Library, item_id
 from ..panels import feed as feed_panel
-from ..panels import links
 from ..roam import PICTURE_FETCH_MAX, public_address, small_picture
 from ..storage import atomic_write_text
 from . import base, weights
@@ -264,11 +263,9 @@ async def _page_picture(http: httpx.AsyncClient, address: str) -> str:
                 data.extend(chunk)
                 if len(data) >= HEAD_READ_MAX:
                     break
-            headers = dict(answer.headers)
-        head = links._Head()
-        head.feed(links._page_text(bytes(data), headers))
-        return roam.facts_from({"meta": head.meta, "ld": head.ld, "canonical": head.canonical, "title": ""},
-                               address)["picture"]
+            types = answer.headers.get("content-type", "")
+        from ..web import fetch
+        return fetch.head(fetch.decoded(bytes(data), types), address)[0]["picture"]
     return ""
 
 

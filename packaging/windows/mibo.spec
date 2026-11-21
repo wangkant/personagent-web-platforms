@@ -25,6 +25,8 @@ for folder, dirs, files in os.walk(package / "_bundled"):
 datas += collect_data_files("tzdata")
 # keyring finds the credential store through its own entry points (secretstore.py).
 datas += copy_metadata("keyring")
+# trafilatura reads its settings.cfg on import and jusText its stop-word lists (web/fetch.py).
+datas += collect_data_files("trafilatura") + collect_data_files("justext")
 
 # Imported by name: the commands, the panels, the chat languages;
 # uvicorn's protocols, ddgs's engines and keyring's backends the same way.

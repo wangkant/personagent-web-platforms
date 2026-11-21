@@ -9,7 +9,6 @@ import io
 import json
 import re
 import time
-from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
@@ -33,59 +32,6 @@ HOST = re.compile(r"[a-z0-9.-]{1,253}")
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
                          "Chrome/130.0 Safari/537.36",
            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"}
-
-
-class _Head(HTMLParser):
-    """The meta pairs, JSON-LD, title, canonical address and icons of a page, as roam.facts_from reads them."""
-
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.meta: list[list[str]] = []
-        self.ld: list[str] = []
-        self.icons: list[str] = []
-        self.title = self.canonical = ""
-        self._in = ""
-
-    def handle_starttag(self, tag, attrs):
-        a = {k.lower(): v or "" for k, v in attrs}
-        if tag == "meta":
-            key = (a.get("property") or a.get("name") or a.get("itemprop") or "").lower()
-            if key and a.get("content"):
-                self.meta.append([key, a["content"]])
-        elif tag == "link":
-            rel = a.get("rel", "").lower().split()
-            if "canonical" in rel and not self.canonical:
-                self.canonical = a.get("href", "")
-            if ("icon" in rel or "apple-touch-icon" in rel) and a.get("href") and not a["href"].endswith(".svg"):
-                self.icons.append(a["href"])
-        elif tag == "title" and not self.title:
-            self._in = "title"
-        elif tag == "script" and a.get("type", "").lower() == "application/ld+json":
-            self._in = "ld"
-            self.ld.append("")
-
-    def handle_endtag(self, tag):
-        if tag in ("title", "script"):
-            self._in = ""
-
-    def handle_data(self, data):
-        if self._in == "title":
-            self.title += data
-        elif self._in == "ld" and len(self.ld[-1]) < 200_000:
-            self.ld[-1] += data
-
-
-def _page_text(content: bytes, headers: dict) -> str:
-    """The page as text, in the charset its header or its own meta names, else UTF-8 or GB18030."""
-    types = {k.lower(): v for k, v in headers.items()}.get("content-type", "")
-    named = re.search(r"charset=[\"']?([\w-]+)", types) or re.search(
-        r"<meta[^>]+charset=[\"']?([\w-]+)", content[:4096].decode("ascii", "ignore"), re.I)
-    for encoding in ([named.group(1)] if named else []) + ["utf-8", "gb18030"]:
-        try:
-            return content.decode(encoding)
-        except (LookupError, UnicodeDecodeError):
-            continue
-    return content.decode("utf-8", "replace")
 
 
 class Links:
@@ -148,25 +94,22 @@ class Links:
         return ""
 
     async def _read(self, url: str) -> dict:
-        from ..roam import facts_from, player_for, site_name
+        from ..roam import player_for, site_name
+        from ..web import fetch
         host = (urlsplit(url).hostname or "").lower()
         out = {"url": url, "site": site_name(url), "host": host.removeprefix("www."), "title": "",
                "description": "", "picture": "", "embed": player_for(url), "length": None, "kind": "page"}
         got = await self._fetch(url, PAGE_BYTES, ("text/html", "application/xhtml"))
-        head = _Head()
+        icons: list[str] = []
         if got:
-            try:
-                head.feed(_page_text(got.content, got.headers)[:PAGE_BYTES])
-            except Exception:
-                pass
-            facts = facts_from({"meta": head.meta, "ld": head.ld, "canonical": head.canonical,
-                                "title": " ".join(head.title.split())}, got.url)
+            types = {k.lower(): v for k, v in got.headers.items()}.get("content-type", "")
+            facts, icons = fetch.head(fetch.decoded(got.content, types), got.url)
             out.update(title=facts["title"], site=facts["site"] or out["site"], description=facts["description"],
                        embed=facts["embed"] or out["embed"], length=facts["length"], kind=facts["kind"])
             if facts["picture"]:
                 out["picture"] = await self._picture(facts["picture"])
         base = got.url if got else url
-        icons = [urljoin(base, href) for href in head.icons[:3]] + [f"https://{host}/favicon.ico"]
+        icons = [urljoin(base, href) for href in icons[:3]] + [f"https://{host}/favicon.ico"]
         out["icon"] = self.icon_kept(host) or await self._icon(icons)
         self.kept[f"icon:{host}"] = {"name": out["icon"], "at": time.time()}
         out["ok"] = bool(got)

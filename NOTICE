@@ -94,3 +94,10 @@ Libraries Mibo installs keep their own licences, which pip installs beside them.
 The feeds in `mibo/sources/` are read by feedparser (kurtmckee/feedparser): BSD
 2-Clause License, Copyright (C) 2010-2025 Kurt McKee, Copyright (C) 2002-2008
 Mark Pilgrim. It brings feedparser-sgmllib: Python Software Foundation License.
+A fetched page's main text is taken by trafilatura (adbar/trafilatura, by Adrien
+Barbaresi): Apache License, Version 2.0. It brings courlan and htmldate (Apache
+License, Version 2.0), jusText (BSD 2-Clause), dateparser (BSD 3-Clause),
+charset-normalizer, pytz and urllib3 (MIT) and regex (Apache License, Version 2.0
+and CNRI-Python). The page's charset is read by w3lib (scrapy/w3lib): BSD 3-Clause
+License, Copyright (c) w3lib and Scrapy developers. lxml's HTML cleaner comes as
+lxml_html_clean: BSD 3-Clause License.

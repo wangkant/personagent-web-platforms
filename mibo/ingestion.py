@@ -397,20 +397,6 @@ class ContentIngestion:
                      ".apk", ".pdf", ".mp4", ".mp3", ".mov", ".avi", ".mkv",
                      ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp")
 
-    _OG_TITLE_PAT = re.compile(
-        r'<meta\s+(?:property|name)\s*=\s*["\'](?:og:title|twitter:title)["\'][^>]*content\s*=\s*["\']([^"\']+)["\']',
-        re.IGNORECASE,
-    )
-    _OG_DESC_PAT = re.compile(
-        r'<meta\s+(?:property|name)\s*=\s*["\'](?:og:description|twitter:description|description)["\'][^>]*content\s*=\s*["\']([^"\']+)["\']',
-        re.IGNORECASE,
-    )
-    _OG_SITE_PAT = re.compile(
-        r'<meta\s+(?:property|name)\s*=\s*["\']og:site_name["\'][^>]*content\s*=\s*["\']([^"\']+)["\']',
-        re.IGNORECASE,
-    )
-    _TITLE_TAG_PAT = re.compile(r'<title[^>]*>(.*?)</title>', re.IGNORECASE | re.DOTALL)
-
     # A picture the person sent in their own chat: the reply model answers from this alone.
     VISION_READ_PROMPT = (
         "Someone sent this picture to their assistant and will ask about it. The assistant "
@@ -758,7 +744,8 @@ class ContentIngestion:
         return ""
 
     async def _fetch_og_meta(self, url: str) -> str:
-        """Open Graph / Twitter card scrape of a page, or "" on any failure."""
+        """`[site] "title" description` from the page's own head (web/fetch.head), or "" when it names neither."""
+        from .web import fetch
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml",
@@ -768,29 +755,11 @@ class ContentIngestion:
         r = await self._safe_get(url, timeout=5, headers=headers)
         if r is None or r.status_code != 200:
             return ""
-        html = r.text[:100_000]
-
-        t = self._OG_TITLE_PAT.search(html)
-        d = self._OG_DESC_PAT.search(html)
-        s = self._OG_SITE_PAT.search(html)
-        title = (t.group(1) if t else "").strip()
-        if not title:
-            tt = self._TITLE_TAG_PAT.search(html)
-            if tt:
-                title = re.sub(r'\s+', ' ', tt.group(1)).strip()[:80]
-        desc = (d.group(1) if d else "").strip()
-        site = (s.group(1) if s else "").strip()
+        facts = fetch.head(fetch.decoded(r.content, r.headers.get("content-type", "")), str(r.url))[0]
+        title, desc = facts["title"][:80], " ".join(facts["description"].split())[:120]
         if not title and not desc:
             return ""
-        import html as _html
-        title = _html.unescape(title)[:80]
-        desc = _html.unescape(desc).replace("\n", " ")[:120]
-        prefix = f"[{site}]" if site else "[link]"
-        if title and desc:
-            return f"{prefix} \"{title}\" {desc}"
-        if title:
-            return f"{prefix} \"{title}\""
-        return f"{prefix}{desc}"
+        return f"[{facts['site']}]" + (f' "{title}"' if title else "") + (f" {desc}" if desc else "")
 
     @staticmethod
     def _url_cache_key(url: str) -> str:
