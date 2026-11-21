@@ -2003,6 +2003,8 @@ async def look_at(page: Page, most: int, *, ref: Optional[int] = None, interacti
     """A look at a page with no errand under way (surface.py's look): its print or a part of it, what was left out
     and why, what the app noticed on it (hints from WALL_JS and signin.CHECK_JS, never a verdict), and with
     `picture` the page as it stands. Nothing on the page is pressed and no request of it is held."""
+    # What the page's own script draws once it has loaded (a list, a table) is waited for, as an errand's look does.
+    await page.settle()
     state = await page.state(min(max(int(most), STATE_MAX), STATE_MOST))
     probe = await page._evaluate("() => ({url: location.href, title: document.title})") or {}
     left = [f"lines {a + 1}-{b} are not shown (report_limit): look from {a + 1} goes on, or find" for a, b in page.cut]

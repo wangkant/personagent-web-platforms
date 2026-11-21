@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
@@ -178,6 +179,7 @@ def test_a_long_print_goes_on_from_the_line_the_omitted_line_names():
     assert len(many.splitlines()) == FIND_MAX and "80 more lines" in more
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="the app operates other programs on Windows only")
 def test_a_program_window_is_read_in_the_same_grammar_after_the_programs_switch(app, monkeypatch, turn):
     from mibo.desk import panel
     asked = []
