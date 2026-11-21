@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>圈子 - 个人主页</title><link rel="stylesheet" href="/e/e.css">
+<style>
+.tabs { display: flex; gap: 26px; background: #fff; border-bottom: 1px solid #e5e5e5; padding: 0 20px; }
+.tab { padding: 12px 0; cursor: pointer; color: #666; }
+.tab.on { color: #1f6feb; border-bottom: 2px solid #1f6feb; font-weight: 600; }
+.stats { display: flex; gap: 40px; } .stats div { text-align: center; } .stats b { display: block; font-size: 22px; }
+.post { padding: 10px 0; border-bottom: 1px solid #f0f0f0; } .post small { color: #999; }
+</style></head>
+<body>
+<header><b>圈子</b><a href="#">发现</a><a href="#">消息</a><span id="who">登录</span></header>
+<div class="tabs"><div class="tab on" data-k="home">首页</div><div class="tab" data-k="follow">关注</div>
+  <div class="tab" data-k="me">我的</div></div>
+<main><div class="card" id="body"></div></main>
+<script>
+// The everyday bench's stand-in for a signed-in profile site (E33): a long feed under 首页, and the person's own
+// numbers only under the tab 我的, drawn a moment after it is pressed. Like real sites the page posts its own
+// telemetry (fetch POST, not a beacon) when it opens, every few seconds and on every click.
+const BODY = document.getElementById("body");
+const log = (what) => fetch("/api/log", {method: "POST", headers: {"Content-Type": "application/json"},
+  body: JSON.stringify({ev: what, t: Date.now(), page: location.pathname})}).catch(() => {});
+log("open");
+setInterval(() => log("heartbeat"), 4000);
+document.addEventListener("click", (e) => log("click:" + (e.target.textContent || "").trim().slice(0, 12)), true);
+const TOPICS = ["周末去哪儿", "城市夜跑", "家常菜谱", "读书打卡", "摄影入门", "旧物改造", "通勤播客", "露营装备"];
+function feed() {
+  let html = "";
+  for (let i = 0; i < 160; i++) {
+    html += `<div class="post"><div>${TOPICS[i % 8]}：第 ${i + 1} 条动态，来自关注的人，内容是一段较长的分享文字，` +
+      `讲述这一周的见闻和感受，配图若干。</div><small>${(i * 7) % 59 + 1} 分钟前 · 赞 ${(i * 37) % 900} · 评论 ${(i * 13) % 120}</small></div>`;
+  }
+  return html;
+}
+function show(k) {
+  for (const t of document.querySelectorAll(".tab")) t.classList.toggle("on", t.dataset.k === k);
+  if (k === "me") {
+    BODY.innerHTML = "<p>加载中…</p>";
+    setTimeout(() => {
+      BODY.innerHTML = '<h2>林晓</h2><div class="stats"><div><b>1,284</b>粉丝</div><div><b>356</b>关注</div>' +
+        '<div><b>8,917</b>获赞</div><div><b>62,450</b>阅读</div></div><p class="hint">数据每日更新</p>';
+    }, 1200);
+    return;
+  }
+  BODY.innerHTML = k === "home" ? feed() : "<p>你关注的人最近没有新动态。</p>";
+}
+if (localStorage.getItem("member") === "1") {
+  document.getElementById("who").textContent = "林晓（已登录）";
+  for (const t of document.querySelectorAll(".tab")) t.addEventListener("click", () => show(t.dataset.k));
+  show("home");
+} else {
+  BODY.innerHTML = '<div class="notice"><h2>请先登录</h2><p><a href="/e/signin.html"><button class="go">登录</button></a></p></div>';
+}
+</script>
+</body></html>

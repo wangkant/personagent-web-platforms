@@ -33,21 +33,24 @@ CHATS = ["Daily notes", "Travel plan", "Code review", "Reading list"]
 MAIN = "main"
 
 
-def start(home: Path, variant: str, log: Path, corner: bool = True, chat: str = "", popen=subprocess.Popen):
+def start(home: Path, variant: str, log: Path, corner: bool = True, chat: str = "", popen=subprocess.Popen,
+          title: str = TITLE):
     """The fixture running with `variant` (and `chat` shown), and its window: (process, window handle). `popen`
-    starts it (the sandbox starts it as its standard user)."""
+    starts it (the sandbox starts it as its standard user); `title` names its window (tools/everyday.py calls it
+    Lumen, the program its request names)."""
     from mibo.desk import win32
     from mibo.host import launch
     electron = asyncio.run(launch.fetch(home))
     profile = Path(home) / "chatfixture-profile"
-    cmd = [str(electron), str(FIXTURE), f"--variant={variant}", f"--log={log}", f"--profile={profile}"]
+    cmd = [str(electron), str(FIXTURE), f"--variant={variant}", f"--log={log}", f"--profile={profile}",
+           f"--title={title}"]
     cmd += ([f"--chat={chat}"] if chat else []) + (["--corner"] if corner else [])
     env = {k: v for k, v in os.environ.items() if k != "ELECTRON_RUN_AS_NODE"}
     low = getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)
     proc = popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=low)
     end = time.monotonic() + 30
     while time.monotonic() < end:
-        hwnd = next((h for h in win32.top_windows() if win32.pid_of(h) == proc.pid and win32.title_of(h) == TITLE
+        hwnd = next((h for h in win32.top_windows() if win32.pid_of(h) == proc.pid and win32.title_of(h) == title
                      and win32.shown(h)), 0)
         if hwnd:
             return proc, hwnd

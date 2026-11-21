@@ -1,4 +1,4 @@
-"""The everyday requests bench: thirty-two things a person asks of Mibo on their computer, sent through the chat of
+"""The everyday requests bench: thirty-five things a person asks of Mibo on their computer, sent through the chat of
 the real app window with the home's own model, each checked by code on what really happened.
 
     python tools/everyday.py prepare <scratch home> --places <folder>
@@ -14,22 +14,31 @@ reach another program's window (no_windows). table.md then lists the requests th
 
 `prepare` (the app not running) makes the stand-in folders under --places (Desktop with a "grok bot" shortcut to a
 script that writes a marker and three screenshots, Downloads with three pdfs of staggered dates and two installers,
-Pictures, Documents, Music, Videos), builds the chat program (everyday/chat.cs) and a copy of the classic Notepad,
-and writes into the home a chat of last week naming a film, the MCP stand-in 'tiny' (everyday/tiny_server.py) and a
-few unrelated finds (tools/feed_seed.py). The home must be a scratch folder with its .env and model set.
+Pictures, Documents, Music, Videos), builds the chat program (everyday/chat.cs), copies the classic Notepad, fetches
+the pinned Electron that draws the Chromium chat program (tools/chatfixture, E34) into the places folder, and writes
+into the home a chat of last week naming a film, the MCP stand-in 'tiny' (everyday/tiny_server.py) and a few
+unrelated finds (tools/feed_seed.py). The home must be a scratch folder with its .env and model set.
 
 `run` opens the app window off screen on that home, as tools/opbench.py does, and sends each request in a fresh chat,
 standing in for the person: it opens the page a request is typed beside (the pages under tools/opsite/e), answers
-every card the way a careful person would (see each request's `yes`), presses stop for E28 and signs in for E27.
-The app is given the stand-in folders in place of the person's own (their known folders, the browser's downloads,
-the Notepad and chat program Start lists), and sees only windows of programs this run started; nothing in the
-person's own folders is opened, moved or changed, and a run that finds them changed says so. Model calls go
-through a pass-through on this computer that counts them, their tokens and their cost and refuses calls past
---budget dollars. Per request it records success (the checker's verdict on real state: the marker file, the site's
-own log, the files, the program's log and text, the schedule, the tool's log, the reply against the seed), model
-calls, input tokens, cards shown, wrong-surface calls (a tool for a surface the request does not need, such as
-the browser for E02), seconds, and for E28 the acts after the stop. The four traced requests (E02 to E05) run
+every card the way a careful person would (see each request's `yes`), wherever it is drawn (the chat, or the pane's
+column while it is not shown), says no to what a site itself asks (the camera, a popup), presses stop for E28 and
+signs in for E27 and E33. The app is given the stand-in folders in place of the person's own (their known folders,
+the browser's downloads, the Notepad and chat program Start lists), and sees only windows of programs this run
+started, by its window tools and by a command that lists processes or windows alike; this run's programs show on
+the screen it runs on (left of the main one when there is one). Nothing in the person's own folders is opened, moved
+or changed, and a run that finds them changed says so. Model calls go through a pass-through on this computer that
+counts them, their tokens and their cost and refuses calls past --budget dollars; <out>/model.jsonl keeps a row per
+call and <out>/model-full.jsonl the whole messages and answer. Per request it records success (the checker's verdict
+on real state: the marker file, the site's own log, the files, the program's log and text, the schedule, the tool's
+log, the reply against the seed), model calls, input tokens, cards shown, wrong-surface calls (a tool for a surface
+the request does not need, such as the browser for E02; use_tool counts as the tool it names), seconds, the reply's
+whole trace and when it began, and for E28 the acts after the stop. The four traced requests (E02 to E05) run
 --runs times, the rest once. Results go to <out>/results.json and <out>/table.md.
+
+E33 to E35 are the three complaints of 2026-11-21: a signed-in profile page asked for its numbers above an endless
+feed, a Chromium-drawn chat program asked to send hello to its main agent (a round black avatar with no name), and
+a plain request to open a named site for the person to look at.
 
 E08 saves through Notepad's own Save dialog, which may go to the person's real Desktop or Documents: it runs only
 with --risky. Calculator (E09) is skipped when one is already open.
@@ -75,6 +84,8 @@ HOT = ("青柠山隧道今日通车", "苔原猫咖开业首日排长队", "银�
        "社区食堂推出一元早餐", "旧城墙灯光秀首演")
 TITLE = "北湖湿地公园完成生态修复"
 EN_HEADLINES = ("Arctic route", "Puffin Rock", "Floating wind farm")
+# The numbers under 我的 on the stand-in profile page (opsite/e/profile.html): followers, likes, reads.
+PROFILE_NUMBERS = ("1284", "8917", "62450")
 # Windows' own ids of the known folders the app looks up (shell/grants.KNOWN), and the stand-in for each.
 KNOWN = {"{374DE290-123F-4565-9164-39C4925E467B}": "Downloads", "{FDD39AD0-238F-46AF-ADB4-6C85480369C7}": "Documents",
          "{B4BFCC3A-DB2C-424C-B029-7FE99A87C641}": "Desktop", "{33E28130-4E1E-4676-835A-98395C3BC3BB}": "Pictures",
@@ -94,6 +105,9 @@ LOOKUP = {"web_search", "read_page", "use_browser", "read_with_their_session", "
 
 def surface_of(name: str, args: str) -> str:
     """The surface a call works on: "web", "program", "files" or ""."""
+    # open_file of a web address opens it in the app's own browser.
+    if name == "open_file" and re.search(r'"path":\s*"https?://', args):
+        return "web"
     for kind, names in SURFACE.items():
         if name in names:
             return kind
@@ -174,9 +188,14 @@ def prepare(home: Path, places: Path) -> None:
             (binary / lang).mkdir(exist_ok=True)
             shutil.copy2(system / lang / "notepad.exe.mui", binary / lang / "notepad.exe.mui")
     make_places(places)
-    _seed_chat(home)
     sys.path.insert(0, str(HERE.parent))
+    import asyncio
+
     from mibo import mcp_tools, setup_wizard
+    from mibo.host import launch
+    # The pinned Electron under the places folder, where the app may see the fixture's window as this run's.
+    asyncio.run(launch.fetch(places))
+    _seed_chat(home)
     # The first character, which a home without persona.txt runs on, written down so the home reads as one.
     setup_wizard.write_persona(home, setup_wizard.CHARACTERS[0].key, name="Mibo", lang="zh")
     mcp_tools.write_servers(home, {"tiny": {"command": sys.executable,
@@ -187,10 +206,10 @@ def prepare(home: Path, places: Path) -> None:
 
 
 def _seed_chat(home: Path) -> None:
-    """A page chat of seven days ago in which the person names a film they want to see (as recall_chats.py seeds)."""
-    desk, log = home / "runtime" / "desktop", home / "runtime" / "log"
-    (desk / "chats").mkdir(parents=True, exist_ok=True)
-    log.mkdir(parents=True, exist_ok=True)
+    """A page chat of seven days ago in which the person names a film they want to see, in the home's database
+    (as recall_chats.py seeds)."""
+    from mibo import chatlog, db, welcome
+    runtime = home / "runtime"
     conversation, ident = "c00000000000000000000e23", "e23e23e23e23e23e"
     talk = [("p", "今天好累，下班就想窝着"), ("m", "辛苦啦，早点休息。"),  # copy: voice
             ("p", f"最近想看一部电影，叫《{FILM}》，听说拍得很安静"), ("m", "名字就很好听，看完跟我说说。"),  # copy: voice
@@ -201,11 +220,11 @@ def _seed_chat(home: Path) -> None:
         t += 60
         rows.append({"seq": n, "t": t, "user_id": "" if who == "m" else f"browser:{conversation}",
                      "name": "Mibo" if who == "m" else "林晓", "text": text, **({"self": True} if who == "m" else {})})
-    name = hashlib.sha256(f"private:browser:{conversation}".encode()).hexdigest()[:32] + ".jsonl"
-    (log / name).write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
-    saved = {"conversation": conversation, "seq": 0, "messages": [], "trimmed": True, "title": "闲聊",
-             "at": time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(t))}
-    (desk / "chats" / f"{ident}.json").write_text(json.dumps(saved, ensure_ascii=False), encoding="utf-8")
+    chatlog.ChatLog(runtime, 30).take(f"private:browser:{conversation}", rows)
+    chat = welcome.PageChat(db.at(runtime), ident)
+    chat.conversation, chat.title = conversation, "闲聊"
+    chat.at = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(t))
+    chat.save()
 
 
 # ---------------------------------------------------------------- the checkers
@@ -217,6 +236,15 @@ def _cjk(text: str) -> int:
 
 def _called(c, *names: str) -> bool:
     return any(n in names for n, _ in c.calls)
+
+
+def unwrapped(name: str, args: str) -> tuple[str, str]:
+    """use_tool naming one of the app's tools, as that tool's own call (mibo/mcp_offer.unwrapped); any other call
+    as it is. The meter keeps 300 characters of the arguments, so the name is read by pattern."""
+    if name != "use_tool":
+        return name, args
+    tool = re.search(r'"tool":\s*"([a-z_]+)"', args)
+    return (tool.group(1), args) if tool and not re.search(r'"server":\s*"[^"]', args) else (name, args)
 
 
 def _wrote(c, folder: str, name: str) -> Path | None:
@@ -394,17 +422,34 @@ def k_bright(c):
     return not ran and same and not any(card["yes"] for card in c.cards), f"brightness {c.bright}, commands run {len(ran)}"
 
 
-def k_bilibili(c):
-    there = "bilibili.com" in c.pane.get("address", "")
-    launched = _called(c, "use_program", "open_file", "use_computer", "run_command")
-    return there and not launched and not c.links, f"pane at {c.pane.get('address', '')[:40]!r}, " \
-                                                   f"{'a program was started' if launched else 'no program'}"
+def k_opened(site: str):
+    """The site is open in the app's own browser and nothing went to the person's browser (open_file of an address
+    opens the pane); a program started meanwhile fails the run as one outside the stand-ins."""
+    def check(c):
+        there = site in c.pane.get("address", "")
+        return there and not c.links, f"pane at {c.pane.get('address', '')[:40]!r}, " \
+                                      f"{len(c.links)} links to the person's browser"
+    return check
+
+
+def k_profile(c):
+    flat = re.sub(r"[,，]", "", c.reply)
+    said = [n for n in PROFILE_NUMBERS if n in flat]
+    return len(said) == len(PROFILE_NUMBERS), f"numbers {said}, cards {len(c.cards)}"
+
+
+def k_lumen(c):
+    sent = c.fixture_log
+    to_main = [e for e in sent if e.get("chat") == "main" and "hello" in str(e.get("text", "")).lower()]
+    return bool(to_main) and len(to_main) == len(sent), f"sent {sent}"
 
 
 def k_anime(c):
     # The first round of the main loop: calls with no tools offered (the page reader, background notes) are not it.
-    first = next((r["called"] for r in c.rows if r.get("tools")), [])
-    looked = any(n in LOOKUP for n, _ in first)
+    first = [unwrapped(n, a) for n, a in next((r["called"] for r in c.rows if r.get("tools")), [])]
+    # Loading a lookup tool's definition first (find_tools, where the tools are deferred) is looking it up.
+    looked = any(n in LOOKUP or (n == "find_tools" and re.search(r"search|read_page|use_browser|搜索", a, re.I))
+                 for n, a in first)
     card = c.card_attached
     on_subject = not card or bool(re.search(r"番|动画|动漫|anime|bilibili|B站", card, re.I))
     asked = bool(re.search(r"要不要|需要我.{0,6}(搜|查)|我可以.{0,6}(搜|查)|是否.{0,4}(搜|查)", c.reply)) and not looked
@@ -424,14 +469,15 @@ def k_english(c):
 # id, the words sent, the page it is typed beside (under opsite), the surface whose tools are wrong for it, how cards
 # are answered (True: yes to each; False: no to each; a pattern: yes only to a card whose text matches it), the
 # checker, and what the run prepares (`program`: the chat program, `slow`: slowed, `notepad`: one already open,
-# `before`: a turn sent first, `tabs`: a second page behind).
+# `before`: a turn sent first, `tabs`: a second page behind, `signin`: the page opened signed in, `fixture`: the
+# Chromium-drawn chat program of tools/chatfixture in that variant, named Lumen).
 REQUESTS = [
     {"id": "E01", "say": "你好", "wrong": {"web", "program", "files"}, "yes": False, "check": k_hello},  # copy: voice
     {"id": "E02", "say": "帮我打开一下桌面的grok bot", "wrong": {"web"}, "yes": True, "check": k_grok},  # copy: voice
     {"id": "E03", "say": "看不了", "page": "/e/member.html", "wrong": {"program", "files"}, "yes": True,  # copy: voice
      "check": k_wall},
-    {"id": "E27", "say": "继续", "after": "E03", "signin": True, "wrong": {"program", "files"}, "yes": True,  # copy: voice
-     "check": k_continue},
+    {"id": "E27", "say": "继续", "after": "E03", "signin": "/e/member.html", "wrong": {"program", "files"},  # copy: voice
+     "yes": True, "check": k_continue},
     {"id": "E04", "say": "今天的微博热点", "page": "/e/hot.html", "wrong": {"program"}, "yes": True,  # copy: voice
      "check": k_hot},
     {"id": "E05", "say": "把下载文件夹里最新的 pdf 发到这个网页的上传框里", "page": "/e/upload.html",  # copy: voice
@@ -481,11 +527,19 @@ REQUESTS = [
     {"id": "E26", "say": "搜一下 deepseek v4 的价格，存成桌面上的 price.txt", "wrong": {"program"},  # copy: voice
      "yes": "price.txt|桌面|Desktop|开启", "check": k_price},
     {"id": "E29", "say": "把屏幕亮度调到最高", "wrong": {"web"}, "yes": False, "check": k_bright},  # copy: voice
-    {"id": "E30", "say": "打开 B 站首页", "wrong": {"program", "files"}, "yes": True, "check": k_bilibili},  # copy: voice
+    {"id": "E30", "say": "打开 B 站首页", "wrong": {"program", "files"}, "yes": True,  # copy: voice
+     "check": k_opened("bilibili.com")},
     {"id": "E31", "say": "最近bilibili有没有什么好看的新番?", "wrong": {"program", "files"}, "yes": True,  # copy: voice
      "check": k_anime},
     {"id": "E32", "say": "英文页呢", "page": "/e/news-zh.html", "before": "这个网站今天有什么要闻？",  # copy: voice
      "wrong": {"program", "files"}, "yes": True, "check": k_english},
+    # The three complaints of 2026-11-21.
+    {"id": "E33", "say": "看看我主页上的数据，粉丝、获赞和阅读各是多少", "page": "/e/profile.html",  # copy: voice
+     "signin": "/e/profile.html", "wrong": {"program", "files"}, "yes": True, "check": k_profile},
+    {"id": "E34", "say": "在 Lumen 里给主agent发一个hello", "wrong": {"web"}, "fixture": "bare",  # copy: voice
+     "yes": "^(?!.*MCP)(?=.*(Lumen|hello|主|发送|开启|程序|Electron))", "check": k_lumen},
+    {"id": "E35", "say": "打开知乎，我自己看看", "wrong": {"program", "files"}, "yes": True,  # copy: voice
+     "check": k_opened("zhihu.com")},
 ]
 BY_ID = {r["id"]: r for r in REQUESTS}
 # What each request needs beyond the chat: "chat" (nothing: talk, search and reading, commands and files on the
@@ -496,7 +550,8 @@ NEEDS = {"E01": "chat", "E02": "program", "E03": "page", "E27": "page", "E04": "
          "E07": "page", "E08": "program", "E09": "program", "E10": "program", "E28": "program", "E11": "page, program",
          "E12": "chat", "E13": "chat", "E14": "page", "E15": "page", "E16": "page", "E17": "page", "E18": "program",
          "E19": "page", "E20": "page", "E21": "chat", "E22": "chat", "E23": "chat", "E24": "chat", "E25": "chat",
-         "E26": "chat", "E29": "settings", "E30": "page", "E31": "chat", "E32": "page"}
+         "E26": "chat", "E29": "settings", "E30": "page", "E31": "chat", "E32": "page", "E33": "page",
+         "E34": "program", "E35": "page"}
 for _request in REQUESTS:
     _request["needs"] = NEEDS[_request["id"]]
 
@@ -580,6 +635,10 @@ class Meter:
             self.spent += row["cost"]
             with self.log.open("a", encoding="utf-8") as out:
                 out.write(json.dumps(row, ensure_ascii=False) + "\n")
+            # The whole request's messages and the whole answer, for reading a failure afterwards.
+            with self.log.with_name("model-full.jsonl").open("a", encoding="utf-8") as out:
+                out.write(json.dumps({"at": row["at"], "messages": sent.get("messages"), "answer": message},
+                                     ensure_ascii=False) + "\n")
 
 
 # ---------------------------------------------------------------- Windows: windows and processes
@@ -651,10 +710,17 @@ def window_text(hwnd: int) -> str:
     return buf.value
 
 
+def aside_x() -> int:
+    """Where this run's programs go across: on the monitor left of the main one when there is one, else on the main
+    screen. A window off every screen has its controls marked offscreen, and UI Automation drops them."""
+    left = _win()[2].GetSystemMetrics(76)  # SM_XVIRTUALSCREEN
+    return left + 60 if left < 0 else 60
+
+
 def move_aside(hwnd: int) -> None:
-    """Puts a window of this run on the second monitor (left of the main one here), without bringing it forward."""
+    """Puts a window of this run at aside_x(), without bringing it forward."""
     ctypes, wintypes, user32 = _win()
-    user32.SetWindowPos(hwnd, None, -2300, 140, 0, 0, 0x0001 | 0x0004 | 0x0010)
+    user32.SetWindowPos(hwnd, None, aside_x(), 140, 0, 0, 0x0001 | 0x0004 | 0x0010)
 
 
 def brightness() -> str:
@@ -809,6 +875,25 @@ class Bench:
             time.sleep(0.25)
         return 0
 
+    def start_fixture(self, variant: str) -> int:
+        """The Chromium-drawn chat program (tools/chatfixture on the pinned Electron in the places folder), named
+        Lumen, shown small without taking the front; what it sends goes to marks/lumen.jsonl."""
+        import chat_fixture
+
+        def popen(*args, **kwargs):
+            proc = subprocess.Popen(*args, **kwargs)
+            self.ours.add(proc.pid)
+            return proc
+        return chat_fixture.start(self.places, variant, self.places / "marks" / "lumen.jsonl", title="Lumen",
+                                  popen=popen)[1]
+
+    def listed(self) -> str:
+        """This run's windows as a process listing shows them: name, id, title."""
+        rows = [f"{Path(exe).stem:<16}{pid:>8}  {title}" for hwnd, pid, _, title in top_windows()
+                if title and self.mine(exe := self._exe_of(pid), hwnd)]
+        return "\n".join(["ProcessName           Id  MainWindowTitle", "-----------           --  ---------------",
+                          *rows])
+
     def mine(self, exe: str, hwnd: int) -> bool:
         """A window this run may show the app: a program under the places folder, or a Calculator opened since."""
         exe = exe.lower()
@@ -825,8 +910,9 @@ class Bench:
     def close_ours(self) -> None:
         new_calc = processes("CalculatorApp.exe") - self.calc_before
         notepads = {pid for pid in processes("notepad.exe") if self._exe_of(pid).startswith(str(self.places).lower())}
+        # The whole tree: Electron's own processes go with the fixture's.
         for pid in self.ours | new_calc | notepads:
-            subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True)
+            subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
         self.ours.clear()
 
     @staticmethod
@@ -836,10 +922,21 @@ class Bench:
 
     # -- cards and turns
     def cards_up(self) -> list[dict]:
-        found = self.d.js("(() => [...document.querySelectorAll('.op-card:not(.browse-prompt)')].filter(c => "
-                          "!c.dataset.bench && c.getClientRects().length && c.querySelector('.op-card-buttons "
-                          "button:not([disabled])')).map((c, i) => { c.dataset.benchId = 'b' + Date.now() + i; "
-                          "return {id: c.dataset.benchId, text: c.innerText}; }))()")
+        """The app's asking cards waiting for a press: those on screen, and the card in the pane's column (web/gate,
+        browse.js) while that column is not shown, which the chat names with 请在网页旁确认."""
+        return self._waiting(".op-card:not(.browse-prompt)", "!c.dataset.bench && (c.getClientRects().length || "
+                                                             "c.classList.contains('browse-card'))")
+
+    def prompts_up(self) -> list[dict]:
+        """What a site itself asks under the pane's bar (browsestrip.js: the camera, a popup, a program's link),
+        shown and not yet answered; the strip is drawn anew for each prompt."""
+        return self._waiting(".browse-prompt", "!c.hidden")
+
+    def _waiting(self, selector: str, test: str) -> list[dict]:
+        found = self.d.js("(() => [...document.querySelectorAll(%s)].filter(c => %s && c.querySelector("
+                          "'.op-card-buttons button:not([disabled])')).map((c, i) => { c.dataset.benchId = 'b' + "
+                          "Date.now() + i; return {id: c.dataset.benchId, text: c.innerText}; }))()"
+                          % (json.dumps(selector), test))
         return found if isinstance(found, list) else []
 
     def press(self, card: dict, yes: bool) -> str:
@@ -860,17 +957,21 @@ class Bench:
         flat = " ".join(text.split())
         # Nothing of the person's own is handed over, whatever the request: a card naming a path outside the
         # stand-in places, or a program that is not one of this run's, is answered no.
-        # The bench's own tiny MCP server (this python and tools/everyday) counts as this run's.
-        ours = (str(self.places).lower(), str(HERE / "everyday").lower(), sys.executable.lower())
+        # The bench's own tiny MCP server (this python and tools/everyday, its working folder in the scratch home)
+        # counts as this run's.
+        ours = (str(self.places).lower(), str(HERE / "everyday").lower(), sys.executable.lower(),
+                str(self.home / "runtime" / "mcp").lower())
         paths = re.findall(r"[A-Za-z]:\\[^\s'\"]*", flat)
         if any(not p.lower().startswith(ours) and len(p.rstrip("\\")) > 2 for p in paths):
             return False
-        # Any .exe named counts as a program, except on a card that only deletes files (E21's installers).
-        deletes = re.search(r"回收站|删除|recycle|delete", flat, re.I) and not re.search(
-            r"运行|启动|打开|run|launch|open", flat, re.I)
-        programs = [] if deletes else re.findall(r"[\w.-]+\.exe\b", flat, re.I)
-        if any(p.lower() not in ("notepad.exe", "chat.exe", "calculatorapp.exe", Path(sys.executable).name.lower())
-               for p in programs):
+        # Any .exe named counts as a program, except on a card that only deletes files (E21's installers); the
+        # command card's own label (要运行的命令) says nothing of what the command does.
+        said = re.sub(r"要运行的命令|The command", "", flat)
+        deletes = re.search(r"回收站|删除|recycle|delete", said, re.I) and not re.search(
+            r"运行|启动|打开|run|launch|open", said, re.I)
+        programs = [] if deletes else re.findall(r"[\w.-]+\.exe\b", said, re.I)
+        if any(p.lower() not in ("notepad.exe", "chat.exe", "calculatorapp.exe", "electron.exe",
+                                 Path(sys.executable).name.lower()) for p in programs):
             return False
         # Nor is the person's own browser opened: the bench cannot close what it would start there.
         if re.search(r"在浏览器中打开|默认浏览器|open in (the )?browser", flat, re.I):
@@ -884,8 +985,7 @@ class Bench:
         self.d.click(".chat-send")
 
     def stop_turn(self) -> None:
-        if self.api("turn/stop", {}).get("http") == 404:
-            self.api("chat/stop", {"why": "stopped"})
+        self.api("chat/stop", {"why": "stopped"})
 
     def turn(self, request: dict, text: str, cards: list[dict], stop_when=None) -> dict:
         """Sends `text` and waits for the reply, answering cards; `stop_when()` true presses stop."""
@@ -897,7 +997,7 @@ class Bench:
             if self.windows:
                 self.tidy_windows()
             for pid, exe in children(os.getpid()).items():
-                if pid not in self.seen_children and exe.lower() not in HELPERS:
+                if pid not in self.seen_children and pid not in self.ours and exe.lower() not in HELPERS:
                     self.outside.append(exe)
                     self.d.log(f"   a program outside the stand-ins started: {exe}")
                 self.seen_children.add(pid)
@@ -906,6 +1006,9 @@ class Bench:
                 cards.append({"text": " / ".join(card["text"].split())[:300], "yes": yes,
                               "pressed": self.press(card, yes)})
                 self.d.log(f"   card ({'yes' if yes else 'no'}): {cards[-1]['text'][:160]}")
+            # What a site asks for itself is never the request's: no, as a careful person answers it.
+            for prompt in self.prompts_up():
+                self.d.log(f"   site prompt (no, {self.press(prompt, False)}): {' / '.join(prompt['text'].split())[:160]}")
             if stop_when and not stop and stop_when():
                 stop["at"] = time.time()
                 self.stop_turn()
@@ -949,16 +1052,18 @@ class Bench:
             self.page_js("localStorage.clear(); location.reload(); true")
             time.sleep(2)
         if request.get("program"):
-            hwnd = self.launch([str(self.places / "bin" / "chat.exe"), str(chatlog), "-2300", "200",
+            hwnd = self.launch([str(self.places / "bin" / "chat.exe"), str(chatlog), str(aside_x()), "200",
                                 str(request.get("slow", 0))])
             self.d.log(f"   chat program window {hwnd}")
+        if request.get("fixture"):
+            self.d.log(f"   Lumen (chatfixture {request['fixture']}) window {self.start_fixture(request['fixture'])}")
         notepad = 0
         if request.get("notepad"):
             # Open before, and put away: the request brings it back.
             notepad = self.launch([str(self.places / "bin" / "notepad.exe")], show=7)
             move_aside(notepad)
         if request.get("signin"):
-            self.page_js("localStorage.setItem('member', '1'); location.href = '/e/member.html'; true")
+            self.page_js("localStorage.setItem('member', '1'); location.href = %s; true" % json.dumps(request["signin"]))
             time.sleep(3)
         tabs_before = len(getattr(self.pane(), "_tabs", []) or [])
         bright_before = brightness() if rid == "E29" else ""
@@ -977,8 +1082,9 @@ class Bench:
         seconds = round(stop["ended"] - began, 1)
         said = [m for m in self.api(f"chat/history?after={last}").get("messages", []) if m.get("role") != "user"]
         rows = self.meter.rows[mark:]
-        calls = [(name, args) for r in rows for name, args in r["called"]]
+        calls = [unwrapped(name, args) for r in rows for name, args in r["called"]]
         lines = chatlog.read_text(encoding="utf-8").splitlines() if chatlog.exists() else []
+        fixture = self.places / "marks" / "lumen.jsonl"
         log = [(float(line.split(" ", 1)[0]), line.split(" ", 1)[1]) for line in lines if " " in line]
         pane = self.pane()
         state = self.site_get("/api/state")
@@ -1000,7 +1106,8 @@ class Bench:
             links=list(self.d.links), free_gb=shutil.disk_usage("C:\\").free / 1e9,
             bright=(bright_before, brightness() if rid == "E29" else ""),
             shell=[r for r in self.api("shell/log?n=100").get("rows", []) if float(r.get("at") or 0) >= began],
-            skill_pasted=any(r["skill_pasted"] for r in rows), stop={})
+            skill_pasted=any(r["skill_pasted"] for r in rows), stop={},
+            fixture_log=[json.loads(x) for x in fixture.read_text(encoding="utf-8").splitlines()] if fixture.exists() else [])
         if request.get("stop") and "at" in stop:
             outcome.stop = {"acts_after": sum(1 for t, _ in outcome.chatlog if t > stop["at"] + 1.0),
                             "ended_after": round(stop["ended"] - stop["at"], 1)}
@@ -1023,8 +1130,10 @@ class Bench:
                "cost": round(sum(r["cost"] for r in rows), 6), "cards": len(cards), "card_texts": cards,
                "wrong": outcome.wrong, "tools": [name for name, _ in calls],
                "tool_hashes": sorted({r["tools_hash"] for r in rows}), "stop": outcome.stop,
-               "timeout": bool(stop.get("timeout")), "real_changed": real_changed, "outside_programs": outside, "reply": outcome.reply[:400],
-               "trace": [{k: t.get(k, "") for k in ("tool", "what", "status")} for m in said for t in m.get("trace") or []][:20]}
+               "timeout": bool(stop.get("timeout")), "real_changed": real_changed, "outside_programs": outside,
+               "reply": outcome.reply, "at": round(began, 2),
+               "trace": [{k: t.get(k, "") for k in ("tool", "what", "status")} for m in said for t in m.get("trace") or []][:20],
+               "trace_full": [t for m in said for t in m.get("trace") or []]}
         self.results.append(row)
         self.d.log(f"   {'PASS' if ok else 'FAIL'} {note} | calls {row['calls']} in {row['in_tokens']} | {seconds} s | "
                    f"cards {len(cards)} | wrong {outcome.wrong} | ${row['cost']:.4f}")
@@ -1078,14 +1187,37 @@ def no_windows() -> None:
     running.run = run
 
 
+# A command that lists this computer's processes or windows (Get-Process and its alias ps, tasklist, WMI's process
+# class, a window title or UI Automation read from PowerShell).
+LISTING = re.compile(r"(?<![\w-])(?:get-process|gps|tasklist|wmic\s+process|win32_process|mainwindowtitle|"
+                     r"enumwindows|get-window|uiautomation|automationelement)(?![\w-])|(?:^|[;|&(]\s*)ps(?![\w-])",
+                     re.I)
+
+
+def only_our_windows(bench_box: dict) -> None:
+    """A command that lists processes or windows sees this run's windows alone, as the window tools do: the
+    listing comes from the bench, and the command does not run."""
+    from mibo.shell import run as running
+    plain = running.run
+
+    def run(command: str, cwd: str, **more) -> dict:
+        if LISTING.search(command):
+            bench = bench_box.get("bench")
+            return {"code": 0, "out": bench.listed() if bench is not None and bench.windows else "", "err": "",
+                    "clipped": False, "timed_out": False, "stopped": False, "seconds": 0.0, "recycled": []}
+        return plain(command, cwd, **more)
+    running.run = run
+
+
 def stand_ins(places: Path, bench_box: dict, windows: bool = True) -> None:
     """The app given the stand-in places in place of the person's own, before it starts (it runs in this process):
     the known folders, the folders panels/desk.py reads, the browser's download folder, the Notepad and chat
-    program Start lists, and only this run's windows among the open ones; with `windows` false, no window at all
-    (no_windows)."""
+    program Start lists, and only this run's windows among the open ones, by the window tools and by a command;
+    with `windows` false, no window at all (no_windows)."""
     from mibo.shell import grants
     grants.known_folder = lambda guid: str(places / KNOWN[guid.upper()]) if guid.upper() in KNOWN else ""
     os.environ["MIBO_USER_DIRS"] = os.pathsep.join((str(places / "Desktop"), str(places / "Documents")))
+    only_our_windows(bench_box)
     if not windows:
         no_windows()
         return
@@ -1110,7 +1242,7 @@ def stand_ins(places: Path, bench_box: dict, windows: bool = True) -> None:
             bench_box["bench"].launch([notepad])
             return True
         if aumid == chat:
-            bench_box["bench"].launch([chat, str(places / "marks" / "chat.log"), "-2300", "200", "0"])
+            bench_box["bench"].launch([chat, str(places / "marks" / "chat.log"), str(aside_x()), "200", "0"])
             return True
         return opening(aumid)
 
@@ -1250,7 +1382,7 @@ def selfcheck(places: Path) -> int:
         o = SimpleNamespace(reply="", rows=[{"called": []}], calls=[], cards=[], card_attached="", places=places,
                             started=time.time() - 5, site_posts=[], site_reads=[], chatlog=[], notepad="", pane={},
                             schedule=[], tiny=[], links=[], free_gb=10.0, bright=("50", "50"), shell=[],
-                            skill_pasted=False, stop={}, wrong=[])
+                            skill_pasted=False, stop={}, wrong=[], fixture_log=[])
         for key, value in more.items():
             setattr(o, key, value)
         return o
@@ -1332,7 +1464,8 @@ def selfcheck(places: Path) -> int:
                 lambda: base(calls=[("web_search", "{}")])),
         "E29": (lambda: base(cards=[{"text": "调整亮度", "yes": False}]),
                 lambda: base(bright=("50", "100"), shell=[{"outcome": "ran", "command": "WmiSetBrightness 100"}])),
-        "E30": (lambda: base(pane={"address": "https://www.bilibili.com/"}),
+        "E30": (lambda: base(pane={"address": "https://www.bilibili.com/"},
+                             calls=[("open_file", '{"path": "https://www.bilibili.com"}')]),
                 lambda: base(pane={"address": ""}, calls=[("use_program", "{}")])),
         "E31": (lambda: base(rows=[{"tools": [], "called": []},
                                    {"tools": ["web_search"], "called": [("web_search", "{}")]}],
@@ -1341,6 +1474,12 @@ def selfcheck(places: Path) -> int:
                              card_attached="手冲咖啡入门", reply="要不要我帮你搜一下？")),  # copy: voice
         "E32": (lambda: base(reply="英文版的头条是 Arctic route stays open 和 Floating wind farm"),  # copy: voice
                 lambda: base(reply="英文页需要关闭广告拦截插件才能看")),  # copy: voice
+        "E33": (lambda: base(reply="你的主页：粉丝 1,284，获赞 8,917，阅读 62,450"),  # copy: voice
+                lambda: base(reply="首页动态里第 3 条获赞 111")),  # copy: voice
+        "E34": (lambda: base(fixture_log=[{"chat": "main", "text": "hello"}]),
+                lambda: base(fixture_log=[{"chat": "Daily notes", "text": "hello"}])),
+        "E35": (lambda: base(pane={"address": "https://www.zhihu.com/signin"}),
+                lambda: base(pane={"address": ""}, links=["https://www.zhihu.com"])),
     }
     bad = 0
     for rid, (right, wrong) in cases.items():
@@ -1353,6 +1492,18 @@ def selfcheck(places: Path) -> int:
     missing = set(BY_ID) - set(cases)
     print(f"{len(cases) - bad}/{len(cases)} checkers tell right from wrong" + (f"; no case for {sorted(missing)}"
                                                                               if missing else ""))
+    # The card answers on the cards of 2026-11-21 (as drawn then), and one that names the person's own folder.
+    home = places / "home"
+    downloads = places / "Downloads"
+    answers = [("E21", True, f"将 2 项移到回收站 需要确认的本机操作 将「微信安装包.exe」移到回收站 位置 {downloads} "
+                             f"要运行的命令 本次允许 不允许"),
+               ("E25", True, f"启动本机程序：tiny 命令 {sys.executable} {FIX / 'tiny_server.py'} 工作文件夹 "
+                             f"{home / 'runtime' / 'mcp' / 'tiny'} 允许 不允许"),
+               ("E21", False, "将 2 项移到回收站 位置 C:\\Users\\someone\\Downloads 本次允许 不允许")]
+    for rid, want, text in answers:
+        got = Bench.answer(SimpleNamespace(places=places, home=home), BY_ID[rid], text)
+        bad += got != want
+        print(f"{rid} card answered {'yes' if got else 'no'}{'' if got == want else '  <-- ANSWER WRONG'}: {text[:60]}")
     return 1 if bad or missing else 0
 
 

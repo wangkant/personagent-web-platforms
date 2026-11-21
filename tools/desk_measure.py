@@ -346,7 +346,8 @@ class Bench:
         elif kind == "see_lease":
             answer = {"yes": bool(self.task.get("sight"))}
         else:
-            answer = {"yes": (card.get("kind") or kind) in self.task.get("allow", ())}
+            # Allowed by the card's kind of act, or by its type for a card by picture (P2's see_action).
+            answer = {"yes": bool({card.get("kind"), kind} & set(self.task.get("allow", ())))}
         self.rec.cards.append({"type": kind, "kind": card.get("kind", ""), "target": card.get("target", ""),
                                "text": str(card.get("text", ""))[:80], "files": card.get("files", []),
                                "answer": answer})
@@ -656,7 +657,8 @@ def explorer(b: Bench):
                                   f"files {names()}")},
         {"id": "E2", "say": "这个文件夹里有几个 txt 文件", "prepare": reset, "look": True,
          "check": lambda _c, out: (has(out, "3") and len(names()) == 5, f"files {names()}")},
-        {"id": "E3", "say": "在这个文件夹里新建一个文件夹，名字叫 归档", "prepare": reset, "allow": {"file"},
+        # New › Folder is a press on the menu's Folder item, then the name typed: both are this task's.
+        {"id": "E3", "say": "在这个文件夹里新建一个文件夹，名字叫 归档", "prepare": reset, "allow": {"file", "press"},
          "check": lambda _c, _o: ((folder / "归档").is_dir() and len(names()) == 6, f"files {names()}")},
     ]
     return hwnd, {}, [{**t, "program": "文件资源管理器"} for t in tasks], lambda: b.close(hwnd)
