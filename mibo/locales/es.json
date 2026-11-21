@@ -479,7 +479,6 @@
     "wait": "Espere a que termine esta respuesta.",
     "loadFailed": "No se pudo cargar el chat. Vuelva a intentarlo en un momento.",
     "reload": "Reintentar",
-    "trimmed": "No se conservaron los mensajes anteriores",
     "today": "Hoy",
     "yesterday": "Ayer",
     "reply": "Responder",
@@ -533,7 +532,12 @@
     "privateMark": "Chat temporal",
     "privateNote": "No usa ni actualiza la memoria, no se guarda en el registro de chats y se borra al cerrar la aplicación.",
     "privateStart": "Iniciar un chat temporal",
-    "privateLeave": "Salir del chat temporal"
+    "privateLeave": "Salir del chat temporal",
+    "compacted": "Los mensajes anteriores se condensaron en un resumen.",
+    "showSummary": "Ver resumen",
+    "contextCleared": "Contexto borrado. Los mensajes anteriores ya no se envían al modelo.",
+    "cut": "El mensaje superaba lo que el modelo puede leer, así que se conservaron el principio y el final.",
+    "model_window_small": "La ventana de contexto de este modelo es demasiado pequeña para la configuración básica de Mibo. Elija un modelo con una ventana de contexto más amplia."
   },
   "compact": {
     "full": "Abrir en la ventana principal",
@@ -706,7 +710,26 @@
       "now": "ahora mismo",
       "m": "hace {count} min",
       "h": "hace {count} h"
-    }
+    },
+    "context": "Contexto ocupado: {p} %",
+    "contextOf": "{n} / {of} tokens",
+    "contextAbout": "Unos {n} / {of} tokens",
+    "contextParts": {
+      "system": "Configuración del sistema",
+      "tools": "Descripción de herramientas",
+      "memory": "Memoria",
+      "summary": "Resumen de la conversación",
+      "recent": "Mensajes recientes"
+    },
+    "compactNow": "Resumir ahora",
+    "compacting": "Resumiendo…",
+    "compactNone": "Aún no hay mensajes anteriores para resumir",
+    "compactFailed": "No se pudo escribir el resumen. Vuelva a intentarlo más tarde.",
+    "clearContext": "Borrar contexto",
+    "clearTitle": "¿Borrar el contexto de este chat?",
+    "clearText": "El modelo dejará de tener en cuenta los mensajes anteriores. El historial del chat y la memoria no cambian.",
+    "clearOk": "Borrar",
+    "clearFailed": "No se pudo borrar el contexto. Vuelva a intentarlo."
   },
   "onboard": {
     "steps": [

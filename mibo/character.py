@@ -136,6 +136,22 @@ class Character:
         """The stop button: the reply under way in a chat is cancelled, and nothing of it is said or kept."""
         return self.agent is not None and self.agent.stop_turn(conversation)
 
+    def context(self, conversation: str) -> dict:
+        """The chat's context gauge and what can be done with it (dm.DirectMessages.chat_context)."""
+        if self.agent is None:
+            return {"known": False, "compactable": False, "held": False}
+        return self.agent.chat_context(conversation)
+
+    async def compact(self, conversation: str) -> dict:
+        """立即归纳 in a chat (dm.DirectMessages.compact_now)."""
+        agent = await self._ready()
+        return await agent.compact_now(conversation)
+
+    async def clear_context(self, conversation: str) -> dict:
+        """清空上下文 in a chat (dm.DirectMessages.clear_context): the mark it leaves."""
+        agent = await self._ready()
+        return await agent.clear_context(conversation)
+
     def busy(self) -> bool:
         """Whether a turn of any chat is under way."""
         return self.agent is not None and any(lock.locked() for lock in self.agent.turn_locks.values())

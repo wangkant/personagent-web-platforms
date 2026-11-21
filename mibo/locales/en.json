@@ -478,7 +478,6 @@
     "wait": "Wait for this reply to finish first.",
     "loadFailed": "The chat could not be loaded. Try again in a moment.",
     "reload": "Try again",
-    "trimmed": "Earlier messages were not kept",
     "today": "Today",
     "yesterday": "Yesterday",
     "week": null,
@@ -533,7 +532,12 @@
     "privateMark": "Temporary chat",
     "privateNote": "Doesn't use or update memory, isn't kept in the chat record, and is cleared when the app closes.",
     "privateStart": "Start a temporary chat",
-    "privateLeave": "Leave the temporary chat"
+    "privateLeave": "Leave the temporary chat",
+    "compacted": "Earlier messages were condensed into a summary.",
+    "showSummary": "View summary",
+    "contextCleared": "Context cleared. Earlier messages are no longer sent to the model.",
+    "cut": "This message was longer than the model can read, so its beginning and end were kept.",
+    "model_window_small": "This model's context window is too small to hold Mibo's basic setup. Choose a model with a longer context window."
   },
   "compact": {
     "full": "Open in the main window",
@@ -707,7 +711,26 @@
       "now": "just now",
       "m": "{count} min ago",
       "h": "{count} h ago"
-    }
+    },
+    "context": "Context {p}% full",
+    "contextOf": "{n} / {of} tokens",
+    "contextAbout": "About {n} / {of} tokens",
+    "contextParts": {
+      "system": "System setup",
+      "tools": "Tool descriptions",
+      "memory": "Memory",
+      "summary": "Conversation summary",
+      "recent": "Recent messages"
+    },
+    "compactNow": "Summarize now",
+    "compacting": "Summarizing…",
+    "compactNone": "No earlier messages to summarize yet",
+    "compactFailed": "The summary could not be written. Try again later.",
+    "clearContext": "Clear context",
+    "clearTitle": "Clear this chat's context?",
+    "clearText": "The model will no longer refer to earlier messages. The chat history and memory are not affected.",
+    "clearOk": "Clear",
+    "clearFailed": "The context could not be cleared. Try again."
   },
   "onboard": {
     "steps": [

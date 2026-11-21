@@ -473,7 +473,6 @@
     "wait": "请等待当前回复完成后再发送。",
     "loadFailed": "无法读取对话记录。请稍后重试。",
     "reload": "重试",
-    "trimmed": "更早的消息未保留",
     "today": "今天",
     "yesterday": "昨天",
     "week": [
@@ -536,7 +535,12 @@
     "privateMark": "无痕对话",
     "privateNote": "不读取也不更新记忆，不写入对话记录，关闭应用后清除。",
     "privateStart": "开始无痕对话",
-    "privateLeave": "退出无痕对话"
+    "privateLeave": "退出无痕对话",
+    "compacted": "较早的对话已归纳为摘要。",
+    "showSummary": "查看摘要",
+    "contextCleared": "上下文已清空，此前的对话不再提供给模型。",
+    "cut": "消息超出模型可读取的长度，已保留开头与结尾部分。",
+    "model_window_small": "该模型的上下文窗口过小，无法容纳 Mibo 的基本设定。请改用上下文窗口更长的模型。"
   },
   "compact": {
     "full": "在主窗口中打开",
@@ -718,7 +722,26 @@
       "now": "刚刚",
       "m": "{count} 分钟前",
       "h": "{count} 小时前"
-    }
+    },
+    "context": "上下文占用 {p}%",
+    "contextOf": "{n} / {of} tokens",
+    "contextAbout": "约 {n} / {of} tokens",
+    "contextParts": {
+      "system": "系统设定",
+      "tools": "工具说明",
+      "memory": "记忆",
+      "summary": "对话摘要",
+      "recent": "近期对话"
+    },
+    "compactNow": "立即归纳",
+    "compacting": "正在归纳…",
+    "compactNone": "暂无可归纳的较早对话",
+    "compactFailed": "归纳未完成，请稍后重试。",
+    "clearContext": "清空上下文",
+    "clearTitle": "清空此对话的上下文？",
+    "clearText": "清空后，模型将不再参考此前的对话，聊天记录与记忆不受影响。",
+    "clearOk": "清空",
+    "clearFailed": "未能清空上下文，请重试。"
   },
   "onboard": {
     "steps": [

@@ -19,7 +19,7 @@ FULL_ENV = {
     "LLM_FALLBACK_THINKING": "true",
     "LLM_RATE_WINDOW_S": "13", "LLM_RATE_THRESHOLD": "14", "LLM_FALLBACK_DURATION_S": "15",
     "LLM_RATE_LIMIT_COOLDOWN_S": "16",
-    "MEMORY_CALLS_PER_DAY": "0", "MEMORY_PROMPT_CHARS": "900", "MEMORY_KEEP_RECENT": "false",
+    "MEMORY_CALLS_PER_DAY": "0", "CONTEXT_WINDOW": "65536", "MEMORY_KEEP_RECENT": "false",
     "VISION_MODEL": "v-model", "VISION_API_KEY": "vk",
     "VISION_BASE_URL": "https://vision.example/v4/", "AGENT_LANG": " ZH ",
 }
@@ -50,7 +50,7 @@ def test_every_setting_is_read() -> None:
     assert (s.base_url, s.vision_base_url, s.llm_fallback_base_url) == (
         "https://llm.example/v1", "https://vision.example/v4", "https://fb.example/v1")
     assert (s.llm_fallback_duration_s, s.llm_rate_limit_cooldown_s) == (15, 16)
-    assert (s.memory_calls_per_day, s.memory_prompt_chars, s.memory_keep_recent) == (0, 900, False)
+    assert (s.memory_calls_per_day, s.context_window, s.memory_keep_recent) == (0, 65536, False)
     assert (s.agent_lang, s.admin_name, s.admin_relationship) == ("zh", "O", "rel")
     # A fallback endpoint left unset means the primary's, and is sent `thinking` only when told it takes it.
     unset = AgentSettings.from_env(env={"LLM_API_KEY": "k"})
@@ -66,9 +66,9 @@ def test_an_out_of_range_setting_falls_back_rather_than_raising() -> None:
     assert (port("not-a-number"), port("70000"), port("9000")) == (8080, 8080, 9000)
     s = AgentSettings.from_env(env={
         "LLM_API_KEY": "k", "ROAM_GAP_HOURS": "lots", "LLM_TIMEOUT_S": "0", "LLM_RATE_LIMIT_COOLDOWN_S": "0",
-        "MEMORY_CALLS_PER_DAY": "-1", "MEMORY_PROMPT_CHARS": "5"})
+        "MEMORY_CALLS_PER_DAY": "-1", "CONTEXT_WINDOW": "5"})
     assert (s.roam_gap_h, s.llm_timeout_s, s.llm_rate_limit_cooldown_s) == (3.0, 120.0, 20)
-    assert (s.memory_calls_per_day, s.memory_prompt_chars) == (40, 2400)
+    assert (s.memory_calls_per_day, s.context_window) == (40, 0)
 
 
 def _documented() -> dict[str, str]:

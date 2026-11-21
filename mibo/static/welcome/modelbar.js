@@ -1,9 +1,10 @@
 "use strict";
 // The model control beside the composer's "+": the saved model's short name, and in its menu the thinking
 // level (only for a model measured to reason and to take the setting), the service's other models, and what
-// the calls spent with the account's balance. Settings' model page shows the same: the measured abilities
-// and the usage, with the monthly limit (settings below). Reads /api/modelbar and /api/usage
-// (panels/modelbar.py); the chat (chat.js) makes one control per chat view.
+// the calls spent with the account's balance, and the chat's context: how much of the model's window its last
+// request took, 立即归纳 and 清空上下文. Settings' model page shows the same: the measured abilities and the usage,
+// with the monthly limit (settings below). Reads /api/modelbar and /api/usage (panels/modelbar.py) and
+// /api/chat/context (welcome.py); the chat (chat.js) makes one control per chat view.
 window.paModelBar = (() => {
   // The problems a failed check names (endpoints.PROBLEMS), as Settings words them.
   const LEVELS = ["auto", "off", "standard", "deep"];
@@ -24,7 +25,12 @@ window.paModelBar = (() => {
     gear: '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>',
     search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
     out: '<path d="M14 4.5h5.5V10M19.5 4.5 11 13M18 14v4.5a1 1 0 0 1-1 1H5.5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1H10"/>',
+    layers: '<path d="m12 3 9 5-9 5-9-5 9-5z"/><path d="m3 13 9 5 9-5"/>',
+    fold: '<path d="M4 6h16M4 10h10M4 14h16M4 18h7"/>',
+    erase: '<path d="M7 20h11M5.5 15.5l9-9a2 2 0 0 1 2.8 0l1.2 1.2a2 2 0 0 1 0 2.8L12 17H8z"/>',
   };
+  // The parts of a request the gauge names, in the order a request carries them (dm.chat_context).
+  const PARTS = ["system", "tools", "memory", "summary", "recent"];
 
   function el(tag, className = "", text = "") {
     const node = document.createElement(tag);
@@ -157,6 +163,9 @@ window.paModelBar = (() => {
     let busyWith = "";
     let pollTimer = 0;
     let query = "";
+    // The chat's context (dm.chat_context), read each time the menu opens; 立即归纳 under way.
+    let held = null;
+    let compacting = false;
 
     const wrap = el("div", "mb-wrap");
     const button = el("button", "mb-pill");
@@ -224,9 +233,10 @@ window.paModelBar = (() => {
     readUsage();
 
     // ---- The menu
-    function item(icon, label, run, { hint = "", checked = null, more = false, cls = "" } = {}) {
+    function item(icon, label, run, { hint = "", checked = null, more = false, cls = "", disabled = false } = {}) {
       const node = el("button", `side-menu-item mb-item ${cls}`.trim());
       node.type = "button";
+      node.disabled = disabled;
       node.setAttribute("role", checked === null ? "menuitem" : "menuitemradio");
       if (checked !== null) node.setAttribute("aria-checked", String(checked));
       const text = el("span", "mb-text");
@@ -288,7 +298,81 @@ window.paModelBar = (() => {
         more: true,
         hint: today ? `${t.today} ${today.main}` : "",
       }));
+      if (held) out.push(rule(), ...contextRows(held));
       return out;
+    }
+
+    // The gauge, its parts on hover or focus, and what can be done with the chat's context.
+    function contextRows(c) {
+      const t = w();
+      const out = [];
+      if (c.known) {
+        const row = el("div", "side-menu-item mb-item mb-ctx");
+        row.tabIndex = -1;
+        row.setAttribute("role", "menuitem");
+        const text = el("span", "mb-text");
+        const meter = el("span", "mb-meter");
+        meter.style.setProperty("--used", `${c.percent}%`);
+        text.append(el("span", "mb-label", fill(t.context, { p: c.percent })), meter);
+        const tip = el("div", "mb-ctx-tip");
+        tip.id = `mb-ctx-${env.chat}`;
+        tip.setAttribute("role", "tooltip");
+        tip.hidden = true;
+        for (const part of PARTS) {
+          if (!c.parts[part]) continue;
+          const line = el("div", "mb-ctx-part");
+          line.append(el("span", "", t.contextParts[part]), el("span", "mb-ctx-n", tokens(c.parts[part])));
+          tip.append(line);
+        }
+        tip.append(el("p", "mb-ctx-total", fill(c.estimated ? t.contextAbout : t.contextOf,
+          { n: tokens(c.tokens), of: tokens(c.limit) })));
+        row.setAttribute("aria-describedby", tip.id);
+        row.append(svg(I.layers), text, tip);
+        // Beside the menu, where the menu's own scrolling does not cut it off.
+        const showTip = () => {
+          tip.hidden = false;
+          const at = row.getBoundingClientRect();
+          const wide = tip.offsetWidth;
+          const left = at.right + 8 + wide <= innerWidth - 8 ? at.right + 8 : Math.max(8, at.left - 8 - wide);
+          tip.style.left = `${left}px`;
+          tip.style.top = `${Math.max(8, Math.min(at.top, innerHeight - tip.offsetHeight - 8))}px`;
+        };
+        const hideTip = () => (tip.hidden = true);
+        row.addEventListener("mouseenter", showTip);
+        row.addEventListener("focus", showTip);
+        row.addEventListener("mouseleave", hideTip);
+        row.addEventListener("blur", hideTip);
+        out.push(row);
+      }
+      out.push(item(I.fold, compacting ? t.compacting : t.compactNow, compact,
+        { disabled: compacting || !c.compactable, hint: c.compactable || compacting ? "" : t.compactNone }));
+      out.push(item(I.erase, t.clearContext, clear, { disabled: !c.held }));
+      return out;
+    }
+    async function readContext() {
+      held = await ctx.api(`chat/context?chat=${encodeURIComponent(env.chat)}`).catch(() => held);
+    }
+    async function compact() {
+      compacting = true;
+      draw();
+      const done = await ctx.api("chat/compact", { chat: env.chat }).catch(() => null);
+      compacting = false;
+      if (!done || done.failed) env.flash(w().compactFailed);
+      else if (done.compacted) await env.changed();
+      await readContext();
+      if (open && view === "main") draw();
+    }
+    async function clear() {
+      close(true);
+      const t = w();
+      if (!(await ctx.confirm({ title: t.clearTitle, text: t.clearText, ok: t.clearOk }))) return;
+      try {
+        await ctx.api("chat/clear", { chat: env.chat });
+      } catch {
+        env.flash(t.clearFailed);
+        return;
+      }
+      await env.changed();
     }
 
     function modelsView() {
@@ -363,7 +447,7 @@ window.paModelBar = (() => {
       menu.style.bottom = `${wrap.getBoundingClientRect().bottom - bottom}px`;
       menu.style.left = `${at.width + 8}px`;
     }
-    const items = () => [...menu.querySelectorAll(".mb-item, .mb-search-input")];
+    const items = () => [...menu.querySelectorAll(".mb-item:not(:disabled), .mb-search-input")];
     const focusFirst = () => items()[view === "main" ? 0 : 1]?.focus();
 
     async function show(fromKeys = false) {
@@ -378,6 +462,7 @@ window.paModelBar = (() => {
       const [list] = await Promise.all([
         ctx.api("modelbar/models").catch(() => models),
         Date.now() - usageAt > USAGE_EVERY_MS ? readUsage() : null,
+        readContext(),
       ]);
       models = list;
       if (open && view === "main") draw();

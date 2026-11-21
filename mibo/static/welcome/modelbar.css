@@ -298,6 +298,50 @@
   border-radius: var(--pa-r-pill);
   background: linear-gradient(var(--pa-n600), var(--pa-n600)) left / var(--used) 100% no-repeat, var(--pa-sunken);
 }
+/* The chat's context: the share of the window, its parts beside the menu on hover or focus. */
+.mb-ctx {
+  cursor: default;
+}
+.mb-ctx .mb-meter {
+  margin: 4px 0 2px;
+}
+.mb-ctx-tip {
+  position: fixed;
+  z-index: 40;
+  width: 216px;
+  padding: 8px 12px;
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-r-sm);
+  background: var(--pa-surface);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  color: var(--pa-muted);
+  font-size: var(--pa-fs-xs);
+  line-height: 20px;
+  white-space: normal;
+}
+.mb-ctx-tip[hidden] {
+  display: none;
+}
+.mb-ctx-part {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.mb-ctx-n {
+  color: var(--pa-text);
+  font-variant-numeric: tabular-nums;
+}
+.mb-ctx-total {
+  margin: 4px 0 0;
+  padding-top: 4px;
+  border-top: 1px solid var(--pa-line);
+  font-variant-numeric: tabular-nums;
+}
+.side-menu-item.mb-item:disabled {
+  background: transparent;
+  cursor: default;
+  opacity: 0.5;
+}
 .mb-limit-near .mb-meter {
   background: linear-gradient(var(--pa-amber700), var(--pa-amber700)) left / var(--used) 100% no-repeat, var(--pa-sunken);
 }

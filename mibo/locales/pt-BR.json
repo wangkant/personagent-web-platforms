@@ -479,7 +479,6 @@
     "wait": "Aguarde esta resposta terminar.",
     "loadFailed": "Não foi possível carregar a conversa. Tente novamente em instantes.",
     "reload": "Tentar novamente",
-    "trimmed": "As mensagens anteriores não foram mantidas",
     "today": "Hoje",
     "yesterday": "Ontem",
     "reply": "Responder",
@@ -533,7 +532,12 @@
     "privateMark": "Conversa temporária",
     "privateNote": "Não usa nem atualiza a memória, não fica no registro de conversas e é apagada ao fechar o aplicativo.",
     "privateStart": "Iniciar uma conversa temporária",
-    "privateLeave": "Sair da conversa temporária"
+    "privateLeave": "Sair da conversa temporária",
+    "compacted": "As mensagens anteriores foram condensadas em um resumo.",
+    "showSummary": "Ver resumo",
+    "contextCleared": "Contexto limpo. As mensagens anteriores não são mais enviadas ao modelo.",
+    "cut": "A mensagem era maior do que o modelo consegue ler, então o início e o fim foram mantidos.",
+    "model_window_small": "A janela de contexto deste modelo é pequena demais para a configuração básica do Mibo. Escolha um modelo com uma janela de contexto maior."
   },
   "compact": {
     "full": "Abrir na janela principal",
@@ -706,7 +710,26 @@
       "now": "agora mesmo",
       "m": "há {count} min",
       "h": "há {count} h"
-    }
+    },
+    "context": "Contexto usado: {p}%",
+    "contextOf": "{n} / {of} tokens",
+    "contextAbout": "Cerca de {n} / {of} tokens",
+    "contextParts": {
+      "system": "Configuração do sistema",
+      "tools": "Descrição das ferramentas",
+      "memory": "Memória",
+      "summary": "Resumo da conversa",
+      "recent": "Mensagens recentes"
+    },
+    "compactNow": "Resumir agora",
+    "compacting": "Resumindo…",
+    "compactNone": "Ainda não há mensagens anteriores para resumir",
+    "compactFailed": "Não foi possível escrever o resumo. Tente novamente mais tarde.",
+    "clearContext": "Limpar contexto",
+    "clearTitle": "Limpar o contexto desta conversa?",
+    "clearText": "O modelo deixará de considerar as mensagens anteriores. O histórico da conversa e a memória não são afetados.",
+    "clearOk": "Limpar",
+    "clearFailed": "Não foi possível limpar o contexto. Tente novamente."
   },
   "onboard": {
     "steps": [

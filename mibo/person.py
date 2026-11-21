@@ -21,7 +21,7 @@ from datetime import date, datetime, timedelta, tzinfo
 from pathlib import Path
 from typing import Callable, Iterable, Optional
 
-from . import chatlangs, memstore, ranking, timewords
+from . import chatlangs, context, memstore, ranking, timewords
 from .storage import num as _num
 from .textproc import _clean_prompt_source, _focus_tokens
 
@@ -966,33 +966,37 @@ def _in_window(plan: dict, today: date) -> bool:
     return (end - today).days >= WINDOW_DAYS[0] and (start - today).days <= WINDOW_DAYS[1]
 
 
-def recall_block(store: Person, focus: str, now: float, tz, lang: str, budget: int,
+def recall_block(store: Person, focus: str, now: float, tz, lang: str, budget: float,
                  manner: Iterable[str] = ()) -> tuple[str, list[str]]:
-    """The person's block for a reply prompt, within `budget` characters: how
-    to treat them, what they cannot have or do not want and who they are
-    always, plans in their window with their day and how far off, the other
-    facts ranked by `focus` while the budget lasts, and the talk.
-    `manner`: how they asked to be treated as the profile keeps it, beside
-    the store's own. Returns (block, ids placed)."""
+    """The person's block for a reply prompt, within `budget` tokens as the chat's estimator counts them
+    (context.text_tokens), its frame included: how to treat them, what they cannot have or do not want and who
+    they are always, plans in their window with their day and how far off, the other facts ranked by `focus`
+    while the budget lasts, and the talk. `manner`: how they asked to be treated as the profile keeps it, beside
+    the store's own. Returns (block, ids placed); ("", []) when not even its frame fits."""
     name = store.name()
     today = _day(now, tz)
     placed: list[str] = []
-    left = budget
+    who = f"{name}, the person you are talking to" if name else "the person you are talking to"
+    left = budget - context.text_tokens(_recall_frame(who, _NOTHING_YET))
+    if left < 0:
+        return "", []
     parts: list[str] = []
 
     def take(head: str, lines: list[str], rows: list[dict]) -> None:
         nonlocal left
         kept = []
+        room = left - context.text_tokens(head + "\n\n")
         for line, row in zip(lines, rows):
-            if len(line) + 1 > left:
+            cost = context.text_tokens(line + "\n")
+            if cost > room:
                 continue
             kept.append(line)
-            left -= len(line) + 1
+            room -= cost
             if row.get("id"):
                 placed.append(row["id"])
         if kept:
             parts.append(head + "\n" + "\n".join(kept))
-            left -= len(head) + 1
+            left = room
 
     def fact_line(f: dict) -> str:
         if f.get("status") == "past":
@@ -1038,10 +1042,10 @@ def recall_block(store: Person, focus: str, now: float, tz, lang: str, budget: i
     lines += [f"- {t.get('day', '')}: {json.dumps(str(t.get('words') or ''), ensure_ascii=False)}"
               for t in topics]
     talk_text = "What you two have talked about:\n" + "\n".join(lines) if lines else ""
-    if len(talk_text) + 1 > left:
+    if context.text_tokens(talk_text + "\n\n") > left:
         talk_text = ""
     elif talk_text:
-        left -= len(talk_text) + 1
+        left -= context.text_tokens(talk_text + "\n\n")
 
     rest = [f for f in facts if f not in always]
     # A fact is found by the words of those it replaced in its slot too: "室友" finds "和小雅和好了" there.
@@ -1068,8 +1072,15 @@ def recall_block(store: Person, focus: str, now: float, tz, lang: str, budget: i
     take("No longer true (only for what was before, never as now):", [fact_line(f) for f in past], past)
     if talk_text:
         parts.append(talk_text)
-    who = f"{name}, the person you are talking to" if name else "the person you are talking to"
     body = "\n\n".join(parts)
+    return _recall_frame(who, "\n" + body if body else _NOTHING_YET), placed
+
+
+_NOTHING_YET = "Nothing yet."
+
+
+def _recall_frame(who: str, body: str) -> str:
+    """The person's block: what it is and how to use it, then `body`."""
     return (
         "\n\n<about_them>\n"
         f"What you know about {_clean_prompt_source(who)}, kept by this app from all your chats with them. "
@@ -1079,9 +1090,8 @@ def recall_block(store: Person, focus: str, now: float, tz, lang: str, budget: i
         "happened to them. Use at most one of these in a reply unless "
         "they ask, never list them, and never announce that you remember.\n"
         "A plan whose day is past and not asked about may be asked about once.\n"
-        + ("\n" + body if body else "Nothing yet.") +
-        "\n</about_them>"
-    ), placed
+        + body + "\n</about_them>"
+    )
 
 
 def _plan_text(plan: dict) -> tuple[str, bool]:

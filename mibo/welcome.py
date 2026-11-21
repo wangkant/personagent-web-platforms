@@ -209,6 +209,8 @@ class PageChat:
         # {seq: the message as stored}: what a save compares with to write only what changed.
         self._stored = dict(messages)
         self._wipe = False
+        # A 无痕对话's mark of a cleared context, held here as it has no rows (`summary`).
+        self.mark: dict | None = None
         # The secrets said in this chat since the page started, masked wherever a reply repeats them.
         self._secrets: dict = {}
         self.history = [json.loads(body) for body in self._stored.values()]
@@ -240,13 +242,17 @@ class PageChat:
 
     def summary(self) -> dict | None:
         """The chat's checkpoint, which the character keeps as this chat's summary row (dm.py): {"text", "from":
-        the time of the first turn still read whole, "at": when it was written}; None before the first."""
+        the time of the first turn still read whole, "at": when it was written}, or the mark of a cleared context
+        (no text, "cleared": true); None before either."""
+        if self.private:
+            return self.mark
         rows = self.store.read("SELECT body FROM page_messages WHERE chat = ? AND kind = 'summary'", (self.id,))
         return json.loads(rows[0][0]) if rows else None
 
     def reset(self) -> None:
         self.conversation = secrets.token_hex(12)
         self.history = []
+        self.mark = None
         self._wipe = True
 
     @property
@@ -788,6 +794,31 @@ class Workspace:
             self.reset_chat()
             return {"ok": True, "forgotten": forgotten}
 
+    # -- what the model reads of a chat (context design, stage S5): the gauge, 立即归纳 and 清空上下文
+
+    def chat_context(self, chat: str = MAIN_CHAT) -> dict:
+        return self.character.context(self._chat(chat).conversation)
+
+    async def compact_chat(self, chat: str = MAIN_CHAT) -> dict:
+        """The chat's older turns condensed now, between replies: {"compacted", "failed"}."""
+        async with self._chat_lock:
+            try:
+                return await self.character.compact(self._chat(chat).conversation)
+            except NotReady:
+                raise ValueError("activity_unavailable") from None
+
+    async def clear_context(self, chat: str = MAIN_CHAT) -> dict:
+        """The model no longer reads the chat's turns before now; the page keeps every message."""
+        async with self._chat_lock:
+            room = self._chat(chat)
+            try:
+                mark = await self.character.clear_context(room.conversation)
+            except NotReady:
+                raise ValueError("activity_unavailable") from None
+            if room.private:
+                room.mark = mark
+            return {"ok": True, "summary": room.summary()}
+
     @staticmethod
     def _read_attachments(raw) -> list[tuple[dict, bytes]]:
         """The pictures and files sent with a message, checked: each one's record
@@ -941,11 +972,13 @@ class Workspace:
                 return {"reply": "", "stopped": True, **room.view(said["seq"] - 1 if after is None else after)}
             if any(item.get("reason") == "excuse" for item in items):
                 # The model failed: here the admin checks the setup, so it is reported, not chatted about.
-                # An account out of balance is named, with its console (abilities.note_problem).
+                # An account out of balance is named, with its console, and a window too small for the chat's
+                # setup with its sentence (abilities.note_problem).
                 from . import abilities
-                if abilities.problem_since(self._runtime(), asked_at) == "no_balance":
-                    self._unanswered(said, "model_no_balance", room)
-                    raise ValueError("model_no_balance")
+                problem = abilities.problem_since(self._runtime(), asked_at)
+                if problem in ("no_balance", "window_small"):
+                    self._unanswered(said, f"model_{problem}", room)
+                    raise ValueError(f"model_{problem}")
                 self._unanswered(said, "chat_failed", room)
                 raise RuntimeError("the model did not answer")
             if not items:
@@ -1374,7 +1407,7 @@ def create_app(home: Path, token: str, *, workspace: Workspace | None = None) ->
     async def bad_value(request, exc):
         allowed = {"busy", "invalid_provider", "key_required", "invalid_url", "https_required",
                    "model_required", "invalid_character", "key_rejected", "model_limited", "model_unreachable",
-                   "model_no_balance", "model_not_found",
+                   "model_no_balance", "model_not_found", "model_window_small",
                    "key_malformed", "key_again", "name_required",
                    "invalid_message", "invalid_chat", "activity_unavailable", "activity_changed",
                    "memory_secret", "memory_not_instructions", "memory_paused", "memory_health_off",
@@ -1556,6 +1589,19 @@ def create_app(home: Path, token: str, *, workspace: Workspace | None = None) ->
     async def forget(request: Request):
         await body(request)
         return await workspace.forget_chat()
+
+    @app.get("/api/chat/context")
+    async def chat_context(chat: str = MAIN_CHAT):
+        # On the loop the character runs on: the gauge reads its turns as they are between two awaits.
+        return workspace.chat_context(chat)
+
+    @app.post("/api/chat/compact")
+    async def compact_chat(request: Request):
+        return await workspace.compact_chat(str((await body(request)).get("chat") or MAIN_CHAT))
+
+    @app.post("/api/chat/clear")
+    async def clear_context(request: Request):
+        return await workspace.clear_context(str((await body(request)).get("chat") or MAIN_CHAT))
 
     @app.get("/api/chat/history")
     async def history(after: int | None = None, chat: str = MAIN_CHAT):

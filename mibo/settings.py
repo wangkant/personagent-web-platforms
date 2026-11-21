@@ -124,9 +124,6 @@ class AgentSettings:
     memory_tidy_every: int = 8
     #: Consolidation calls per day for all chats together; 0 turns them off.
     memory_calls_per_day: int = 40
-    #: Characters of remembered material in a reply: the summary of earlier
-    #: conversation, facts and events.
-    memory_prompt_chars: int = 2400
     #: Events kept per chat before the least useful are removed.
     memory_episodes_max: int = 120
     #: Keep each chat's recent messages on disk for 72 hours.
@@ -225,9 +222,6 @@ class AgentSettings:
             memory_calls_per_day=env_int(
                 "MEMORY_CALLS_PER_DAY", declared["memory_calls_per_day"],
                 minimum=0, maximum=10_000, env=env),
-            memory_prompt_chars=env_int(
-                "MEMORY_PROMPT_CHARS", declared["memory_prompt_chars"],
-                minimum=200, maximum=100_000, env=env),
             memory_episodes_max=env_int(
                 "MEMORY_EPISODES_MAX", declared["memory_episodes_max"],
                 minimum=1, maximum=10_000, env=env),

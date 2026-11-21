@@ -16,12 +16,6 @@ from .textproc import (
 
 logger = logging.getLogger("agent")
 
-#: MEMORY_PROMPT_CHARS when an agent carries no settings record.
-_MEMORY_PROMPT_CHARS = 2400
-#: Below this budget the running summary may take only half of it.
-_THREAD_FULL_BUDGET = 800
-_FACTS_MAX = 8
-_EVENTS_MAX = 4
 #: Lines of their past chats a message about the past brings, for a model that does not search them itself.
 _LOG_LINES = 3
 # A message asking what someone said.
@@ -207,10 +201,6 @@ class Retrieval:
         from .textproc import _env_tz_offset
         return timezone(timedelta(hours=_env_tz_offset()))
 
-    def _memory_budget(self) -> int:
-        settings = getattr(self, "settings", None)
-        return max(0, int(getattr(settings, "memory_prompt_chars", _MEMORY_PROMPT_CHARS)))
-
     def _remember_recalled(self, conv: str, placed: list[tuple[str, str, str]]) -> None:
         """What this chat's latest prompt placed, for `_mark_used` after the send."""
         if not hasattr(self, "_last_recalled"):
@@ -262,13 +252,12 @@ class Retrieval:
         self._memory_counts_dirty = set()
         self._save_person()
 
-    def _person_block(self, conv: str, focus_text: str) -> tuple[str, list[tuple[str, str, str]]]:
-        """What a page chat's prompt knows of its one person (person.py): the
+    def _person_block(self, conv: str, focus_text: str, budget: float) -> tuple[str, list[tuple[str, str, str]]]:
+        """What a page chat's prompt knows of its one person (person.py), within `budget` estimated tokens: the
         same block in every chat of theirs, the facts ranked by `focus_text`."""
         from . import person, profile, today
         block, ids = person.recall_block(self.person_store, focus_text, time.time(), self._prompt_tz(),
-                                         self.chat_lang, self._memory_budget(),
-                                         manner=profile.manner_lines(today.runtime_of(self)))
+                                         self.chat_lang, budget, manner=profile.manner_lines(today.runtime_of(self)))
         return block, [(conv, "person", i) for i in ids]
 
     def _past_block(self, conv: str, text: str) -> str:

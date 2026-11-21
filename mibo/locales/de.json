@@ -479,7 +479,6 @@
     "wait": "Warten Sie zuerst, bis diese Antwort fertig ist.",
     "loadFailed": "Der Chat konnte nicht geladen werden. Versuchen Sie es gleich erneut.",
     "reload": "Erneut versuchen",
-    "trimmed": "Frühere Nachrichten wurden nicht aufbewahrt",
     "today": "Heute",
     "yesterday": "Gestern",
     "reply": "Antworten",
@@ -533,7 +532,12 @@
     "privateMark": "Temporärer Chat",
     "privateNote": "Nutzt und aktualisiert das Gedächtnis nicht, wird nicht im Chatverlauf gespeichert und beim Schließen der App gelöscht.",
     "privateStart": "Temporären Chat starten",
-    "privateLeave": "Temporären Chat verlassen"
+    "privateLeave": "Temporären Chat verlassen",
+    "compacted": "Frühere Nachrichten wurden zu einer Zusammenfassung verdichtet.",
+    "showSummary": "Zusammenfassung anzeigen",
+    "contextCleared": "Kontext geleert. Frühere Nachrichten werden nicht mehr an das Modell gesendet.",
+    "cut": "Die Nachricht war länger, als das Modell lesen kann. Anfang und Ende wurden beibehalten.",
+    "model_window_small": "Das Kontextfenster dieses Modells ist zu klein für die Grundeinstellungen von Mibo. Wählen Sie ein Modell mit einem längeren Kontextfenster."
   },
   "compact": {
     "full": "Im Hauptfenster öffnen",
@@ -706,7 +710,26 @@
       "now": "gerade eben",
       "m": "vor {count} Min.",
       "h": "vor {count} Std."
-    }
+    },
+    "context": "Kontext zu {p} % belegt",
+    "contextOf": "{n} / {of} Tokens",
+    "contextAbout": "Etwa {n} / {of} Tokens",
+    "contextParts": {
+      "system": "Systemvorgaben",
+      "tools": "Werkzeugbeschreibungen",
+      "memory": "Gedächtnis",
+      "summary": "Gesprächszusammenfassung",
+      "recent": "Neueste Nachrichten"
+    },
+    "compactNow": "Jetzt zusammenfassen",
+    "compacting": "Wird zusammengefasst…",
+    "compactNone": "Noch keine früheren Nachrichten zum Zusammenfassen",
+    "compactFailed": "Die Zusammenfassung konnte nicht erstellt werden. Versuchen Sie es später erneut.",
+    "clearContext": "Kontext leeren",
+    "clearTitle": "Kontext dieses Chats leeren?",
+    "clearText": "Das Modell berücksichtigt frühere Nachrichten danach nicht mehr. Chatverlauf und Gedächtnis bleiben erhalten.",
+    "clearOk": "Leeren",
+    "clearFailed": "Der Kontext konnte nicht geleert werden. Versuchen Sie es erneut."
   },
   "onboard": {
     "steps": [

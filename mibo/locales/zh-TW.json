@@ -473,7 +473,6 @@
     "wait": "請等待此回覆完成。",
     "loadFailed": "無法載入對話，請稍後再試。",
     "reload": "重試",
-    "trimmed": "更早的訊息未保留",
     "today": "今天",
     "yesterday": "昨天",
     "reply": "回覆",
@@ -527,7 +526,12 @@
     "privateMark": "無痕對話",
     "privateNote": "不讀取也不更新記憶，不寫入對話紀錄，關閉應用程式後清除。",
     "privateStart": "開始無痕對話",
-    "privateLeave": "退出無痕對話"
+    "privateLeave": "退出無痕對話",
+    "compacted": "較早的對話已歸納為摘要。",
+    "showSummary": "查看摘要",
+    "contextCleared": "上下文已清空，此前的對話不再提供給模型。",
+    "cut": "訊息超出模型可讀取的長度，已保留開頭與結尾部分。",
+    "model_window_small": "該模型的上下文視窗過小，無法容納 Mibo 的基本設定。請改用上下文視窗更長的模型。"
   },
   "compact": {
     "full": "在主視窗中開啟",
@@ -700,7 +704,26 @@
       "now": "剛剛",
       "m": "{count} 分鐘前",
       "h": "{count} 小時前"
-    }
+    },
+    "context": "上下文佔用 {p}%",
+    "contextOf": "{n} / {of} 個 token",
+    "contextAbout": "約 {n} / {of} 個 token",
+    "contextParts": {
+      "system": "系統設定",
+      "tools": "工具說明",
+      "memory": "記憶",
+      "summary": "對話摘要",
+      "recent": "近期對話"
+    },
+    "compactNow": "立即歸納",
+    "compacting": "正在歸納…",
+    "compactNone": "暫無可歸納的較早對話",
+    "compactFailed": "歸納未完成，請稍後再試。",
+    "clearContext": "清空上下文",
+    "clearTitle": "清空此對話的上下文？",
+    "clearText": "清空後，模型將不再參考此前的對話，聊天記錄與記憶不受影響。",
+    "clearOk": "清空",
+    "clearFailed": "未能清空上下文，請再試一次。"
   },
   "onboard": {
     "steps": [

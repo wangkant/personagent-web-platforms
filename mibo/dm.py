@@ -9,6 +9,7 @@ import logging
 import time
 from datetime import datetime
 
+from . import abilities
 from . import catalog
 from . import channels
 from . import context
@@ -46,6 +47,9 @@ _FAILS_BEFORE_CUT = 2
 # The line a cut without a summary adds to the checkpoint: (zh, en).
 _CUT_LINE = ("（{span}的对话未写入摘要，可使用 {tool} 查找。）",
              "(The conversation of {span} is not in this checkpoint; {tool} finds it.)")
+# The system prompt and the tool definitions may take this share of the input limit at most; past it the model's
+# window cannot hold the chat's basic setup (context design: the window-too-small sentence).
+_SETUP_SHARE = 0.6
 
 # The owner's turn on the page looks things up itself (loop.py); a
 # context, so no fake `_chat_dm` needs a new argument or return value. None: no tools.
@@ -93,6 +97,7 @@ def _page_turns(runtime, conversation: str) -> list[dict]:
                        (conversation,))
     mark = json.loads(marks[0][0]) if marks else {}
     since = float(mark.get("from") or 0.0)
+    grace = 0.0 if mark.get("cleared") else _HEARD_AFTER_S
     turns: list[dict] = []
     for (body,) in store.read(f"SELECT body FROM page_messages WHERE kind = 'message' AND chat IN ({_OF_CHAT}) "
                               "ORDER BY seq", (conversation,)):
@@ -102,7 +107,7 @@ def _page_turns(runtime, conversation: str) -> list[dict]:
             continue
         at = _at(message.get("at"))
         # What the checkpoint holds; a turn may come back with it, never go missing.
-        if at < since - _HEARD_AFTER_S:
+        if at < since - grace:
             continue
         role, text = message.get("role"), message.get("text")
         if not isinstance(text, str):
@@ -491,6 +496,7 @@ class DirectMessages:
                     texts[-1]["memory"] = {"used": used}
                 self._maybe_consolidate(pkey, "trim")
             if lookups.sent is not None:
+                self._note_request(user_id, pkey, lookups.sent)
                 self._spawn(self._compact_after(user_id, pkey, lookups.sent))
             # Never the words: what they say may be forgotten later.
             logger.info("[Agent] reply (chat=%s, %d chars)", conversation, len(reply))
@@ -522,11 +528,18 @@ class DirectMessages:
         `pictures` go with the last turn for the model to see itself. `out_of_time`: the turn's time ran
         out with work under way, so this call only says what was done, without tools."""
         await self._prepare_retrieval(self._last_user_text(history), pkey)
-        prompt = self._build_dm_prompt(history, pkey=pkey, follow_up=follow_up,
+        system = self._dm_system()
+        plan, ratio = self._turn_plan(system, tools=not follow_up)
+        if plan.limit - plan.available > _SETUP_SHARE * plan.limit:
+            # Not even the system prompt and the tools fit: no request is sent, and the page names why.
+            abilities.note_problem(self, "window_small", self._endpoint_for(self.llm_dm_model)[0])
+            raise ValueError("the model's window cannot hold the chat's system prompt and tools")
+        if not follow_up:
+            self._cut_message(history, plan, ratio)
+        prompt = self._build_dm_prompt(history, room=plan.turn / ratio, pkey=pkey, follow_up=follow_up,
                                        pictures=len(pictures))
-        if not follow_up and self._cut_message(history, prompt.system):
-            prompt = self._build_dm_prompt(history, pkey=pkey, pictures=len(pictures))
-        system = prompt.system
+        # The turn context's size, for the gauge's parts (`chat_context`).
+        self.__dict__.setdefault("_turn_sizes", {})[pkey] = context.text_tokens(prompt.turn_context)
         # A turn of the person's: the reply model looks things up itself (loop.py).
         lookups = None if follow_up else chat_lookups.get()
         messages = prompt.messages_with_context(prompt.messages)
@@ -545,19 +558,116 @@ class DirectMessages:
                 return await self._call_llm(system, messages, self.llm_dm_model, max_tokens=FROM_BUDGET)
         return await self._reply(system, messages, self.llm_dm_model, lookups, said=self._last_user_text(history))
 
-    def _cut_message(self, history: list[dict], system: str) -> bool:
+    def _turn_plan(self, system: str, tools: bool) -> tuple[context.Budget, float]:
+        """`_history_plan` of a turn with the chat's system prompt `system`, and with the tools the model's window
+        is offered when `tools`."""
+        return self._history_plan((system, self._offered_tools() if tools else None))
+
+    def _offered_tools(self) -> list:
+        """The tool definitions the reply model's window is offered up front (catalog.offered)."""
+        model = self.llm_dm_model
+        return catalog.offered(self._budget(self._endpoint_for(model)[0], model)).tools
+
+    def _cut_message(self, history: list[dict], plan: context.Budget, ratio: float) -> None:
         """The person's newest message, when it alone passes its share of the request (half of what the system
         prompt and tools leave), cut at ingestion to its head and tail, and the page told (it marks their message,
-        welcome.py). Whether it was cut."""
+        welcome.py)."""
         last = history[-1] if history else {}
-        if last.get("role") != "user":
-            return False
-        model = self.llm_dm_model
-        tools = catalog.offered(self._budget(self._endpoint_for(model)[0], model)).tools
-        plan, ratio = self._history_plan((system, tools))
         words = str(last.get("content") or "")
-        if context.text_tokens(words) <= plan.message / ratio:
-            return False
+        if last.get("role") != "user" or context.text_tokens(words) <= plan.message / ratio:
+            return
         last["content"] = context.cut(words, plan.message / ratio, _MESSAGE_CUT)
         current_turn.get().said.append({"type": "cut"})
-        return True
+
+    # ---- what the person sees of the context and can do with it (context design, stage S5) ----------
+
+    def _note_request(self, user_id: str, pkey: str, sent: tuple) -> None:
+        """The chat's last reply request, for its gauge: the prompt tokens the endpoint reported for it, the input
+        limit, and the estimated size of each part (system prompt, tools, turn context, checkpoint, the turns and
+        this turn's tool rounds), with the turns it held."""
+        model = self.llm_dm_model
+        url = self._endpoint_for(model)[0]
+        anchor = (context._learned(self).get((url, model)) or {}).get("anchor")
+        if anchor is None:
+            return
+        system, tools = sent
+        rows = self.dm_history.get(user_id) or []
+        held = rows[:-1] if rows and rows[-1].get("role") == "assistant" else rows
+        summary = context.rows_tokens(held[:1]) if held and held[0].get("role") == context.CHECKPOINT else 0.0
+        parts = {"system": context.estimate({"messages": [{"role": "system", "content": system}]}),
+                 "tools": context.estimate({"tools": tools}) if tools else 0.0,
+                 "memory": vars(self).get("_turn_sizes", {}).get(pkey, 0.0), "summary": summary}
+        parts["recent"] = max(0.0, anchor[1] - sum(parts.values()))
+        with purpose("reply"):
+            limit = self._budget(url, model, self._reply_effort(url, model)).limit
+        self.__dict__.setdefault("_chat_requests", {})[pkey] = {
+            "prompt": anchor[0], "parts": parts, "limit": limit, "rows": rows,
+            "held": context.rows_tokens(held), "summary": summary, "ratio": context.ratio(self, url, model),
+            "sent": sent}
+
+    def chat_context(self, conversation: str) -> dict:
+        """The chat's gauge and what can be done with its context: the last reply request's prompt tokens over the
+        input limit (once a compaction or a clear changed the turns since, that figure moved by what they changed,
+        and marked estimated) with its parts in tokens; whether there are older turns to condense, and any turns
+        held at all. {"known": False, ...} before the chat's first reply request in this run."""
+        user_id, pkey = chat_key(conversation)
+        self._rehydrate_page(user_id, pkey)
+        rows = self.dm_history.get(user_id) or []
+        first = 1 if rows and rows[0].get("role") == context.CHECKPOINT else 0
+        out = {"known": False, "compactable": context.tail_from(rows, 0) > first, "held": bool(rows)}
+        seen = vars(self).get("_chat_requests", {}).get(pkey)
+        if not seen:
+            return out
+        parts, ratio, prompt = dict(seen["parts"]), seen["ratio"], seen["prompt"]
+        estimated = rows is not seen["rows"]
+        if estimated:
+            # The turns changed under the gauge: the checkpoint and the turns as they are now.
+            summary = context.rows_tokens(rows[:1]) if first else 0.0
+            moved = context.rows_tokens(rows) - seen["held"]
+            parts["recent"] = max(0.0, parts["recent"] + moved - (summary - seen["summary"]))
+            parts["summary"] = summary
+            prompt = max(0, round(prompt + ratio * moved))
+        scale = prompt / max(1.0, sum(parts.values()))
+        return {**out, "known": True, "tokens": prompt, "limit": seen["limit"], "estimated": estimated,
+                "percent": min(100, round(100 * prompt / seen["limit"])),
+                "parts": {name: round(scale * value) for name, value in parts.items()}}
+
+    async def compact_now(self, conversation: str) -> dict:
+        """立即归纳: the chat's turns before its newest exchange made one checkpoint now, on the prefix of its last
+        request (dsh's manual compaction, its retained tail none but the newest turn). {"compacted": bool} and
+        {"failed": True} when the summary was not written."""
+        user_id, pkey = chat_key(conversation)
+        async with self.turn_locks[pkey], self.locks[pkey]:
+            self._rehydrate_page(user_id, pkey)
+            rows = self.dm_history.get(user_id) or []
+            start = context.tail_from(rows, 0)
+            if start <= (1 if rows and rows[0].get("role") == context.CHECKPOINT else 0):
+                return {"compacted": False}
+            seen = vars(self).get("_chat_requests", {}).get(pkey)
+            sent = seen["sent"] if seen else (self._dm_system(), self._offered_tools())
+            kept = await self._compacted(user_id, rows, start, sent, self._history_plan(sent)[0], now=False)
+            if kept is None:
+                return {"compacted": False, "failed": True}
+            self.dm_history[user_id] = kept
+            self._recent_dirty.add(pkey)
+            self._maybe_flush_recent()
+            return {"compacted": True}
+
+    async def clear_context(self, conversation: str) -> dict:
+        """清空上下文: the model no longer reads the chat's turns or checkpoint; the page's copy, the chat's record
+        and the memory keep everything. The page's summary row becomes the clear's mark, so the turns before it
+        never come back on a restart. The mark ({"text", "from", "at", "cleared"})."""
+        user_id, pkey = chat_key(conversation)
+        async with self.turn_locks[pkey], self.locks[pkey]:
+            now = time.time()
+            self.dm_history[user_id] = []
+            vars(self).get("_compact_fails", {}).pop(user_id, None)
+            mark = {"text": "", "from": now, "at": now, "cleared": True}
+            with db.at(self.memory_file.parent).write() as conn:
+                conn.execute("INSERT OR REPLACE INTO page_messages(chat, seq, kind, body) "
+                             "SELECT id, 0, 'summary', ? FROM page_chats WHERE conversation = ?",
+                             (json.dumps(mark), conversation))
+            self._recent_dirty.add(pkey)
+            self._maybe_flush_recent()
+            logger.info("[Agent] the chat's context was cleared by the person")
+            return mark

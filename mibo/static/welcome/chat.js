@@ -6,7 +6,7 @@
 window.paChat = (() => {
   const MAIN = "main";
   // Failures that the settings page can fix get a way there.
-  const SETTINGS_FIXES = new Set(["key_required", "chat_failed", "model_no_balance"]);
+  const SETTINGS_FIXES = new Set(["key_required", "chat_failed", "model_no_balance", "model_window_small"]);
   // What the character sends on its own is looked for this often while the chat is on screen; in
   // the app's own window it is looked for when the window says a chat changed ("pa-chats"), and
   // only now and then besides.
@@ -317,7 +317,9 @@ window.paChat = (() => {
       attachKey = 0,
       dragDepth = 0,
       // A 无痕对话: it reads no memory and leaves none (welcome.py PageChat.private).
-      privateChat = false;
+      privateChat = false,
+      // When the checkpoint or the cleared mark the thread shows was written (welcome.py PageChat.summary).
+      marked = 0;
     // Where the thread was last drawn to: the day, and the character's open run of messages.
     let lastDay = "",
       run = null;
@@ -436,6 +438,9 @@ window.paChat = (() => {
       ctx, flash,
       pictures: () => Boolean(parts.messages.querySelector(".me-att .pic")),
       tools: () => Boolean(parts.messages.querySelector(".act, .me-choice")),
+      // Its context gauge, 立即归纳 and 清空上下文 act on this chat; what they changed shows in the thread.
+      chat: id,
+      changed: async () => mark((await history(seen)).summary),
     });
     parts.send = el("button", "chat-send");
     parts.send.type = "submit";
@@ -883,6 +888,9 @@ window.paChat = (() => {
         const sent = item.picture === undefined && linkCards(item.text);
         if (sent) node.append(sent);
         if (item.choices?.length) node.append(plus.sent(item.choices));
+        // Longer than the model reads at once: it read the head and the tail (dm._cut_message).
+        if (item.cut) node.append(el("small", "msg-mark msg-cut", say("cut")));
+        node.dataset.at = item.at || "";
         parts.messages.append(node);
         if (item.failed) failed(node, item.failed, item.text, item.seq, item.quote, item.attachments || [], item.choices || []);
       } else if (item.role === "memory") {
@@ -1031,13 +1039,54 @@ window.paChat = (() => {
         privateChat = Boolean(value.private);
         renderText();
       }
-      if (value.trimmed && value.messages.length) parts.messages.append(el("p", "chat-trimmed", say("trimmed")));
       for (const item of value.messages) showMessage(item, false, true);
+      marked = 0;
+      mark(value.summary);
       const said = value.messages.findLast((item) => item.role !== "user" && item.text);
       if (main && said) hooks.said?.(id, said.text);
       seen = Math.max(seen, value.last || 0);
       if (visible()) hooks.seen(id, seen);
       toBottom();
+    }
+    // Where the chat's older turns became its checkpoint, one quiet line before the first message the model still
+    // reads whole, with the checkpoint's text under it on request; where its context was cleared, the line it left.
+    // Drawn again only when a new one was written.
+    function mark(summary) {
+      if ((summary?.at || 0) === marked) return;
+      marked = summary?.at || 0;
+      parts.messages.querySelector(":scope > .chat-compacted")?.remove();
+      if (!summary) return;
+      const node = el("div", "chat-compacted");
+      const line = el("p", "chat-compacted-line");
+      line.append(el("span", "", say(summary.cleared ? "contextCleared" : "compacted")));
+      node.append(line);
+      if (!summary.cleared) {
+        const text = el("div", "chat-summary", summary.text);
+        text.hidden = true;
+        text.id = `chat-summary-${id}`;
+        const open = button("pa-btn pa-btn-link", say("showSummary"), () => {
+          text.hidden = !text.hidden;
+          open.textContent = say(text.hidden ? "showSummary" : "collapse");
+          open.setAttribute("aria-expanded", String(!text.hidden));
+          if (!text.hidden) keepEnd();
+        });
+        open.setAttribute("aria-expanded", "false");
+        open.setAttribute("aria-controls", text.id);
+        line.append(open);
+        node.append(text);
+      }
+      // The first turn the model still reads whole was heard at "from" (dm.py), and the page keeps its messages'
+      // times to the second: after a checkpoint, the last of their messages sent by then; after a clear, the first
+      // sent after it.
+      const mine = [...parts.messages.querySelectorAll(":scope > .me[data-at]")];
+      const from = summary.from * 1000;
+      const first = summary.cleared ? mine.find((one) => Date.parse(one.dataset.at) > from)
+        : mine.findLast((one) => Date.parse(one.dataset.at) <= from);
+      if (first) first.before(node);
+      else {
+        parts.messages.append(node);
+        keepEnd();
+      }
     }
     // A plain chat deleted from another window: the shell lets it go.
     function lost(error) {
@@ -1527,7 +1576,10 @@ window.paChat = (() => {
         mine.remove();
         unline(typing);
         if (value.forgotLines || value.chat !== tag) showHistory(value.forgotLines ? value : await history());
-        else reveal(value.messages);
+        else {
+          reveal(value.messages);
+          mark(value.summary);
+        }
       } catch (error) {
         unline(typing);
         if (lost(error)) return;
@@ -1812,7 +1864,10 @@ window.paChat = (() => {
           if (!sending) {
             const was = parts.empty.hidden;
             if (value.chat !== tag) showHistory(await history());
-            else reveal(value.messages.filter((item) => item.seq > seen));
+            else {
+              reveal(value.messages.filter((item) => item.seq > seen));
+              mark(value.summary);
+            }
             if (was !== parts.empty.hidden || !parts.empty.hidden) renderSetup();
           }
         } catch (error) {

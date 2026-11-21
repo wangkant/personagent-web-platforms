@@ -51,11 +51,42 @@
 .chat-messages {
   display: flow-root;
 }
-.chat-trimmed {
-  margin: var(--pa-s4) 0 0;
+/* Where the older turns became the checkpoint, or the context was cleared: one quiet line, the summary under it. */
+.chat-compacted {
+  margin: var(--pa-s8) 0;
   color: var(--pa-faint);
   font-size: var(--pa-fs-xs);
   text-align: center;
+}
+.chat-compacted-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px var(--pa-s3);
+  margin: 0;
+}
+.chat-compacted .pa-btn-link {
+  color: var(--pa-muted);
+  font-size: inherit;
+  font-weight: 500;
+}
+.chat-summary {
+  max-width: 560px;
+  margin: var(--pa-s3) auto 0;
+  padding: 12px 14px;
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-r-md);
+  background: var(--pa-sunken);
+  color: var(--pa-muted);
+  font-size: var(--pa-fs-sm);
+  line-height: 1.7;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-summary[hidden] {
+  display: none;
 }
 
 /* ---- A day's line */
@@ -78,7 +109,8 @@
   background: var(--pa-line);
 }
 .chat-messages > .day:first-child,
-.chat-trimmed + .day {
+.chat-messages > .chat-compacted:first-child,
+.chat-compacted + .day {
   margin-top: var(--pa-s4);
 }
 
@@ -512,8 +544,12 @@ button.att-file:hover {
   opacity: 0.55;
 }
 /* Stopped by the person: not an error, said in the quiet colour. */
-.me.stopped .msg-mark {
+.me.stopped .msg-mark,
+.me .msg-cut {
   color: var(--pa-faint);
+}
+.me .msg-cut {
+  font-weight: 400;
 }
 .notice.quiet {
   padding: 0;

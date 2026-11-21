@@ -479,7 +479,6 @@
     "wait": "Attendez d'abord la fin de cette réponse.",
     "loadFailed": "Impossible de charger la discussion. Réessayez dans un instant.",
     "reload": "Réessayer",
-    "trimmed": "Les messages plus anciens n'ont pas été conservés",
     "today": "Aujourd'hui",
     "yesterday": "Hier",
     "reply": "Répondre",
@@ -533,7 +532,12 @@
     "privateMark": "Discussion temporaire",
     "privateNote": "N'utilise ni ne met à jour la mémoire, n'est pas conservée dans l'historique et s'efface à la fermeture de l'application.",
     "privateStart": "Démarrer une discussion temporaire",
-    "privateLeave": "Quitter la discussion temporaire"
+    "privateLeave": "Quitter la discussion temporaire",
+    "compacted": "Les messages précédents ont été condensés en un résumé.",
+    "showSummary": "Voir le résumé",
+    "contextCleared": "Contexte effacé. Les messages précédents ne sont plus envoyés au modèle.",
+    "cut": "Le message dépassait ce que le modèle peut lire : le début et la fin ont été conservés.",
+    "model_window_small": "La fenêtre de contexte de ce modèle est trop petite pour la configuration de base de Mibo. Choisissez un modèle avec une fenêtre de contexte plus grande."
   },
   "compact": {
     "full": "Ouvrir dans la fenêtre principale",
@@ -706,7 +710,26 @@
       "now": "à l'instant",
       "m": "il y a {count} min",
       "h": "il y a {count} h"
-    }
+    },
+    "context": "Contexte utilisé : {p} %",
+    "contextOf": "{n} / {of} jetons",
+    "contextAbout": "Environ {n} / {of} jetons",
+    "contextParts": {
+      "system": "Consignes système",
+      "tools": "Description des outils",
+      "memory": "Mémoire",
+      "summary": "Résumé de la conversation",
+      "recent": "Messages récents"
+    },
+    "compactNow": "Résumer maintenant",
+    "compacting": "Résumé en cours…",
+    "compactNone": "Aucun message antérieur à résumer pour l'instant",
+    "compactFailed": "Le résumé n'a pas pu être rédigé. Réessayez plus tard.",
+    "clearContext": "Effacer le contexte",
+    "clearTitle": "Effacer le contexte de cette discussion ?",
+    "clearText": "Le modèle ne tiendra plus compte des messages précédents. L'historique et la mémoire restent intacts.",
+    "clearOk": "Effacer",
+    "clearFailed": "Le contexte n'a pas pu être effacé. Réessayez."
   },
   "onboard": {
     "steps": [
