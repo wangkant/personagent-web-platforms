@@ -64,6 +64,21 @@ def test_a_reasoning_model_is_asked_in_the_spelling_it_takes_from_then_on(model)
     assert len(sent) == 4 and "max_tokens" not in sent[3] and "temperature" not in sent[3]
 
 
+def test_a_routers_model_behind_another_host_is_asked_to_skip_reasoning_in_the_routers_spelling_too(model):
+    # A local pass-through or gateway to OpenRouter ignores DeepSeek's `thinking`; one that has no `reasoning` field
+    # refuses it once and is asked without it from then on.
+    model.script(fail(400, {"error": {"message": "Unrecognized request argument supplied: reasoning"}}),
+                 text(json.dumps(VERDICT)), text(json.dumps(VERDICT)), purpose="reviewer")
+    ask = review.endpoint(model.url, KEY, "deepseek/deepseek-v4.1-flash")
+
+    async def run() -> list[review.Verdict]:
+        return [await review.review(["list my desktop"], ACTION, ask=ask, lang="en") for _ in range(2)]
+    assert [v.decision for v in asyncio.run(run())] == ["go", "go"]
+    sent = [r["body"] for r in model.asked("reviewer")]
+    assert sent[0]["reasoning"] == {"enabled": False} and sent[0]["thinking"] == {"type": "disabled"}
+    assert len(sent) == 3 and "reasoning" not in sent[1] and "reasoning" not in sent[2]
+
+
 def test_an_inner_answer_cut_off_mid_json_is_asked_again_with_four_times_the_room(model):
     cut = {"content": '{"kind_asked": true, "decision": "g', "finish": "length"}
     (verdict,) = reviewed(model, cut, text(json.dumps(VERDICT)), json_mode=True)

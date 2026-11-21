@@ -66,14 +66,17 @@ def thinking_off(payload: dict, url: str, takes_thinking, lowest: str = "") -> d
     a caller that survives its refusal (`_post_chat`) passes None. `lowest` is
     the effort that lowers a model with no switch (modelcatalog.lowest_effort)."""
     router = "openrouter.ai" in (url or "")
-    if _on_host(_host(url), _ENABLE_THINKING_HOSTS):
+    qwen_host = _on_host(_host(url), _ENABLE_THINKING_HOSTS)
+    if qwen_host:
         payload["enable_thinking"] = False
     elif takes_thinking is not False and not router:
         payload["thinking"] = {"type": "disabled"}
-    if router:
+    # A vendor/model name on another host is most often a gateway in front of a router (LiteLLM, a local
+    # pass-through to OpenRouter), which ignores `thinking`: it gets the router's switch as well.
+    if router or (not qwen_host and "/" in str(payload.get("model") or "")):
         # OpenRouter's own switch for every model; the exclude/max_tokens form is 400-rejected by some upstreams.
         payload["reasoning"] = {"enabled": False}
-    elif lowest:
+    if lowest and not router:
         payload["reasoning_effort"] = lowest
     return payload
 
@@ -203,6 +206,8 @@ class ModelCalls:
             payload.pop("temperature", None)
         if ("reasoning", url, model) in quirks and payload.get("reasoning") == {"enabled": False}:
             payload["reasoning"] = {"effort": "minimal"}
+        if ("reasoning_switch", url, model) in quirks and payload.get("reasoning") == {"enabled": False}:
+            payload.pop("reasoning")
         if ("images", url, model) in quirks:
             without_pictures(payload)
         if ("response_format", url, model) in quirks:

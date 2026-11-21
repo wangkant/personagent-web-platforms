@@ -146,6 +146,10 @@ def adapt_rejected_payload(payload: dict, error_text: str) -> str:
             "reasoning is mandatory" in text or re.search(r"effort[\"' ]{0,3}none[^.\n]{0,40}not supported", text)):
         payload["reasoning"] = {"effort": "minimal"}
         return "reasoning"
+    # Or a gateway that has no such field.
+    if payload.get("reasoning") == {"enabled": False} and _refuses_field(text, "reasoning"):
+        payload.pop("reasoning")
+        return "reasoning_switch"
     if "thinking" in payload and _refuses_field(text, "thinking"):
         payload.pop("thinking")
         return "thinking"

@@ -38,6 +38,10 @@ def test_a_refused_value_keeps_its_field_and_only_a_switched_off_reasoning_is_re
     assert adapt_rejected_payload(off, mandatory) == "reasoning" and off["reasoning"] == {"effort": "minimal"}
     lowest = {"model": "m", "reasoning": {"effort": "minimal"}}
     assert adapt_rejected_payload(lowest, "Reasoning is mandatory") == "" and lowest["reasoning"] == {"effort": "minimal"}
+    # A gateway with no such field drops the switch.
+    gateway = {"model": "a/b", "reasoning": {"enabled": False}}
+    assert adapt_rejected_payload(gateway, "Unrecognized request argument supplied: reasoning") == "reasoning_switch"
+    assert "reasoning" not in gateway
 
 
 def test_the_switch_off_is_spelled_as_each_service_takes_it():
@@ -52,6 +56,10 @@ def test_the_switch_off_is_spelled_as_each_service_takes_it():
     for known in (None, True, False):
         assert thinking_off({"model": "m"}, "https://openrouter.ai/api/v1", known, "none") == {
             "model": "m", "reasoning": {"enabled": False}}
+    # A vendor/model name on another host (a gateway or pass-through in front of OpenRouter, which ignores
+    # `thinking`) gets the router's switch as well.
+    assert thinking_off({"model": "deepseek/deepseek-v4.1-flash"}, "http://127.0.0.1:4000/v1", None) == {
+        "model": "deepseek/deepseek-v4.1-flash", "thinking": off, "reasoning": {"enabled": False}}
     # DashScope and SiliconFlow take Qwen's own switch.
     assert thinking_off({"model": "qwen3.6-plus"}, "https://dashscope.aliyuncs.com/compatible-mode/v1",
                         None)["enable_thinking"] is False
