@@ -10,6 +10,10 @@ changed since) (MIT, NOTICE).
                                     a reply request's reported prompt_tokens: the anchor, and the model's ratio
     count(caller, url, model, payload)
                                     tokens of the next request: the anchor plus the ratio times what changed since
+    Fit(plan, count, ratio, pictures)
+                                    one turn's requests fitted before each is sent: a tool result held to its share
+                                    when it comes in (dsh spill-policy), then past the ceiling the older results and
+                                    the pictures tools returned cut once each (dsh compaction-tool-result-pruner)
 
 The window is measured, never looked up by a model's name; counts are the endpoint's own usage.prompt_tokens.
 """
@@ -33,6 +37,13 @@ RATIO_FIRST, RATIO_LOW, RATIO_HIGH, RATIO_WEIGHT = 1.25, 0.5, 2.0, 0.2
 # An overflow error's own statement of the window ("maximum context length is 8192 tokens").
 _STATED = re.compile(r"(?:context(?:[ _](?:length|window|size))?|maximum (?:input )?length)\D{0,24}?(\d[\d,]{2,})",
                      re.IGNORECASE)
+# One tool result at ingestion at most (dsh spill-policy's 12,500), and an older one once cut past the ceiling:
+# head and tail kept four to one, the characters left out counted where the cut is.
+RESULT_TOKENS, SMALL_TOKENS, HEAD_SHARE = 12_500, 1250, 0.8
+CUT_MARK = "\n\n[... {n} characters of this result left out ...]\n\n"
+PICTURE_GONE = "[an older picture, removed to save room; look again if it is still needed]"
+# Past the ceiling T, older results are cut until the request is under this share of it.
+FIT_TO = 0.7
 
 
 def window(rec: dict | None, setting: int = 0) -> tuple[int, str]:
@@ -69,6 +80,7 @@ class Budget:
     ceiling: int     # T: the request size that prunes a turn's older results
     message: int     # the person's newest message whole up to this
     result: int      # one tool result at ingestion at most
+    small: int       # an older tool result once cut past the ceiling
 
     def retry(self, prompt: int) -> int:
         """max_tokens for a reply cut off at the cap: four times the room, within what the window leaves."""
@@ -89,7 +101,7 @@ def budget(window: int, level: str = "", fixed: int = 0) -> Budget:
     return Budget(window=window, answer=answer, safety=safety, limit=limit, available=available,
                   turn=min(round(0.15 * available), 2000), history=history, tail=history // 2,
                   checkpoint=max(300, round(0.15 * history)), ceiling=min(round(0.85 * limit), 100_000),
-                  message=available // 2, result=12_500)
+                  message=available // 2, result=RESULT_TOKENS, small=min(SMALL_TOKENS, round(0.1 * available)))
 
 
 # ------------------------------------------------------------------ count --
@@ -175,3 +187,94 @@ def known_window(caller, url: str, model: str, setting: int = 0) -> tuple[int, s
     rec = dict(abilities.record(abilities.runtime_of(caller), url, model) or {})
     rec.update((k, v) for k, v in (_learned(caller).get((url, model)) or {}).items() if k == "context_error")
     return window(rec, setting)
+
+
+# -------------------------------------------------------------------- fit --
+
+def _within(text: str, tokens: float) -> int:
+    """How many characters from the start of `text` its estimate keeps within `tokens`."""
+    spent = 0.0
+    for n, ch in enumerate(text):
+        spent += CJK_TOKENS if _CJK.match(ch) else OTHER_TOKENS
+        if spent > tokens:
+            return n
+    return len(text)
+
+
+def cut(text: str, tokens: float) -> str:
+    """`text` within about `tokens` estimated tokens: whole when it fits, else its head and tail four to one with
+    the characters left out counted between them (dsh spill-policy's retention)."""
+    if text_tokens(text) <= tokens:
+        return text
+    room = max(0.0, tokens - text_tokens(CUT_MARK.format(n=len(text))))
+    head = text[:_within(text, HEAD_SHARE * room)]
+    tail = text[len(text) - _within(text[::-1], room - text_tokens(head)):] if room else ""
+    return head + CUT_MARK.format(n=len(text) - len(head) - len(tail)) + tail
+
+
+class Fit:
+    """One turn's requests fitted to the budget `plan` before each is sent (context-design's fit ladder). A tool
+    result is held to its share when it comes in: RESULT_TOKENS, or less when its round alone would pass the
+    ceiling T and shares FIT_TO of what is left under it. Past T, older results and the pictures tools returned
+    are cut once each, oldest first, to their small size until the request is under FIT_TO of T; the newest round
+    is left whole. `count(convo)` is the
+    request's tokens with `convo` as its conversation, `ratio` the endpoint's tokens per estimated one, and a user
+    message whose first words are `pictures` holds pictures a tool returned (the person's own are never cut)."""
+
+    def __init__(self, plan: Budget, count, ratio: float, pictures: str) -> None:
+        self.plan, self.count, self.ratio, self.pictures = plan, count, ratio, pictures
+        # Results already held to their share, and messages already cut, by identity.
+        self.seen: set[int] = set()
+        self.cut: set[int] = set()
+        self.rewrites = 0
+
+    def _returned(self, message: dict) -> bool:
+        content = message.get("content")
+        return (message.get("role") == "user" and isinstance(content, list) and bool(content)
+                and content[0].get("text") == self.pictures)
+
+    def _shrink(self, message: dict) -> float:
+        """Cut one result or one message of returned pictures to its small size; the estimated tokens saved."""
+        before = message_tokens(message)
+        if message.get("role") == "tool":
+            message["content"] = cut(message["content"], self.plan.small)
+        else:
+            message["content"] = [{"type": "text", "text": PICTURE_GONE} if p.get("type") == "image_url" else p
+                                  for p in message["content"]]
+        self.cut.add(id(message))
+        return before - message_tokens(message)
+
+    def __call__(self, convo: list[dict]) -> bool:
+        """Fit `convo` in place for its next request; whether that request is within the input limit L."""
+        plan, ratio = self.plan, self.ratio
+        start = max((n for n, m in enumerate(convo) if m.get("tool_calls")), default=len(convo))
+        fresh = [m for m in convo[start:] if m.get("role") == "tool" and id(m) not in self.seen]
+        for message in fresh:
+            message["content"] = cut(message["content"], plan.result / ratio)
+        total = self.count(convo)
+        if total > plan.ceiling:
+            for message in convo[:start]:
+                if total < FIT_TO * plan.ceiling:
+                    break
+                if id(message) in self.cut or not (message.get("role") == "tool" or self._returned(message)):
+                    continue
+                if message.get("role") == "tool" and text_tokens(message["content"]) <= plan.small:
+                    continue
+                total -= ratio * self._shrink(message)
+                self.rewrites += 1
+        if total > plan.ceiling and fresh:
+            # The newest round shares FIT_TO of what is left under T, a small result taking only what it needs: new
+            # text is where the estimate errs (a Chinese wiki page counted 1.36 times its estimate on DeepSeek).
+            left = FIT_TO * ((plan.ceiling - total) / ratio + sum(text_tokens(m["content"]) for m in fresh))
+            for n, message in enumerate(sorted(fresh, key=lambda m: len(m["content"]))):
+                message["content"] = cut(message["content"], max(0.0, left / (len(fresh) - n)))
+                left -= text_tokens(message["content"])
+            total = self.count(convo)
+        self.seen.update(map(id, fresh))
+        return total <= plan.limit
+
+    def last(self, convo: list[dict]) -> None:
+        """For a turn's last call when its request cannot fit: every result and returned picture cut small."""
+        for message in convo:
+            if id(message) not in self.cut and (message.get("role") == "tool" or self._returned(message)):
+                self._shrink(message)

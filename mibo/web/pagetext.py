@@ -14,7 +14,7 @@ is answered; a question over a whole list (the largest, a count) loads the rest 
 are the last resort. Every reading says what it read and what it left, so a reply never claims a whole page it
 read a part of.
 
-    room(able, answer)                 tokens of page one call may carry, from abilities.record's window
+    room(plan)                         tokens of page one call may carry, from the model's budget (context.budget)
     clean(text)                        the page's lines with repeated chrome dropped
     give(text, question, room, ...)    what a tool hands the chat model: the page whole, a section, or the outline
                                        and the lines that match
@@ -30,12 +30,11 @@ import re
 from collections import Counter
 from typing import Awaitable, Callable, Optional
 
-# The window (tokens) a model with no record is taken to have, the part of it the instructions and the question
-# around a page take, and the share of the rest a page read may take; one call never carries more than PAGE_MOST
-# tokens of page (Anthropic's web fetch shows 100000 as its content cap). No context design was written for the
-# app when this was set (work/mibo-migration/context-design.json absent on 2026-11-21): a plain half of the
-# measured window, after the answer's room.
-LEAST_CONTEXT = 8192
+from .. import context
+
+# The part of the model's input limit (context.Budget.limit) the instructions and the question around a page take,
+# and the share of the rest a page read may take; one call never carries more than PAGE_MOST tokens of page
+# (Anthropic's web fetch shows 100000 as its content cap).
 PROMPT_TOKENS = 1500
 SHARE = 0.5
 PAGE_MOST = 100_000
@@ -56,7 +55,6 @@ AT_ONCE = 4
 ROUNDS = 2
 RESULT_MAX = 4000
 SEP = re.compile(r"\|( --- \|)+")
-WIDE = re.compile(r"[⺀-鿿가-힯぀-ヿ豈-﫿＀-￯]")
 # Characters that end a run of a CJK question's terms: words that ask rather than name.
 ASKING = set("的了是在我你他她它这那哪个些吗呢啊和与及或也都就还把被给对从向到为上下里中么什怎多少几谁请帮看告诉说一有没")
 STOP = {"the", "a", "an", "of", "on", "in", "to", "is", "are", "was", "what", "which", "who", "how", "this", "that",
@@ -85,16 +83,14 @@ it>"}"""
 
 
 def tokens(text: str) -> int:
-    """About how many tokens `text` takes: a CJK character one, other characters three and a half to a token."""
-    wide = len(WIDE.findall(text))
-    return wide + math.ceil((len(text) - wide) / 3.5)
+    """About how many tokens `text` takes, by the chat's own estimate (context.text_tokens)."""
+    return math.ceil(context.text_tokens(text))
 
 
-def room(able: Optional[dict], answer: int) -> int:
-    """Tokens of page one call may carry: half of the model's measured window (abilities.record's context; no
-    record: LEAST_CONTEXT) after the answer's room and the prompt, at most PAGE_MOST."""
-    context = int((able or {}).get("context") or 0) or LEAST_CONTEXT
-    return max(1000, min(PAGE_MOST, int((context - answer - PROMPT_TOKENS) * SHARE)))
+def room(plan) -> int:
+    """Tokens of page one call may carry: half of the model's input limit (`plan`, a context.Budget) after the
+    prompt around the page, at most PAGE_MOST."""
+    return max(1000, min(PAGE_MOST, int((plan.limit - PROMPT_TOKENS) * SHARE)))
 
 
 def clean(text: str) -> str:

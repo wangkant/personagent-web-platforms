@@ -143,26 +143,63 @@ def test_the_reviewer_ends_acting_at_three_refusals_in_a_row_or_twenty_in_a_turn
     assert stopped.refused()
 
 
-def test_older_results_are_pruned_in_the_middle_and_the_newest_kept_whole():
-    convo = [{"role": "tool", "tool_call_id": str(n), "content": str(n) * 20_000} for n in range(4)]
-    loop.prune(convo, 30_000)
-    sizes = [len(m["content"]) for m in convo]
-    assert sizes[-1] == 20_000 and max(sizes[:-1]) < 8_300
-    assert "characters truncated from the middle of this result" in convo[0]["content"]
-    assert convo[0]["content"].startswith("0") and convo[0]["content"].endswith("0")
+def _long_page(n: int, chars: int = 20_000) -> str:
+    # A page of distinct Chinese lines, none repeated, so no line is dropped as the page's chrome.
+    lines = ("".join(chr(0x4E00 + (n * 997 + i * 131 + j * 7) % 20000) for j in range(100))
+             for i in range(chars // 100))
+    body = "".join(f"<p>{line}</p>" for line in lines)
+    return f"<html><head><title>{n}</title></head><body>{body}</body></html>"
 
 
-def test_pictures_the_tools_returned_older_than_the_latest_two_become_a_line():
-    picture = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA"}}
-    returned = {"type": "text", "text": loop.TOOL_PICTURES}
-    convo = [{"role": "user", "content": [{"type": "text", "text": "compare"}, picture, picture, picture]},
-             {"role": "user", "content": [returned, picture, picture]},
-             {"role": "user", "content": [returned, picture]}]
-    loop.prune(convo, 60_000)
-    kinds = [[p["type"] for p in m["content"]] for m in convo]
-    # Their own pictures stay whatever the tools brought after them.
-    assert kinds == [["text", "image_url", "image_url", "image_url"], ["text", "text", "image_url"],
-                     ["text", "image_url"]]
+def _rewrites(bodies: list) -> dict:
+    """How many times each result changed after it was first sent."""
+    sent: dict = {}
+    for body in bodies:
+        for message in body["messages"]:
+            if message.get("role") == "tool":
+                sent.setdefault(message["tool_call_id"], []).append(message["content"])
+    return {ident: sum(a != b for a, b in zip(seen, seen[1:])) for ident, seen in sent.items()}
+
+
+@pytest.mark.parametrize("window", [16384, 65536])
+def test_ten_long_page_reads_at_once_still_get_an_answer_within_the_window(app, site, turn, window):
+    app.model.window = window
+    measured(app, context=window)
+    pages = [site.put(f"/long{n}", _long_page(n)) for n in range(10)]
+    done = turn("读这十个页面", [call("read_page", url=page) for page in pages], say("读完了。"))
+    assert done.reply == "读完了。"
+    # The stand-in refuses a request past its window: every one fitted, with its answer's room.
+    assert all(tokens(b) + b["max_tokens"] <= window for b in done.asked())
+    assert all(done.result_of(c["id"]) for c in done.calls())
+
+
+def test_reads_after_reads_each_result_is_cut_at_most_once_and_the_newest_reads_stay_whole(
+        app, site, turn):
+    app.model.window = 65536
+    measured(app, context=65536)
+    pages = [site.put(f"/long{n}", _long_page(n)) for n in range(12)]
+    done = turn("一轮一轮地读", *[[call("read_page", url=page) for page in pages[k:k + 3]] for k in range(0, 12, 3)],
+                say("读完了。"))
+    bodies = done.asked()
+    assert done.reply == "读完了。" and all(tokens(b) + b["max_tokens"] <= 65536 for b in bodies)
+    rewrites = _rewrites(bodies)
+    assert max(rewrites.values()) == 1
+    last = [m for m in bodies[-1]["messages"] if m.get("role") == "tool"]
+    older = [m["content"] for m in last[:-3] if rewrites[m["tool_call_id"]]]
+    assert older and min(len(m["content"]) for m in last[-3:]) > max(map(len, older))
+
+
+def test_a_turn_too_large_for_the_window_with_its_tools_is_answered_without_them(app, turn):
+    app.model.window = 16384
+    measured(app, context=16384)
+    logs = [{"kind": "file", "name": f"log{k}.txt", "data": base64.b64encode(" ".join(
+        f"line {n} of log {k}" for n in range(470)).encode()).decode()} for k in range(3)]
+    done = turn("Where does it fail?", say("That log is long; the error is near the end."), attachments=logs)
+    # One last call, without the tool definitions, that fits the window with its answer's room.
+    (body,) = done.asked()
+    assert "tools" not in body and body["messages"][-1]["content"] == loop.ANSWER_NOW
+    assert tokens(body) + body["max_tokens"] <= 16384
+    assert done.reply == "That log is long; the error is near the end."
 
 
 def test_the_pictures_they_attach_reach_the_model_whole(turn):

@@ -100,7 +100,8 @@ from pathlib import Path
 from typing import Awaitable, Callable, Optional
 from urllib.parse import parse_qsl, unquote_plus, urlencode, urlsplit, urlunsplit
 
-from . import gate, signin
+from .. import context
+from . import gate, pagetext, signin
 from .pageops import STATE_MAX, STATE_MOST, Page, Refused, chord, clip, fold, quote, view_of
 
 logger = logging.getLogger("mibo.web")
@@ -122,9 +123,9 @@ REPEATS_NOTE = 3
 REPEATS_MAX = 5
 # Presses of one control in one click (`times`): a stepper's +, a calendar's next-month arrow.
 TIMES_MAX = 24
-# A context window this large (tokens, as the host states it) gives a page an eighth of it in characters, up to
+# A context window this large (tokens, from context.window) gives a page an eighth of it in characters, up to
 # pageops.STATE_MOST, and an answer ANSWER_MOST tokens, so done's result can carry what was read (RESULT_MAX
-# characters); a smaller or unstated one, the least.
+# characters); a smaller one, the least.
 ROOMY = 32_000
 ANSWER_LEAST = 900
 ANSWER_MOST = 3000
@@ -2039,18 +2040,19 @@ async def look_at(page: Page, most: int, *, ref: Optional[int] = None, interacti
     return found
 
 
-def budget(able: Optional[dict]) -> dict:
+def budget(able: Optional[dict], setting: int = 0) -> dict:
     """What a run may take, from the model as the app's check measured it (abilities.record: whether it called a
-    tool by itself, the context window its host states), never from its name: model calls before the person is
-    asked whether to go on, actions, actions in one reply, characters of the page a call carries, tokens of an
-    answer. No record: the least able model's."""
+    tool by itself) and its budget (context.budget over context.window: the person's CONTEXT_WINDOW `setting`,
+    the host's figure, an overflow's, else the assumed window), never from its name: model calls before the person
+    is asked whether to go on, actions, actions in one reply, characters of the page a call carries, tokens of an
+    answer, and tokens of page a reading call carries (web/pagetext.room)."""
     able = able or {}
     own = able.get("tools") == "yes"
-    context = int(able.get("context") or 0)
+    plan = context.budget(context.window(able, setting)[0])
     calls = CALLS_MOST if own else CALLS_MAX
     return {"calls": calls, "actions": 2 * calls + 1, "at_once": ACTIONS_AT_ONCE * (2 if own else 1),
-            "page": min(STATE_MOST, max(STATE_MAX, context // 8)),
-            "answer": ANSWER_MOST if context >= ROOMY else ANSWER_LEAST}
+            "page": min(STATE_MOST, max(STATE_MAX, plan.window // 8)),
+            "answer": ANSWER_MOST if plan.window >= ROOMY else ANSWER_LEAST, "read": pagetext.room(plan)}
 
 
 def parse(answer: str, at_once: int = ACTIONS_AT_ONCE) -> tuple[str, list[dict], str]:
@@ -2155,15 +2157,14 @@ def _signature(action: dict, page: str) -> str:
 
 
 async def read_page(ask_model, hands, action: dict, question: str, able: Optional[dict],
-                    last: Optional[dict] = None) -> dict:
+                    last: Optional[dict] = None, setting: int = 0) -> dict:
     """The `read` action made: the page's words from `hands` (what its document holds now, the page not scrolled;
-    a list that draws only the rows in view read through), read for `question` by web/pagetext.py in the room `able`'s measured window leaves, more of the page loaded through
+    a list that draws only the rows in view read through), read for `question` by web/pagetext.py in the room `budget(able, setting)` gives, more of the page loaded through
     `hands` only when the answer needs it. The act's result with "answer", "found" (yes, no or partly), "calls"
     (the model calls the reading took), "read" (what was read and what was left), "sections" and "text" (the words
     the model saw). `last` keeps a run's last reading: the same read of a page whose words have not changed since
     gives that reading again with no model call and says so, as the reply loop answers an identical call made
     again (loop._REPEATED)."""
-    from . import pagetext
     result = await hands.act(action)
     if result.get("status") != "ok":
         return {**result, "answer": "", "found": "", "calls": 0, "read": "", "sections": [], "text": ""}
@@ -2180,7 +2181,7 @@ async def read_page(ask_model, hands, action: dict, question: str, able: Optiona
         return {**result, **before, "calls": 0, "text": "",
                 "read": f"{before['read']}; the same read as the last, on a page whose words have not changed since: "
                         f"its answer stands, nothing was read again"}
-    reading = await pagetext.answer(ask_model, question, text, pagetext.room(able, budget(able)["answer"]),
+    reading = await pagetext.answer(ask_model, question, text, budget(able, setting)["read"],
                                     more=more, goes_on=bool(result.get("goes_on")),
                                     look_for=str(action.get("look_for") or ""), part=part)
     if last is not None:
@@ -2191,14 +2192,16 @@ async def read_page(ask_model, hands, action: dict, question: str, able: Optiona
 async def run(ask_model: Callable[[str, list[dict]], Awaitable[str]], hands, task: str, *,
               runtime: Optional[Path] = None, before: Optional[list[str]] = None,
               on_step: Callable[[str], None] = lambda note: None,
-              sees: Callable[[], bool] = lambda: False, said: str = "", able: Optional[dict] = None) -> dict:
+              sees: Callable[[], bool] = lambda: False, said: str = "", able: Optional[dict] = None,
+              setting: int = 0) -> dict:
     """Do `task` in the pane. Returns {"status", "result", "steps", "calls", "kind", "outside", "proof"}: status
     is done, failed, declined, waiting (a card's time ran out with it still up: the result is the act it waits on,
     in the person's words, and the card stays answerable), handover (a wall, a secret field, a page it cannot
     work, nothing moving), asked (a
     question for the person), paused (the person took the page), stopped, or cap (the ceiling of `budget(able)`
     reached with the task unfinished: the result is what is left, and the person says 继续 to go on with a fresh
-    ceiling). `able` is the model's record from the app's check (abilities.record). Done is never the model's word alone: `proof`
+    ceiling). `able` is the model's record from the app's check (abilities.record), `setting` the person's
+    CONTEXT_WINDOW for it. Done is never the model's word alone: `proof`
     says what bore it out, "press" (something went out on the person's yes and nothing typed is left unsent),
     "page" (the words it gave in `expect` show on the page) or "judge" (one more model call over the steps and
     the page, asked only when neither holds); a done the judge found wanting and that then came again with
@@ -2209,7 +2212,7 @@ async def run(ask_model: Callable[[str, list[dict]], Awaitable[str]], hands, tas
     sees both."""
     from ..roam import fence_pages
     said = clip(" ".join(re.sub(r"[\x00-\x1f]", " ", str(said or "")).split()), 400)
-    limits = budget(able)
+    limits = budget(able, setting)
     rules = RULES.replace("{at_once}", str(limits["at_once"]))
     history: list[str] = list(before or [])
     # What the model kept from pages it has left, for a task that needs two pages.
@@ -2432,7 +2435,7 @@ async def run(ask_model: Callable[[str, list[dict]], Awaitable[str]], hands, tas
                           "something else"}
             elif do == "read":
                 question = " ".join(str(action.get("question") or action.get("text") or said or task).split())[:300]
-                result = await read_page(ask_model, hands, action, question, able, last_read)
+                result = await read_page(ask_model, hands, action, question, able, last_read, setting)
             else:
                 result = await hands.act(action)
             if result.get("still"):

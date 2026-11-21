@@ -9,6 +9,7 @@ import re
 
 import pytest
 
+from mibo import context
 from mibo.web import operate, pagetext
 
 # A profile as a short-video site draws it: its numbers in the first screen, a feed of cards below.
@@ -124,21 +125,25 @@ async def test_a_section_the_model_names_is_read_whole() -> None:
 
 
 async def test_pieces_side_by_side_only_when_too_long_and_the_question_needs_all_of_it() -> None:
-    table = "| 标题 | 阅读 |\n| --- | --- |\n" + "\n".join(f"| 文章{n} | {1000 + n} |" for n in range(600))
+    table = "| 标题 | 阅读 |\n| --- | --- |\n" + "\n".join(f"| 文章{n} | {1000 + n} |" for n in range(1500))
     pieces = len(pagetext.pieces(pagetext.clean(table), pagetext._chars(table, 3000)))
     model = Model({"answer": "", "found": "partly", "section": 0, "look_for": ""},
-                  *[{"found": f"文章{n}"} for n in range(pieces)], {"answer": "文章599 · 1599"})
+                  *[{"found": f"文章{n}"} for n in range(pieces)], {"answer": "文章1499 · 2499"})
     got = await pagetext.answer(model, "哪篇阅读最高", table, 3000)
-    assert got["calls"] == 1 + pieces + 1 and got["answer"] == "文章599 · 1599"
+    assert got["calls"] == 1 + pieces + 1 and got["answer"] == "文章1499 · 2499"
     # Every piece keeps the table's header row.
     assert all("| 标题 | 阅读 |" in sent for system, sent in model.sent if system == pagetext.PART)
 
 
 def test_the_room_follows_the_window_the_app_measured() -> None:
-    small, large = pagetext.room({"context": 32_000}, 900), pagetext.room({"context": 128_000}, 3000)
+    small, large = pagetext.room(context.budget(32_000)), pagetext.room(context.budget(128_000))
     assert small < large <= pagetext.PAGE_MOST
-    assert pagetext.room(None, 900) == pagetext.room({"context": pagetext.LEAST_CONTEXT}, 900) < small
-    assert pagetext.room({"context": 2_000_000}, 3000) == pagetext.PAGE_MOST
+    assert pagetext.room(context.budget(2_000_000)) == pagetext.PAGE_MOST
+    # An errand's reading takes its room from the same budget: the host's window, the person's setting over it, and
+    # the assumed window when nothing states one.
+    assert operate.budget({"context": 128_000})["read"] == large
+    assert operate.budget({"context": 1_000_000}, setting=32_000)["read"] == small
+    assert operate.budget(None)["read"] == pagetext.room(context.budget(context.ASSUMED))
 
 
 def test_repeated_chrome_goes_and_numbers_and_rows_stay() -> None:

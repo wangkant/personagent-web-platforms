@@ -439,11 +439,12 @@ class WebSearch:
         from . import abilities
         # The model as the app's check measured it: the run's ceiling, page and answer room (operate.budget).
         able = abilities.record(today.runtime_of(self), self._endpoint_for(self.llm_dm_model)[0], self.llm_dm_model)
+        setting = self._setting(self.llm_dm_model)
 
         async def ask_model(system: str, messages: list[dict]) -> str:
             with purpose("operate"):
                 return await self._call_llm(system, messages, self.llm_dm_model,
-                                            max_tokens=operate.budget(able)["answer"],
+                                            max_tokens=operate.budget(able, setting)["answer"],
                                             disable_thinking=True, temperature=0.2,
                                             json_object=True)
 
@@ -463,7 +464,8 @@ class WebSearch:
         try:
             outcome = await operate.run(ask_model, Pane(), task, runtime=today.runtime_of(self), before=before,
                                         on_step=lambda note: lookups.doing("operate", note),
-                                        sees=self._shows_pictures, said=lookups.said, able=able)
+                                        sees=self._shows_pictures, said=lookups.said, able=able,
+                                        setting=setting)
         finally:
             if outcome["status"] == "failed" and not outcome["result"]:
                 # Stopped from the chat: the pane hears it now, not at the end of a step that never comes.
@@ -553,12 +555,12 @@ class WebSearch:
                 + fence_pages(f"{facts}\n{' '.join((item.description or item.text).split())[:400]}"))
 
     def _page_room(self) -> int:
-        """Tokens of page one tool result may carry (web/pagetext.room), from the reply model as the app's check
-        measured it."""
-        from . import abilities
-        from .web import operate, pagetext
-        able = abilities.record(today.runtime_of(self), self._endpoint_for(self.llm_dm_model)[0], self.llm_dm_model)
-        return pagetext.room(able, operate.budget(able)["answer"])
+        """Tokens of page one tool result may carry: the reader's room in the reply model's budget
+        (web/pagetext.room), within the share one result takes in the turn (context.Budget.result), so a long page
+        comes as its outline and the lines that match rather than cut blind."""
+        from .web import pagetext
+        plan = self._budget(self._endpoint_for(self.llm_dm_model)[0], self.llm_dm_model)
+        return min(pagetext.room(plan), plan.result)
 
     async def _read_for_chat(self, url: str, said: str = "") -> tuple[str, str, str] | None:
         """(title, readable text, final address) of a public page (web/fetch.py): fetched plainly, and read

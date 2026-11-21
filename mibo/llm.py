@@ -315,12 +315,16 @@ class ModelCalls:
             return None
         return abilities.reply_effort(abilities.runtime_of(self), url, model)
 
-    def _budget(self, url: str, model: str, effort=None) -> context.Budget:
-        """The request budget of `model` at `url` (context.py), replies thinking at `effort`'s level; the person's
-        CONTEXT_WINDOW is the window of every model but a fallback served apart (endpoints.endpoint_for)."""
-        apart = model == self.llm_fallback_model and model != self.model
-        window, _ = context.known_window(self, url, model, 0 if apart else self.context_window)
-        return context.budget(window, effort[0] if effort else "")
+    def _setting(self, model: str) -> int:
+        """The person's CONTEXT_WINDOW as `model`'s window: every model's but a fallback served apart
+        (endpoints.endpoint_for)."""
+        return 0 if model == self.llm_fallback_model and model != self.model else self.context_window
+
+    def _budget(self, url: str, model: str, effort=None, fixed: int = 0) -> context.Budget:
+        """The request budget of `model` at `url` (context.py), replies thinking at `effort`'s level, with `fixed`
+        tokens of system prompt and tool definitions."""
+        window, _ = context.known_window(self, url, model, self._setting(model))
+        return context.budget(window, effort[0] if effort else "", fixed)
 
     def _shows_pictures(self) -> bool:
         """Whether a turn's pictures go to the reply model itself: not while a
