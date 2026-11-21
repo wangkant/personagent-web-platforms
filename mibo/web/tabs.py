@@ -236,36 +236,37 @@ class PaneTab(_BlockingTab):
     and a suspended page is resumed first. Read in place (read.read with here=True) or operated (pageops);
     it never moves the person's page except when they asked for something to be done in it.
 
-    It is always the pane's tab in front: every call, the address and the frames go to the view that tab shows
+    It is the pane's tab in front: every call, the address and the frames go to the view that tab shows
     (`pane._core`). A run acts on that tab only; the pane pauses it when another tab comes to the front, and a
-    run that goes on starts its listeners there.
+    run that goes on starts its listeners there. With `tab`, a tab's number, it is that tab wherever it is: a page
+    the character opened out of sight (surface.py's look reads it so).
 
     Frames from another site are attached in that view, as Target.setAutoAttach with flatten gives them, and
     called through WebView2's session calls; when another tab comes to the front, `frames()` starts over there."""
 
-    def __init__(self, pane: Any):
+    def __init__(self, pane: Any, tab: int = 0):
         super().__init__()
-        self.pane = pane
+        self.pane, self.tab = pane, tab
         # The view whose frames are attached, and their sessions: id -> made ready (Fetch, the frames under it).
         self._view: Any = None
         self._frames: dict[str, bool] = {}
 
     @property
     def url(self) -> str:
-        return self.pane.address()
+        return self.pane.address(self.tab)
 
     def _call(self, method: str, params: dict, session: str) -> dict:
-        return self.pane.cdp(method, params, session=session)
+        return self.pane.cdp(method, params, session=session, tab=self.tab)
 
     def _attached(self) -> list[str]:
         return list(self._frames)
 
     async def frames(self) -> list[str]:
-        view = self.pane._core
+        view = self.pane.core_of(self.tab)
         if view is not self._view:
             self._view, self._frames = view, {}
-            await asyncio.to_thread(self.pane.listen, "Target.attachedToTarget", self._on_attached, True)
-            await asyncio.to_thread(self.pane.listen, "Target.detachedFromTarget", self._on_detached, True)
+            await asyncio.to_thread(self.pane.listen, "Target.attachedToTarget", self._on_attached, True, self.tab)
+            await asyncio.to_thread(self.pane.listen, "Target.detachedFromTarget", self._on_detached, True, self.tab)
             # Off and on again: the frames there already are attached anew, for this tab.
             await self.cdp("Target.setAutoAttach", {"autoAttach": False, "waitForDebuggerOnStart": False})
             await self.cdp("Target.setAutoAttach", AUTO_ATTACH)
@@ -313,13 +314,13 @@ class PaneTab(_BlockingTab):
             await self.cdp("Page.enable", {})
             await asyncio.to_thread(self.pane.listen, event, lambda params: handler(
                 {"url": (params.get("frame") or {}).get("url", self.url)}) if name == "load" or not (
-                params.get("frame") or {}).get("parentId") else None)
+                params.get("frame") or {}).get("parentId") else None, False, self.tab)
         elif name.startswith("Fetch."):
             # Fetch events come from the page and from its frames: each answer goes back where it came from.
             await asyncio.to_thread(self.pane.listen, name, lambda params, session: (
-                self._heard(session, params), handler(params)), True)
+                self._heard(session, params), handler(params)), True, self.tab)
         else:
-            await asyncio.to_thread(self.pane.listen, name, handler)
+            await asyncio.to_thread(self.pane.listen, name, handler, False, self.tab)
 
     async def close(self) -> None:
         # The person's pane stays: it closes when they close it.

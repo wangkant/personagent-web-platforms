@@ -101,7 +101,7 @@ from typing import Awaitable, Callable, Optional
 from urllib.parse import parse_qsl, unquote_plus, urlencode, urlsplit, urlunsplit
 
 from . import gate, signin
-from .pageops import STATE_MAX, STATE_MOST, Page, Refused, chord, clip, fold, quote
+from .pageops import STATE_MAX, STATE_MOST, Page, Refused, chord, clip, fold, quote, view_of
 
 logger = logging.getLogger("mibo.web")
 
@@ -1166,39 +1166,7 @@ class Hands:
         return found
 
     async def picture(self) -> dict:
-        """The pane as the person sees it, in the page's own pixels, with each control and clickable thing of the
-        last look boxed under its id; nothing else drawn on it."""
-        from PIL import Image, ImageDraw
-        metrics = await self.page.cdp("Page.getLayoutMetrics")
-        view = metrics.get("cssVisualViewport") or {}
-        wide, high = float(view.get("clientWidth") or 1280), float(view.get("clientHeight") or 800)
-        shot = await self.page.cdp("Page.captureScreenshot", format="png", clip={
-            "x": float(view.get("pageX") or 0), "y": float(view.get("pageY") or 0), "width": wide, "height": high,
-            "scale": 1})
-        image = Image.open(io.BytesIO(base64.b64decode(shot["data"]))).convert("RGB")
-        if image.size != (round(wide), round(high)):
-            # A scaled display gives device pixels: the picture is brought to the page's own pixels, so a point
-            # read off it and a click mean the same place.
-            image = image.resize((round(wide), round(high)), Image.LANCZOS)
-        draw = ImageDraw.Draw(image)
-        boxed = 0
-        for ident, (role, _name) in list(self.page.last.items()):
-            if role in ("scrollable", "text"):
-                continue
-            try:
-                b = await self.page.box(ident)
-            except Exception:
-                continue
-            if b["w"] < 4 or b["h"] < 4 or b["x"] + b["w"] < 0 or b["y"] + b["h"] < 0 or b["x"] > wide or b["y"] > high:
-                continue
-            boxed += 1
-            draw.rectangle([b["x"], b["y"], b["x"] + b["w"], b["y"] + b["h"]], outline=(255, 90, 0), width=2)
-            draw.rectangle([b["x"], b["y"] - 13, b["x"] + 8 + 7 * len(str(ident)), b["y"]], fill=(255, 90, 0))
-            draw.text((b["x"] + 3, b["y"] - 13), str(ident), fill=(255, 255, 255))
-        out = io.BytesIO()
-        image.save(out, format="JPEG", quality=80)
-        return {"status": "ok", "picture": base64.b64encode(out.getvalue()).decode(), "boxed": boxed,
-                "size": [round(wide), round(high)]}
+        return await picture_of(self.page)
 
     # --- acting
 
@@ -1992,6 +1960,81 @@ class Remote:
 
     async def end(self, status: str, note: str) -> None:
         await asyncio.to_thread(self._post, "end", 10, status=status, note=note)
+
+
+async def picture_of(page: Page) -> dict:
+    """The page as it stands in its view, in its own pixels, with each control and clickable thing of the last
+    look boxed under its id; nothing else drawn on it."""
+    from PIL import Image, ImageDraw
+    metrics = await page.cdp("Page.getLayoutMetrics")
+    view = metrics.get("cssVisualViewport") or {}
+    wide, high = float(view.get("clientWidth") or 1280), float(view.get("clientHeight") or 800)
+    shot = await page.cdp("Page.captureScreenshot", format="png", clip={
+        "x": float(view.get("pageX") or 0), "y": float(view.get("pageY") or 0), "width": wide, "height": high,
+        "scale": 1})
+    image = Image.open(io.BytesIO(base64.b64decode(shot["data"]))).convert("RGB")
+    if image.size != (round(wide), round(high)):
+        # A scaled display gives device pixels: the picture is brought to the page's own pixels, so a point
+        # read off it and a click mean the same place.
+        image = image.resize((round(wide), round(high)), Image.LANCZOS)
+    draw = ImageDraw.Draw(image)
+    boxed = 0
+    for ident, (role, _name) in list(page.last.items()):
+        if role in ("scrollable", "text"):
+            continue
+        try:
+            b = await page.box(ident)
+        except Exception:
+            continue
+        if b["w"] < 4 or b["h"] < 4 or b["x"] + b["w"] < 0 or b["y"] + b["h"] < 0 or b["x"] > wide or b["y"] > high:
+            continue
+        boxed += 1
+        draw.rectangle([b["x"], b["y"], b["x"] + b["w"], b["y"] + b["h"]], outline=(255, 90, 0), width=2)
+        draw.rectangle([b["x"], b["y"] - 13, b["x"] + 8 + 7 * len(str(ident)), b["y"]], fill=(255, 90, 0))
+        draw.text((b["x"] + 3, b["y"] - 13), str(ident), fill=(255, 255, 255))
+    out = io.BytesIO()
+    image.save(out, format="JPEG", quality=80)
+    return {"status": "ok", "picture": base64.b64encode(out.getvalue()).decode(), "boxed": boxed,
+            "size": [round(wide), round(high)]}
+
+
+async def look_at(page: Page, most: int, *, ref: Optional[int] = None, interactive: bool = False, find: str = "",
+                  start: int = 0, picture: bool = False) -> dict:
+    """A look at a page with no errand under way (surface.py's look): its print or a part of it, what was left out
+    and why, what the app noticed on it (hints from WALL_JS and signin.CHECK_JS, never a verdict), and with
+    `picture` the page as it stands. Nothing on the page is pressed and no request of it is held."""
+    state = await page.state(min(max(int(most), STATE_MAX), STATE_MOST))
+    probe = await page._evaluate("() => ({url: location.href, title: document.title})") or {}
+    left = [f"lines {a + 1}-{b} are not shown (report_limit): look from {a + 1} goes on, or find" for a, b in page.cut]
+    if ref is not None or interactive or find or start:
+        state, part = view_of(page.lines, page.spans, ref=ref, interactive=interactive, find=find, start=start,
+                              most=most)
+        left = [part] if part else []
+    if page.secrets:
+        left.append(f"what {len(page.secrets)} secret fields hold is masked (private)")
+    if any(line.startswith("--- frame") and "for the person" in line for line in page.lines):
+        left.append("payment and sign-in frames are not read (private)")
+    noticed = []
+    try:
+        wall = await page._evaluate(WALL_JS) or {}
+        judged = signin.judge(wall, await page._evaluate(signin.CHECK_JS) or {}, None, False)
+    except Exception:
+        judged = {}
+    if judged.get("kind") == "verification":
+        noticed.append(f"a check for people is on the page ({clip(judged.get('evidence', ''), 80)})")
+    elif judged.get("kind"):
+        noticed.append(f"the page asks them to sign in ({clip(judged.get('evidence', ''), 80)})")
+    if judged.get("prompt"):
+        noticed.append(f"a sign-in box that can be closed is over the page (“{clip(judged['prompt'], 60)}”)")
+    if page.secrets:
+        noticed.append("a password field")
+    if judged.get("drawn"):
+        noticed.append("a drawn part (canvas, map or game) the lines cannot show: picture shows it")
+    found = {"status": "ok", "state": state, "url": probe.get("url", ""), "title": probe.get("title", ""),
+             "omitted": "; ".join(left), "noticed": "; ".join(noticed)}
+    if picture:
+        found["picture"] = (await picture_of(page))["picture"]
+    return found
 
 
 def budget(able: Optional[dict]) -> dict:

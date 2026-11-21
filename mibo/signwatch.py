@@ -219,8 +219,9 @@ class _Blank:
         view = WebView2()
         properties = CoreWebView2CreationProperties()
         properties.UserDataFolder = str(self.folder / "webview")
-        from .browser import language
+        from .browser import BROWSER_ARGS, language
         properties.Language = language()
+        properties.AdditionalBrowserArguments = BROWSER_ARGS
         view.CreationProperties = properties
         view.Visible = False
         self.view = view

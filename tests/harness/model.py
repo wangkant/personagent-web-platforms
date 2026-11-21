@@ -55,7 +55,7 @@ def text(words: str) -> dict:
     return {"content": words}
 
 
-def call(name: str, **args) -> dict:
+def call(name: str, /, **args) -> dict:
     """One tool call. Put several in a list to make them one round."""
     return {"call": {"name": name, "arguments": args}}
 

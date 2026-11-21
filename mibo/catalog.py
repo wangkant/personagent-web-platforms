@@ -9,7 +9,7 @@ import json
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
-from . import context, mcp_offer, pastchats, schedule_tool, search
+from . import context, mcp_offer, pastchats, schedule_tool, search, surface
 from .desk import tool as desk_tool
 from .shell import tool as shell_tool
 from .skills import tool as skill_tool
@@ -51,6 +51,10 @@ async def _web(agent, called: dict, args: dict, lookups) -> str:
     return await agent._web_tool(called["name"], args, lookups)
 
 
+async def _place(agent, called: dict, args: dict, lookups) -> str:
+    return await surface.run(agent, called, args, lookups)
+
+
 async def _shell(agent, called: dict, args: dict, lookups) -> str:
     return await shell_tool.call(agent, called["name"], args, lookups)
 
@@ -77,6 +81,9 @@ async def _mcp(agent, called: dict, args: dict, lookups) -> str:
 
 MODULES = (
     Module("web", lambda: search.TOOLS + [connect.TOOL], _web),
+    # open and look: pages, windows, files and folders by one name (surface.py). Opening what the person named
+    # is free; reading another program's window asks for the programs switch inside the call.
+    Module("place", lambda: surface.TOOLS, _place),
     Module("computer", lambda: shell_tool.TOOLS, _shell, "computer", frozenset({shell_tool.PLAN_TOOL["function"]["name"]})),
     Module("program", lambda: desk_tool.OFFERED, _desk, "programs"),
     Module("skill", lambda: [skill_tool.TOOL], _skill),

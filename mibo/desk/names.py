@@ -13,21 +13,16 @@ started, and only a window's title is read here, never what it shows.
 """
 from __future__ import annotations
 
-import difflib
 import os
 import re
 import time
-import unicodedata
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
+from ..resolve import CLOSE, FOUND, plain, score
 from . import grants as g, win32
 
-# A score from here on is a match.
-FOUND = 0.6
-# Two programs this near in score, neither named exactly: the model is asked which one.
-CLOSE = 0.03
 # The model may give a program's other name after a slash (微信/WeChat).
 SEVERAL = re.compile(r"[/|、，,]")
 # Start's entry for File Explorer starts no file of its own name; its windows are explorer.exe's.
@@ -81,35 +76,6 @@ class Found:
     several: bool = False
 
 
-def _plain(text: str) -> str:
-    return "".join(ch for ch in unicodedata.normalize("NFKC", text).casefold() if ch.isalnum() or ch in "+#")
-
-
-def _words(text: str) -> set[str]:
-    return set(re.findall(r"[a-z0-9]+|[^\W\d_a-z]+", unicodedata.normalize("NFKC", text).casefold()))
-
-
-def score(asked: str, text: str) -> float:
-    """How well the person's word names `text`, 0 to 1: the same name; each word of it (Word for Microsoft
-    Word); its beginning (网易云 for 网易云音乐); the name with its maker's in front (腾讯QQ for QQ); a part of
-    it (资源管理器 for 文件资源管理器); or a slip of the hand."""
-    a, t = _plain(asked), _plain(text)
-    if not a or not t:
-        return 0.0
-    if a == t:
-        return 1.0
-    part = min(1.0, len(a) / len(t))
-    if _words(asked) <= _words(text):
-        return 0.8 + 0.15 * part
-    if len(a) >= 2 and t.startswith(a):
-        return 0.75 + 0.15 * part
-    if len(t) >= 2 and a.endswith(t):
-        return 0.65 + 0.2 * len(t) / len(a)
-    if len(a) >= (3 if a.isascii() else 2) and a in t:
-        return 0.6 + 0.15 * part
-    return difflib.SequenceMatcher(None, a, t).ratio() - 0.25 if len(a) >= 4 else 0.0
-
-
 def runs(app: App, exe: str) -> bool:
     """Whether a running file is the program this entry starts: of its package, or the very file."""
     if app.family:
@@ -129,7 +95,7 @@ def beside(app: App, exe: str) -> bool:
 
 def resolve(asked: str, windows: list[Window], apps: list[App]) -> Found:
     """The window or the Start entry `asked` names. `windows` are the open ones, the front-most first."""
-    said = [part for part in SEVERAL.split(asked) if _plain(part)]
+    said = [part for part in SEVERAL.split(asked) if plain(part)]
 
     def best(pairs) -> float:
         return max((score(word, text) * weight for word in said for text, weight in pairs if text), default=0.0)

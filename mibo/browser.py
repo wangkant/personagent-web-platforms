@@ -134,6 +134,12 @@ SECRET_SCRIPT = "!!document.querySelector('input[type=password]')"
 CDP_S = 20.0
 WATCH_MS = 250
 OPEN_WITHIN_S = 20.0
+# A page the character opens out of sight: laid out at this size behind the app's own page, where nothing of it
+# shows. Every view on the pane's folder runs with Playwright's own switches for pages not in front, so a page
+# out of sight keeps its timers and drawing (the views of one folder share one browser and must ask alike).
+ASIDE = (1280, 800)
+BROWSER_ARGS = ("--disable-background-timer-throttling --disable-renderer-backgrounding "
+                "--disable-backgrounding-occluded-windows")
 VK_ESCAPE = 0x1B
 # The steps of a run the column beside the page lists (browse.js), the ends after which the page is the person's
 # until they say to go on, and for how long a run going on from one of those keeps its steps.
@@ -322,6 +328,8 @@ class _Tab:
         self.popup: tuple | None = None
         self.url = self.title = ""
         self.loading = self.sound = False
+        # Opened by the character out of sight (Pane.place_page): drawn behind the app's page until it comes to the front.
+        self.aside = False
         self.notices: list[dict] = []
         self.once: dict[str, set] = {}
 
@@ -430,6 +438,48 @@ class Pane:
         """What the person typed in the bar: in the tab in front."""
         self.ui(lambda: self._open(address, here=True))
 
+    def place_page(self, address: str, show: bool) -> dict:
+        """A page the character opens (surface.py): with `show` as a link does, in front; else in a tab of its own
+        behind the others, the tab in front and what the person sees left as they are. Its tab's number and address."""
+        made: list = []
+
+        def go() -> None:
+            if show:
+                self._open(address)
+            tab = self._tab if show else self._aside(address)
+            made.append({"id": tab.id, "url": address, "title": ""})
+        self.ui(go)
+        return made[0]
+
+    def tabs(self) -> list[dict]:
+        """Every tab: its number, title, address, whether it is private, in front, or opened out of sight."""
+        found: list = []
+        self.ui(lambda: found.extend({"id": t.id, "title": t.title, "url": t.url, "private": t.private,
+                                      "front": t is self._tab, "aside": t.aside} for t in self._tabs))
+        return found
+
+    def front(self, ident: int) -> bool:
+        """Tab `ident` comes to the front, the pane shown; False when there is no such tab."""
+        done: list = []
+
+        def bring() -> None:
+            tab = next((t for t in self._tabs if t.id == ident), None)
+            if tab is not None:
+                self._switch(tab)
+                if self._hidden:
+                    self._do("return")
+                self.tell({"open": True, "url": tab.url, "host": urlsplit(tab.url).hostname or "",
+                           "title": tab.title, "private": tab.private, **self._strip()})
+            done.append(tab is not None)
+        self.ui(bring)
+        return bool(done and done[0])
+
+    def core_of(self, ident: int = 0):
+        """The page of tab `ident`, or of the tab in front with 0; None when it is not there."""
+        if not ident:
+            return self._core
+        return next((t.core for t in self._tabs if t.id == ident), None)
+
     def place(self, box: list, scale: float, cuts: list) -> None:
         self.ui(lambda: self._place(box, scale, cuts))
 
@@ -527,12 +577,24 @@ class Pane:
         self._tabs.insert(at, tab)
         return tab
 
+    def _aside(self, address: str) -> _Tab:
+        """A tab out of sight at the end of the strip, its WebView made now behind the app's page and muted."""
+        from System.Drawing import Rectangle
+        self._made += 1
+        tab = _Tab(self._made, False)
+        tab.aside, tab.url, tab.pending = True, address, address
+        self._tabs.append(tab)
+        self._make(tab, Rectangle(0, 0, *ASIDE))
+        self.tell(self._strip())
+        return tab
+
     def _switch(self, tab: _Tab) -> None:
         """`tab` comes to the front: the one before is hidden and its reading ends, this one is shown, sized, cut
         and zoomed as the pane is, and its page is read from now. A run under way pauses (it acts on the page in
         front only), unless it waits for the person's own sign-in."""
         if tab is self._tab:
             return
+        tab.aside = False
         before = self._tab
         if before is not None:
             self._send(self._finish())
@@ -692,8 +754,9 @@ class Pane:
             roomed["size"] = self._kept["size"] = size
             self._keep()
 
-    def _make(self, tab: _Tab) -> None:
-        """The tab's WebView, on the pane's folder (so in the same browser processes as the other tabs)."""
+    def _make(self, tab: _Tab, box=None) -> None:
+        """The tab's WebView, on the pane's folder (so in the same browser processes as the other tabs); with `box`
+        out of sight there, behind the app's page."""
         from Microsoft.Web.WebView2.WinForms import CoreWebView2CreationProperties, WebView2
         from System.Drawing import ColorTranslator
 
@@ -703,15 +766,19 @@ class Pane:
         # Private: an InPrivate profile, so no sign-in of the person's reaches the page and nothing of it stays.
         properties.IsInPrivateModeEnabled = tab.private
         properties.Language = language()
+        properties.AdditionalBrowserArguments = BROWSER_ARGS
         view.CreationProperties = properties
         view.DefaultBackgroundColor = ColorTranslator.FromHtml(CANVAS[_dark()])
-        view.Bounds = self._box
-        view.Visible = tab is self._tab and not self._hidden and not self._quieted
+        view.Bounds = box or self._box
+        view.Visible = box is not None or tab is self._tab and not self._hidden and not self._quieted
         view.CoreWebView2InitializationCompleted += self._ready
         view.ZoomFactorChanged += self._zoomed
         view.KeyDown += self._key
         self.form.Controls.Add(view)
-        view.BringToFront()
+        if box is None:
+            view.BringToFront()
+        else:
+            view.SendToBack()
         tab.view = view
         view.EnsureCoreWebView2Async(None)
 
@@ -748,6 +815,10 @@ class Pane:
         core.IsDocumentPlayingAudioChanged += self._sound
         core.IsMutedChanged += self._sound
         tab.core = core
+        if tab.aside:
+            # Out of sight: no sound, and the page acts as a page in front would (focus, as Playwright's do).
+            core.IsMuted = True
+            core.CallDevToolsProtocolMethodAsync("Emulation.setFocusEmulationEnabled", '{"enabled": true}')
         if tab.popup is not None:
             # The site's popup is this tab's page: it keeps window.opener, so a sign-in hands its answer back.
             request, deferral = tab.popup
@@ -1389,13 +1460,15 @@ class Pane:
 
     # ---- the character operating the page (web/operate.py), from a thread other than the form's
 
-    def cdp(self, method: str, params: dict | None = None, timeout: float = CDP_S, session: str = "") -> dict:
-        """One DevTools protocol call in the page open now, or with `session` in one of its frames."""
-        return _call(self.ui, lambda: self._core, method, params or {}, timeout, session)
+    def cdp(self, method: str, params: dict | None = None, timeout: float = CDP_S, session: str = "",
+            tab: int = 0) -> dict:
+        """One DevTools protocol call in the page open now (with `tab`, in that tab's), or with `session` in one of
+        its frames."""
+        return _call(self.ui, lambda: self.core_of(tab), method, params or {}, timeout, session)
 
-    def listen(self, name: str, handler: Callable[..., None], session: bool = False) -> None:
-        """`handler(params)` on each DevTools event `name` of the page open now; with `session`,
-        `handler(params, session)`, the session it came from ("" for the page, else a frame's)."""
+    def listen(self, name: str, handler: Callable[..., None], session: bool = False, tab: int = 0) -> None:
+        """`handler(params)` on each DevTools event `name` of the page open now (with `tab`, of that tab's); with
+        `session`, `handler(params, session)`, the session it came from ("" for the page, else a frame's)."""
         def on(sender, args) -> None:
             with contextlib.suppress(ValueError):
                 params = json.loads(str(args.ParameterObjectAsJson))
@@ -1405,15 +1478,20 @@ class Pane:
                     handler(params)
 
         def add() -> None:
-            if self._core is not None:
-                self._core.GetDevToolsProtocolEventReceiver(name).DevToolsProtocolEventReceived += on
+            core = self.core_of(tab)
+            if core is not None:
+                core.GetDevToolsProtocolEventReceiver(name).DevToolsProtocolEventReceived += on
                 self._listeners.append(on)
         self.ui(add)
 
-    def address(self) -> str:
+    def address(self, tab: int = 0) -> str:
         found: list = []
-        self.ui(lambda: found.append(str(self._core.Source) if self._core is not None
-                                     else self._tab.pending if self._tab is not None else ""))
+
+        def read() -> None:
+            shown = next((t for t in self._tabs if t.id == tab), None) if tab else self._tab
+            core = shown.core if shown is not None else None
+            found.append(str(core.Source) if core is not None else shown.pending if shown is not None else "")
+        self.ui(read)
         return found[0] if found else ""
 
     def bar_address(self) -> str:
@@ -1614,7 +1692,7 @@ class Pane:
             self._pause()
         for tab in self._tabs:
             if tab.view is not None:
-                tab.view.Visible = not on and tab is self._tab and not self._hidden
+                tab.view.Visible = not on and (tab.aside or tab is self._tab and not self._hidden)
             if tab.core is not None:
                 tab.core.MemoryUsageTargetLevel = (CoreWebView2MemoryUsageTargetLevel.Low if on
                                                    else CoreWebView2MemoryUsageTargetLevel.Normal)
@@ -1824,6 +1902,7 @@ class _Hidden:
         properties = CoreWebView2CreationProperties()
         properties.UserDataFolder = str(self.reader.folder / "webview")
         properties.Language = language()
+        properties.AdditionalBrowserArguments = BROWSER_ARGS
         view.CreationProperties = properties
         view.Visible = False
         view.Bounds = Rectangle(0, 0, 1280, 900)

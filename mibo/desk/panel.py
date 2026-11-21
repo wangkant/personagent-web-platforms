@@ -185,6 +185,8 @@ class Desk:
         self.front = 0
         # The Hands of the task whose pictures the person allowed (the yes covers clicking by sight there).
         self.pictured = None
+        # Windows looked at with no task (surface.py's look), each with Hands that only look, by window handle.
+        self.peeks: dict[int, object] = {}
 
     def who(self) -> str:
         return self.workspace.config().get("PERSONA_NAME", "").strip() or "Mibo"
@@ -353,6 +355,89 @@ class Desk:
                 hands.sight.lease = hands.sight.surface.place()
             return out
         raise ValueError("generic")
+
+    async def place(self, op: str, payload: dict) -> dict:
+        """The character's places among other programs' windows (surface.py), with no task under way: a window
+        found or opened, raised for the person when they want to see it, and a look at one that never raises,
+        restores or presses anything. The never lists hold as for a task; only in a chat turn under way."""
+        if not self.turn_on(str(payload.get("conversation") or "")):
+            return {"status": "unwatched", "line": "the chat turn ended"}
+        self.lang = "zh" if str(payload.get("lang") or "zh").startswith("zh") else "en"
+        return await self._on(self._open_place if op == "place_open" else self._peek, payload)
+
+    def _open_place(self, payload: dict) -> dict:
+        from . import win32
+        from .hands import Hands
+        if payload.get("hwnd"):
+            found = {"hwnd": int(payload["hwnd"])} if win32.alive(int(payload["hwnd"])) else {
+                "status": "unfound", "line": "that window is closed"}
+        else:
+            name = str(payload.get("program") or "")[:200]
+            why = never_named(name)
+            found = self._window(name) if not why else {
+                "status": "refused", "line": f"[refused] {name[:60]} is never operated: {why[1]}"}
+        if not found.get("hwnd"):
+            return found
+        hwnd = found["hwnd"]
+        prog, refused = Hands(self.desktop, ask=self.ask, who=self.who(), lang=self.lang)._grant(hwnd)
+        if refused:
+            return refused
+        if payload.get("show") is True:
+            if win32.minimized(hwnd):
+                win32.restore(hwnd)
+            win32.give_back(hwnd)
+        self.grants.log({"do": "open", "program": prog["name"], "exe": prog.get("exe", ""), "status": "ok",
+                         "line": "raised for the person" if payload.get("show") is True else "found"})
+        return {"status": "ok", "hwnd": hwnd, "program": prog["name"], "title": win32.title_of(hwnd)}
+
+    def _peek(self, payload: dict) -> dict:
+        """A look at a window with Hands that have no task, no strip and no card: its print or a part of it in the
+        page grammar (pageops.view_of), and a picture after the same yes a task's first picture needs."""
+        from ..web.pageops import view_of
+        from . import uia, win32
+        from .hands import Hands
+        hwnd = int(payload.get("hwnd") or 0)
+        if not win32.alive(hwnd):
+            self.peeks.pop(hwnd, None)
+            return {"status": "gone"}
+        hands = self.peeks.get(hwnd)
+        if hands is None:
+            hands = Hands(self.desktop, ask=self.ask, who=self.who(), lang=self.lang)
+            prog, refused = hands._grant(hwnd)
+            if refused:
+                return refused
+            base = Path(prog["exe"]).name.lower()
+            hands.program, hands.task = prog, "look"
+            hands.view = uia.View(hwnd, g.program_pid(hwnd), shared=base in g.SHARED,
+                                  never=lambda h: g.window_never(base, h))
+            self.peeks[hwnd] = hands
+        try:
+            state = hands._read()
+        except uia.Refused as e:
+            return {"status": "gone" if str(e).startswith("[gone]") else "failed", "line": str(e)}
+        view = hands.view
+        left = [f"lines {a + 1}-{b} are not shown (report_limit): look from {a + 1} goes on, or find"
+                for a, b in view.cut]
+        ref, start = payload.get("ref"), payload.get("from") or 0
+        if ref is not None or payload.get("filter") == "interactive" or payload.get("find") or start:
+            state, part = view_of(view.lines, view.spans, ref=ref, interactive=payload.get("filter") == "interactive",
+                                  find=str(payload.get("find") or "")[:200], start=start, most=int(payload["most"]))
+            left = [part] if part else []
+        if win32.minimized(hwnd):
+            left.append("the window is minimized: only what Windows keeps of it is read")
+        noticed = [f"{round(view.drawn * 100)}% of the window is drawn, not named: picture shows it"] if (
+            view.drawn >= 0.3) else []
+        if any(" [secret]" in line for line in view.lines):
+            noticed.append("a password field")
+        found = {"status": "ok", "state": state, "snapshot": view.serial, "omitted": "; ".join(left),
+                 "noticed": "; ".join(noticed)}
+        if payload.get("picture") is True:
+            allowed = {"status": "ok"} if self.pictured is hands else self._pictures(hands, True)
+            if allowed["status"] != "ok":
+                found["omitted"] = "; ".join(x for x in (found["omitted"], "no picture: " + allowed["line"]) if x)
+            else:
+                found["picture"] = hands.picture()["picture"]
+        return found
 
     def review(self, action: dict):
         """Auto mode's reviewer on one action, on the worker thread: the person's own messages of the turn under
@@ -545,6 +630,12 @@ def mount(app, workspace, body) -> None:
             lang = "zh" if str(payload.get("lang") or "").startswith("zh") else "en"
             return await state.begin(task.strip(), " ".join(program.split()), conversation, lang,
                                      str(payload.get("sight") or "")[:120], tuple(" ".join(a.split()) for a in also))
+        if op in ("place_open", "place_look"):
+            if not (isinstance(payload.get("hwnd") or 0, int) and isinstance(payload.get("program") or "", str)
+                    and isinstance(payload.get("most") or 0, int) and isinstance(payload.get("ref") or 0, int)
+                    and isinstance(payload.get("from") or 0, int)):
+                return _error("generic")
+            return await state.place(op, payload)
         if op == "end":
             await state.end(str(payload.get("status") or "")[:20], str(payload.get("note") or ""))
             return {"status": "ok"}

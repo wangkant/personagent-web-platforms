@@ -43,7 +43,7 @@ DOC_KINDS = {".docx": "Word", ".xlsx": "Excel", ".pptx": "PowerPoint", ".pdf": "
 
 # ---------------------------------------------------------------- what the gate holds a file tool to
 
-TOOL_NAMES = {"read": "read_file", "list": "list_files", "search": "search_files", "open": "open_file",
+TOOL_NAMES = {"read": "read_file", "list": "list_files", "search": "search_files", "open": "open",
               "move": "move_files", "delete": "delete_files"}
 
 
@@ -273,14 +273,14 @@ def read(path: str, offset: int = 1, limit: int = READ_LINES) -> str:
     if lines is None:
         if os.path.splitext(path)[1].lower() == ".pdf":
             return (f"{os.path.basename(path)} is a PDF of {size(stat.st_size)}. Its text cannot be read with what "
-                    "this app has; open_file opens it for them in their PDF reader.")
+                    "this app has; open with show true opens it for them in their PDF reader.")
         with open(path, "rb") as f:
             data = f.read(TEXT_MAX + 1)
         text = decode(data[:TEXT_MAX])
         if text is None:
             return (f"{os.path.basename(path)} is not text: a {kind_of(path)} of {size(stat.st_size)}, last changed "
-                    f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(stat.st_mtime))}. open_file opens it in its "
-                    "own program.")
+                    f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(stat.st_mtime))}. open with show true opens it "
+                    "in its own program.")
         lines = text[0].splitlines()
         how = f", {text[1]}" + (", first 10 MB only" if len(data) > TEXT_MAX else "")
     else:

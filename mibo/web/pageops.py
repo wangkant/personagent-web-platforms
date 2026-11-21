@@ -73,6 +73,9 @@ SURROGATE = re.compile("[\ud800-\udfff]")
 # window has room (web/operate.budget), as browser-use gives tens of thousands.
 STATE_MAX = 6000
 STATE_MOST = 20_000
+# A line with an id on it, and how many lines a look's find returns (read_page's find: up to 20).
+ID_LINE = re.compile(r"\*?\[\d+\]")
+FIND_MAX = 20
 SECRET_MASK = "•••"
 # A field's own words that make it secret, whatever its type says: card and one-time-code words as Chromium's
 # autofill heuristics name them (card #, ccnum, csc, a 6-digit code, 2FA, PIN), and their Chinese.
@@ -801,6 +804,45 @@ def merge(merged: list[str], last: list[str], now: list[str]) -> list[str]:
     return merged + now[end.b + end.size:]
 
 
+def view_of(lines: list[str], spans: dict, *, ref: int | None = None, interactive: bool = False, find: str = "",
+            start: int = 0, most: int = STATE_MAX) -> tuple[str, str]:
+    """A part of a print's uncut lines, a page's or a window's (desk/uia.py prints windows in the same grammar), as
+    the snapshot tools give one: `ref` the lines of one id and under it (`spans`), `interactive` only the lines of
+    ids, `find` the id lines holding these words (FIND_MAX, as read_page's find), `start` the lines from that one
+    (1 for the first). (the lines, what was left out)."""
+    numbered = list(enumerate(lines, 1))
+    if ref is not None:
+        if ref not in spans:
+            return "", f"no ref {ref} in the last look; look again for the refs now"
+        a, b = spans[ref]
+        numbered = numbered[a:b]
+    if interactive:
+        numbered = [(n, x) for n, x in numbered if ID_LINE.match(x)]
+    if find:
+        want = [w for w in fold(find).split() if w]
+        # Words are looked for in what a line says, not in its ref.
+        hits = [(n, x) for n, x in numbered if want and all(w in fold(ID_LINE.sub("", x, 1)) for w in want)]
+        ids = [(n, x) for n, x in hits if ID_LINE.match(x)]
+        numbered = (ids or hits)[:FIND_MAX]
+        more = len(ids or hits) - len(numbered)
+        if not numbered:
+            return "", f"no line holds “{clip(find, 60)}”"
+    numbered = [(n, x) for n, x in numbered if n >= start]
+    shown, size = [], 0
+    for n, x in numbered:
+        size += len(x) + 1
+        if size > most:
+            break
+        shown.append((n, x))
+    left = []
+    if find and more > 0:
+        left.append(f"{more} more lines hold these words (report_limit)")
+    if len(shown) < len(numbered):
+        left.append(f"lines {numbered[len(shown)][0]}-{numbered[-1][0]} are not shown (report_limit): look "
+                    f"from {numbered[len(shown)][0]} goes on")
+    return well_formed("\n".join(x for _, x in shown)), "; ".join(left)
+
+
 class Lines(list):
     """The state's lines, each with where it stands down the page (`at`, from the last node the walk passed that
     has a place: `y`), so a page too long for one look shows what is on the screen."""
@@ -841,6 +883,12 @@ class Page:
         self.near: dict[int, str] = {}
         self.before: tuple[dict, dict] = ({}, {})
         self.lines: list[str] = []
+        # Where in those lines each id's own line and the lines under it are ([start, end), for a look at one
+        # part), and the stretches the print left out ([start, end)).
+        self.spans: dict[int, tuple[int, int]] = {}
+        self.cut: list[tuple[int, int]] = []
+        # Prints made of this page so far: a look's snapshot number.
+        self.looks = 0
         # The whole value of each field whose line shows only its start (for `grep`).
         self.values: dict[int, str] = {}
         # The app's own script world in the page, for the ring: (document, context id); the last document a
@@ -1275,6 +1323,8 @@ class Page:
         previous = self.last
         self.before = (self.last, self.near)
         self.last, self.secrets, self.interactive, self.near, self.values = {}, set(), 0, {}, {}
+        self.spans, self.cut = {}, []
+        self.looks += 1
         lines = Lines()
         text: list[str] = []
         tops = docs[0]["layout"]["y"]
@@ -1329,6 +1379,17 @@ class Page:
                 return found
 
             def walk(n: dict | None, inside: str) -> None:
+                # Each id's lines, from its own line to the last line under it.
+                start = len(lines)
+                walk_one(n, inside)
+                local = (n or {}).get("backendDOMNodeId")
+                ident = base + local if local else local
+                if ident in self.last and ident not in self.spans:
+                    own = re.compile(rf"\*?\[{ident}\]")
+                    at = next((i for i in range(start, len(lines)) if own.match(lines[i])), start)
+                    self.spans[ident] = (at, len(lines))
+
+            def walk_one(n: dict | None, inside: str) -> None:
                 if not n:
                     return
                 role = val(n.get("role"))
@@ -1477,6 +1538,7 @@ class Page:
             flush()
             if frame["url"] and len(lines) > start:
                 lines.insert(start, f"--- frame {frame['url']} ---")
+                self.spans = {k: (a + (a >= start), b + (b > start)) for k, (a, b) in self.spans.items()}
 
         emit(docs[0])
         header = f"[state] {probe.get('title', '')} | {probe.get('url', '')}"
@@ -1519,6 +1581,7 @@ class Page:
             if stop == end:
                 start = end - fit(lines[head:end][::-1], room)
                 start = start if start > head else head
+            self.cut = [(a, b) for a, b in ((head, start), (stop, end)) if b > a]
             body = [*lines[:head],
                     *([f"... {start - head} lines above cut here: scroll up to see them, or find or read them"]
                       if start > head else []),

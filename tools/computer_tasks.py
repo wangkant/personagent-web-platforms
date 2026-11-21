@@ -14,7 +14,7 @@ outside the task's folder, or inside it for a task that should change nothing, i
 --meter DIR names a metering proxy's folder (proxy-state.json it reads, proxy-usage.jsonl it writes: one line a
 model call with in, out, cached tokens and cost). With it the script sets the task and model for each run and
 counts the task's calls, tokens and cost; without it those columns are empty. Results go to
-<scratch>/<label>/results.jsonl and a table is printed. Set SHELL_OPEN_DRY=1 for the app, or open_file opens
+<scratch>/<label>/results.jsonl and a table is printed. Set SHELL_OPEN_DRY=1 for the app, or open opens
 the document on the screen.
 """
 from __future__ import annotations
@@ -280,7 +280,7 @@ def s_open(d):
 
 
 def c_open(d, reply, log):
-    opened = [r for r in log if r.get("outcome") == "ran" and re.search(r"Invoke-Item|^open_file ", r.get("command", ""))
+    opened = [r for r in log if r.get("outcome") == "ran" and re.search(r"Invoke-Item|^open ", r.get("command", ""))
               and r.get("command", "").rstrip("'").endswith("季度报告.docx")]
     return bool(opened), "opened 季度报告.docx"
 

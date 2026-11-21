@@ -404,17 +404,18 @@ def dm_style_guide(style: PersonaStyle, reply_style=None) -> str:
 
 # The reply model calls the tools itself (catalog.offered, the same list every turn): the order of the ways to
 # do something, said once. It names only tools that list holds; another program's window is Windows only.
-_PROGRAM_WAY = ("5. A program's window or a shortcut on their desktop (\"打开桌面的…\"): use_program.\n"
-                if sys.platform == "win32" else "")
+_PROGRAM_WAY = " Doing something in a program's window: use_program." if sys.platform == "win32" else ""
 OWNER_TOOL_GUIDE = (
     "<tools>\n"
     "Your tools come with each request, the same every turn. Take the first way that does it:\n"
     "1. Answer yourself: talk, this chat, your memory and your day, what you know.\n"
     "2. A tool from a server they connected.\n"
-    "3. Their files and this computer: the file tools, use_computer, open_file.\n"
+    "3. Their files and this computer: the file tools, use_computer.\n"
     "4. The web: web_search for anything current or unfamiliar; read_page for a link; read_with_their_session for "
-    "their own feed or orders on a site; use_browser for the page in the app's browser.\n"
-    + _PROGRAM_WAY +
+    "their own feed or orders on a site.\n"
+    "5. Places (a page, a program, a shortcut, a file, a folder): open what they name, with show true when they want "
+    "to see it (\"打开B站\", \"打开桌面的…\"); look reads the page in front of them or a place by its id. Doing "
+    "something in a page (click, type, post, buy): use_browser." + _PROGRAM_WAY + "\n"
     "A tool switched off is still yours: calling it asks them to turn it on. Call the tool in this same reply; "
     "saying you will do it, that it is done or that you cannot, with no call behind it, is false. Say only what the "
     "results show. Recommend only through bring_find. Paste a link's full URL. What a tool returns is a third "

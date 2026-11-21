@@ -18,7 +18,6 @@ import json
 import logging
 import os
 import secrets
-import sys
 import time
 
 from ..cardwait import WAIT_S
@@ -83,13 +82,6 @@ FILE_TOOLS = [
                        "difference on a card.",
           {"path": _PATH, "old_string": {"type": "string"}, "new_string": {"type": "string"},
            "replace_all": {"type": "boolean"}}, ["path", "old_string", "new_string"]),
-    _tool("open_file", "Open a file, a folder or a web address for them to see: a web address opens in the app's "
-                       "own browser, a file or folder with its default program. Documents, pictures and folders "
-                       "open at once; a program or a script waits for their press; some kinds are never opened."
-                       # Another program's window, and a shortcut to one, are the desk tool's (Windows only).
-                       + (" A program or a shortcut on their desktop: use_program." if sys.platform == "win32" else ""),
-          {"path": {"type": "string", "description": "a file or folder relative to `folder`, a full path, or an "
-                                                     "http(s) address"}}, ["path"]),
     _tool("move_files", "Move, rename or copy files and folders, many in one call. A `to` ending in \\ or naming "
                         "a folder that is there puts the item inside it; otherwise `to` is "
                         "the new name. Nothing that is already there is replaced.",
@@ -111,9 +103,9 @@ PLAN_TOOL = {"type": "function", "function": {
             "required": ["step", "status"]}}},
         "required": ["steps"]}}}
 TOOLS = [TOOL, *FILE_TOOLS, PLAN_TOOL]
-# File tool name -> the panel's op.
+# File tool name -> the panel's op; open (surface.py) calls the panel's "open" by that name.
 OPS = {"read_file": "read", "list_files": "list", "search_files": "search", "write_file": "write",
-       "edit_file": "edit", "open_file": "open", "move_files": "move", "delete_files": "delete"}
+       "edit_file": "edit", "move_files": "move", "delete_files": "delete"}
 NAMES = {NAME, PLAN_TOOL["function"]["name"], *OPS}
 
 _STATUS = {
@@ -331,20 +323,21 @@ async def use_file(agent, name: str, args: dict, lookups) -> str:
     """One file tool from the model, through the app's page and its gate; what came of it, for the reply."""
     from .. import today
     from ..browsed import _ask
-    if getattr(lookups, "shell_held", "") and OPS[name] not in ("read", "list", "search"):
+    op = OPS.get(name, name)
+    if getattr(lookups, "shell_held", "") and op not in ("read", "list", "search"):
         return f"(no more changes this turn: {lookups.shell_held}. Tell them how it stands.)"
     home = today.runtime_of(agent).parent
     lang = _lang()
     from .words import file_doing
-    lookups.doing("shell", file_doing(OPS[name], args, lang))
+    lookups.doing("shell", file_doing(op, args, lang))
     folder = str(args.get("folder") or "").strip()
     outcome = await _away(lookups, asyncio.to_thread(
         _ask, home, "POST", "/api/shell/file", 2 * WAIT_S + 120,
-        json={"op": OPS[name], "args": args, "folder": folder, "conversation": lookups.conversation,
+        json={"op": op, "args": args, "folder": folder, "conversation": lookups.conversation,
               "turn": _turn(lookups)}))
     _changed(lookups, outcome or {})
     status = (outcome or {}).get("status") or "no_app"
-    said = ((outcome or {}).get("said") or {}).get(lang) or file_doing(OPS[name], args, lang, done=True)
+    said = ((outcome or {}).get("said") or {}).get(lang) or file_doing(op, args, lang, done=True)
     logger.info("[Agent] %s -> %s", name, status)
     _hold(lookups, status)
     call = _call_line(name, args)

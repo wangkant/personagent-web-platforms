@@ -95,7 +95,7 @@ SURFACE = {"web": {"use_browser", "read_page", "web_search", "read_with_their_se
                    "pages_they_read"},
            "program": {"use_program"},
            "files": {"read_file", "list_files", "search_files", "write_file", "edit_file", "move_files", "delete_files",
-                     "open_file", "use_computer", "run_command", "find_files"}}
+                     "use_computer", "run_command", "find_files"}}
 # What the app and this run start as helpers; any other program the app starts is reported.
 HELPERS = {"notepad.exe", "chat.exe", "powershell.exe", "pwsh.exe", "conhost.exe", "cmd.exe", "python.exe",
            "pythonw.exe", "msedgewebview2.exe", "wscript.exe", "taskkill.exe", "tasklist.exe", "csc.exe", "node.exe",

@@ -198,6 +198,10 @@ class View:
         self.forwarded = False
         self.serial = 0
         self.shown: dict[str, tuple] = {}
+        # The last look's lines uncut, each id's own line and the lines under it, and what the print left out.
+        self.lines: list[str] = []
+        self.spans: dict[int, tuple[int, int]] = {}
+        self.cut: list[tuple[int, int]] = []
         self.seen: tuple = ()
         self.named = 0
         self.drawn = 0.0
@@ -289,6 +293,7 @@ class View:
         cache = _cache()
         previous = set(self.nodes)
         self.nodes, self.grid, self.interactive, self.words, self.shown = {}, {}, 0, {}, {}
+        self.spans, self.cut = {}, []
         self.serial += 1
         lines: list[str] = []
         count = 0
@@ -443,6 +448,7 @@ class View:
             # A tooltip or accessible description, when it says more than the name.
             tip = norm(_get(el, A.AutomationElement.HelpTextProperty))
             head = f"[{ident}] {role}"
+            start = len(lines)
             lines.append(("*" if previous and ident not in previous else "") + head
                          + (" [secret]" if secret else "")
                          + (f' "{clip(name, 150)}"' if name else "")
@@ -451,6 +457,7 @@ class View:
                          + (f" tip {quote(clip(tip, 80))}" if tip and tip != name else "")
                          + (" " + " ".join(states) if states else "") + options
                          + (f" @{shape.place(box, frame).replace(' ', '-')}" if top == self.hwnd and box[2] else ""))
+            self.spans[ident] = (start, len(lines))
             if not name and top == self.hwnd and box[2]:
                 nameless.append((len(lines) - 1, head, box, "a picture" if _holds(el, {"img"}) else ""))
             if secret or role in ("document", "textbox"):
@@ -459,6 +466,8 @@ class View:
             for child in children:
                 read(child, top, inside, node, where)
             more(el, role, name, children)
+            # Its own line and the lines under it, for a look at one part (surface.py's look, ref).
+            self.spans[ident] = (start, len(lines))
 
         for i, h in enumerate(wins):
             if self.halted():
@@ -498,9 +507,12 @@ class View:
                 if size > budget:
                     return i
             return len(src)
+        # Uncut, for a look at a part of it (pageops.view_of).
+        self.lines = list(body)
         if fit(body, max) < len(body):
             head = fit(body, max * 0.8)
             tail = fit(body[::-1], max * 0.2)
+            self.cut = [(head, len(body) - tail)]
             body = [*body[:head], f"... {len(body) - head - tail} lines cut here", *body[len(body) - tail:]]
         return well_formed(f"{header}\n" + "\n".join(body) + "\n[/state]")
 
