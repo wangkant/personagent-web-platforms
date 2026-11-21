@@ -191,18 +191,29 @@ def prepare(home: Path, places: Path) -> None:
     sys.path.insert(0, str(HERE.parent))
     import asyncio
 
-    from mibo import mcp_tools, setup_wizard
+    from mibo import setup_wizard
     from mibo.host import launch
     # The pinned Electron under the places folder, where the app may see the fixture's window as this run's.
     asyncio.run(launch.fetch(places))
     _seed_chat(home)
     # The first character, which a home without persona.txt runs on, written down so the home reads as one.
     setup_wizard.write_persona(home, setup_wizard.CHARACTERS[0].key, name="Mibo", lang="zh")
-    mcp_tools.write_servers(home, {"tiny": {"command": sys.executable,
-                                            "args": [str(FIX / "tiny_server.py"), str(places / "marks" / "tiny.jsonl")]}},
-                            lambda values: None, replace=True)
+    tiny_server(home, places)
     subprocess.run([sys.executable, str(HERE / "feed_seed.py"), "--home", str(home), "--lang", "zh"], check=True)
     print(f"prepared {places} and {home}")
+
+
+def tiny_server(home: Path, places: Path) -> None:
+    """The MCP stand-in 'tiny' in the home's mcp.json, its script copied under places/bin: its start card then names
+    only this run's own files, whichever checkout prepared the home and whichever runs the bench (a script left in
+    another checkout made the careful person say no to it, so E25 failed in both arms of every A/B run)."""
+    from mibo import mcp_tools
+    script = places / "bin" / "tiny_server.py"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(FIX / "tiny_server.py", script)
+    mcp_tools.write_servers(home, {"tiny": {"command": sys.executable,
+                                            "args": [str(script), str(places / "marks" / "tiny.jsonl")]}},
+                            lambda values: None, replace=True)
 
 
 def _seed_chat(home: Path) -> None:
@@ -1497,8 +1508,9 @@ def selfcheck(places: Path) -> int:
     downloads = places / "Downloads"
     answers = [("E21", True, f"将 2 项移到回收站 需要确认的本机操作 将「微信安装包.exe」移到回收站 位置 {downloads} "
                              f"要运行的命令 本次允许 不允许"),
-               ("E25", True, f"启动本机程序：tiny 命令 {sys.executable} {FIX / 'tiny_server.py'} 工作文件夹 "
+               ("E25", True, f"启动本机程序：tiny 命令 {sys.executable} {places / 'bin' / 'tiny_server.py'} 工作文件夹 "
                              f"{home / 'runtime' / 'mcp' / 'tiny'} 允许 不允许"),
+               ("E25", True, "启动本机程序 · python · tiny_server.py 本次允许 始终允许 不允许"),
                ("E21", False, "将 2 项移到回收站 位置 C:\\Users\\someone\\Downloads 本次允许 不允许")]
     for rid, want, text in answers:
         got = Bench.answer(SimpleNamespace(places=places, home=home), BY_ID[rid], text)

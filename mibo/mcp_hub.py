@@ -20,22 +20,18 @@ grant that can no longer be refreshed goes back to "needs sign-in" without
 opening anything. Signing out ends the grant at the server first.
 
 The reply model reaches the tools through the character service, which asks
-here (/api/mcp/offer, /find, /call: panels/tools.py). Every call is the
-person's to allow: a tool asks on the card each time unless the person set it,
-or its group (the tools the server marks read-only, or those that write and
-delete), to always (for a tool, that exact description) or never, or allowed it
-for this conversation. Whether read-only tools ask is chosen once, on the
-server's first card, as the provider's own mark; a tool marked destructive asks
-every time. A card is raised only while the
-person's own chat turn is under way, waits for them there (cardwait.py), and
-only a press on the app's own page answers it. What a server asks of the person during
-a call (elicitation) is such a card too: a form they fill in, sent to the server
-and never to the model, or a page they choose to open in their browser.
-
-When a server connects or its tools change, the person's model writes search
-words in Chinese and English once for each new tool (mcp_tools.write_words), so
-find_tools finds tools described in another language; with no model set the
-search uses the tools' own words.
+here (/api/mcp/offer, /find, /call: panels/tools.py). A local server that was
+never allowed starts inside the call that needs it, on its card. A tool its
+provider marks read-only (and not destructive) runs with no reviewer and no
+card; a tool marked destructive asks on the card every time; any other goes to
+the reviewer on the person's own words, and to the card when it does not pass,
+unless the person set it to always (that exact description) or allowed it for
+this conversation. Never, for a tool or for a server's tools that write, stops
+it. A card is raised only while the person's own chat turn is under way, waits
+for them there (cardwait.py), and only a press on the app's own page answers it.
+What a server asks of the person during a call (elicitation) is such a card too:
+a form they fill in, sent to the server and never to the model, or a page they
+choose to open in their browser.
 """
 from __future__ import annotations
 
@@ -142,8 +138,6 @@ class Hub:
         #: For a card that is a server's form: the schema it was drawn from, and what the person filled in.
         self.card_schema: dict = {}
         self.filled: dict = {}
-        #: The tick on a server's first card, 只读工具无需每次确认, as the person left it when they pressed.
-        self.read_default = True
         #: What 本次对话内允许 covers, per conversation: (server, tool, its fingerprint); gone when the app ends.
         self.session: dict[str, set[tuple]] = {}
         self.busy = asyncio.Lock()
@@ -152,10 +146,6 @@ class Hub:
         #: Downloads of Node.js or uv the person started (runtimes.py), and why the last one of each failed.
         self.fetching: dict[str, asyncio.Task] = {}
         self.fetch_failed: dict[str, str] = {}
-        #: Search words are written by one call at a time, so a tool is never described twice.
-        self.words_lock = asyncio.Lock()
-        self.words_tried: set[str] = set()
-        self.indexing: asyncio.Future | None = None
 
     # ---------------------------------------------------------- lifetime --
 
@@ -324,19 +314,6 @@ class Hub:
         # Listing stops past the limit, so how many more is not known: the limit is what the page says.
         runner.cut = mt.MAX_TOOLS if len(tools) > mt.MAX_TOOLS else 0
         runner.tools = tools[:mt.MAX_TOOLS]
-        # Search words in Chinese and English for tools new or changed, written once by the person's model.
-        self.indexing = asyncio.ensure_future(self._index(runner.tools))
-
-    async def _index(self, tools: list[dict]) -> None:
-        """Each tool is described at most once a run, whether or not the model answered; with no model set,
-        search stays on the tools' own words."""
-        values = self.workspace.config()
-        if not (values.get("LLM_API_KEY") and values.get("LLM_BASE_URL") and values.get("LLM_MODEL")):
-            return
-        async with self.words_lock:
-            todo = [t for t in tools if t["fp"] not in self.words_tried]
-            self.words_tried.update(t["fp"] for t in todo)
-            await mt.write_words(self.home, values, todo)
 
     def poke(self, name: str) -> None:
         runner = self.runners.get(name)
@@ -437,7 +414,7 @@ class Hub:
             if runner.state == "connected" and runner.tools:
                 lines.append({"name": runner.name, "about": runner.about or _sample(runner.tools),
                               "tools": len(runner.tools)})
-            elif runner.state in ("waiting", "starting") and not runner.spec.get("disabled"):
+            elif runner.state in ("waiting", "declined", "starting") and not runner.spec.get("disabled"):
                 lines.append({"name": runner.name, "about": "", "tools": 0, "state": runner.state})
         return {"names": [r.name for r in self.runners.values() if not r.spec.get("disabled")], "servers": lines}
 
@@ -446,37 +423,36 @@ class Hub:
         is named."""
         pool = [r for r in self.connected() if not server or r.name == server]
         if server and server in self.runners and not pool:
-            return {"status": "not_connected", "state": self.runners[server].state, "tools": []}
+            return {"status": "not_connected", "state": self.runners[server].state, "error": self.runners[server].error,
+                    "tools": []}
         rows = []
-        words, made = mt.words_of(query), mt.kept_words(self.home)
+        words = mt.words_of(query)
         for runner in pool:
             for tool in runner.tools:
                 if self.grants.mode(runner.name, tool)[0] == mt.NEVER:
                     continue
-                rank = mt.score(words, tool, runner.name, made.get(tool["fp"], "")) if words else 1.0
+                rank = mt.score(words, tool, runner.name) if words else 1.0
                 if rank > 0:
                     rows.append((rank, runner.name, tool))
         rows.sort(key=lambda row: -row[0])
-        if server and words and not rows:
-            # Words that match none of one server's tools (another language, say): its whole list instead.
-            return self.find("", server, k)
-        limit = 30 if (server and not words) else k
+        if words and not rows:
+            # Words that match no tool's own (another language, say): the whole lists, for the model to read.
+            return {**self.find("", server, k), "unmatched": True}
+        limit = 30 if not words else k
         return {"status": "ok", "tools": [{"server": name, **_shown(tool)} for _, name, tool in rows[:limit]],
                 "servers": [r.name for r in self.connected()],
                 # Not started, so their tools are not known yet: the model names one to start it.
                 "waiting": [r.name for r in self.runners.values()
-                            if r.state in ("waiting", "starting") and not r.spec.get("disabled")]}
+                            if r.state in ("waiting", "declined", "starting") and not r.spec.get("disabled")]}
 
     async def _ready(self, runner: Runner, conversation: str) -> dict | None:
         """The server connected, asking the person first to start a local program never allowed; what
-        stands in the way otherwise."""
+        stands in the way otherwise. A no holds for that call only: the next call asks again."""
         if runner.state in ("waiting", "declined") and runner.local:
-            if runner.declined:
-                return {"status": "start_declined"}
             if not await self._ask_start(runner, conversation):
                 return {"status": "start_declined" if runner.declined else "unanswered"}
         for _ in range(int(START_TIMEOUT_S * 2)):
-            if runner.state not in ("starting", "waiting") or not self.turn_on(conversation):
+            if runner.state not in ("starting", "waiting", "declined") or not self.turn_on(conversation):
                 break
             await asyncio.sleep(0.5)
         if runner.state != "connected":
@@ -494,7 +470,14 @@ class Hub:
         return self.find(query, server)
 
     async def call(self, server: str, tool_name: str, arguments, conversation: str) -> dict:
-        """One call the model asked for: started if the person allows it, checked, asked about, run."""
+        """One call the model asked for: started if the person allows it, checked, asked about, run. With no server
+        named, the one connected server that has the tool (a weak model may leave the server out)."""
+        if not server:
+            having = [r.name for r in self.connected() if any(t["name"] == tool_name for t in r.tools)] or \
+                [name for name, r in self.runners.items() if not r.spec.get("disabled")]
+            if len(having) != 1:
+                return {"status": "unknown_anywhere"}
+            server = having[0]
         runner = self.runners.get(server)
         if runner is None:
             return {"status": "unknown_server", "servers": [r.name for r in self.connected()]}
@@ -511,14 +494,18 @@ class Hub:
                 arguments = {}
             problem = mt.check_arguments(tool["inputSchema"], arguments)
             if problem:
-                return {"status": "bad_arguments", "problem": problem}
+                return {"status": "bad_arguments", "problem": problem,
+                        "parameters": mt.offer_schema(tool["inputSchema"]) or {"type": "object", "properties": {}}}
             mode, changed = self.grants.mode(server, tool)
             how = mode
             if mode == mt.NEVER:
                 self._log(server, tool_name, arguments, "never")
                 return {"status": "never"}
             passed = None
-            if mode == mt.AUTO and (server, tool_name, tool["fp"]) in self.session.get(conversation, set()):
+            if mode == mt.AUTO and mt.group_of(tool) == "read":
+                # Marked read-only by the provider of a server the person added and allowed: it runs.
+                how = "read_only"
+            elif mode == mt.AUTO and (server, tool_name, tool["fp"]) in self.session.get(conversation, set()):
                 how = "this_chat"
             elif mode == mt.AUTO and tool["hints"].get("destructiveHint") is not True:
                 # The reviewer first, on the person's own words of this turn; a tool marked destructive skips it.
@@ -539,8 +526,6 @@ class Hub:
                               passed.reason if passed is not None else "")
                     return {"status": status}
                 how = answer
-                if card["read_default"]:
-                    self.grants.set_group(server, "read", mt.ALWAYS if self.read_default else mt.AUTO, runner.tools)
                 if answer == "always":
                     self.grants.set_mode(server, tool, mt.ALWAYS)
                 elif answer == "chat":
@@ -568,9 +553,8 @@ class Hub:
         its maker's description as data, the arguments as the text it sends."""
         from . import acting, review
         request = await asyncio.to_thread(acting.asked, self.workspace)
-        marks = ["its maker marks it read-only"] if tool["hints"].get("readOnlyHint") is True else []
         return await review.decide("tools", request, {
-            "kind": "tool", "where": server, "target": [tool["title"] or tool["name"]], "effects": marks,
+            "kind": "tool", "where": server, "target": [tool["title"] or tool["name"]], "effects": [],
             "text": json.dumps(arguments, ensure_ascii=False)[:2000], "page_says": tool["description"][:200]},
             ask=acting.reviewer(self.workspace), attended=True,
             lang=str(self.workspace.config().get("AGENT_LANG") or "zh"))
@@ -590,10 +574,9 @@ class Hub:
         what = dict(zip(("zh", "en"), (text.format(**names) for text in CARD_WHAT[card["type"]])))
         return await self.cards.ask(card, conversation, what)
 
-    def press(self, ident: str, answer: str, values=None, read_default=None) -> str:
+    def press(self, ident: str, answer: str, values=None) -> str:
         """The person's press on the card: "ok", "gone" for a card no longer up, or where a form's values do not
-        fit what the server asked for. A wider answer than the card offers counts as this once; `read_default` is
-        the tick on a server's first card."""
+        fit what the server asked for. A wider answer than the card offers counts as this once."""
         card = self.cards.card
         if not self.cards.up(ident):
             return "gone"
@@ -603,23 +586,21 @@ class Hub:
                 return problem
         if answer in ("chat", "always") and answer not in card.get("choices", ()):
             answer = "once"
-        self.read_default = read_default is not False
         self.cards.press(ident, answer)
         return "ok"
 
     def _start_card(self, runner: Runner) -> dict:
-        return {"type": "mcp_start", "server": runner.name, "command": mt.command_line(runner.spec),
+        """The server and the program it runs in one line (python · tiny_server.py); the exact command, folder and
+        values under the card's fold."""
+        return {"type": "mcp_start", "server": runner.name, "program": mt.program_of(runner.spec),
+                "command": mt.command_line(runner.spec),
                 "cwd": runner.spec.get("cwd") or str(mt.server_folder(self.home, runner.name)),
-                "env": sorted(runner.spec.get("env") or {}), "choices": ["once", "always"],
-                "read_default": not self.grants.chosen(runner.name)}
+                "env": sorted(runner.spec.get("env") or {}), "choices": ["once", "always"]}
 
     async def _ask_start(self, runner: Runner, conversation: str) -> bool:
-        card = self._start_card(runner)
-        answer = await self.ask(card, conversation)
+        answer = await self.ask(self._start_card(runner), conversation)
         if answer is None:
             return False
-        if card["read_default"] and answer != "no":
-            self.grants.set_group(runner.name, "read", mt.ALWAYS if self.read_default else mt.AUTO, runner.tools)
         self.answer_start(runner.name, answer)
         return answer != "no"
 
@@ -640,11 +621,9 @@ class Hub:
         destructive = tool["hints"].get("destructiveHint") is True
         return {"type": "mcp_tool", "server": runner.name, "tool": tool["name"], "title": tool["title"],
                 "args": mt.plain_arguments(arguments), "raw": raw if len(raw) <= 4000 else raw[:4000] + "\n…",
-                "readonly": tool["hints"].get("readOnlyHint") is True, "destructive": destructive, "changed": changed,
-                # A tool marked destructive asks each time. The tick for read-only tools rides on the server's first
-                # card when it was never chosen, as a remote server has no start card.
-                "choices": ["once"] if destructive else ["once", "chat", "always"],
-                "read_default": not self.grants.chosen(runner.name)}
+                "destructive": destructive, "changed": changed,
+                # A tool marked destructive asks each time.
+                "choices": ["once"] if destructive else ["once", "chat", "always"]}
 
     async def _elicit(self, runner: Runner, request: dict) -> dict:
         """A server asks the person for something during a call of their turn: a form shown on the card for them to
@@ -696,7 +675,6 @@ class Hub:
                 mode, changed = self.grants.mode(name, tool)
                 tools.append({"name": tool["name"], "title": tool["title"],
                               "description": tool["description"][:200], "mode": mode, "changed": changed,
-                              "readonly": tool["hints"].get("readOnlyHint") is True,
                               "destructive": tool["hints"].get("destructiveHint") is True, "group": mt.group_of(tool)})
             # The runtime Mibo can fetch for a program that is missing: "node", "uv" or "".
             need = runtimes.needed(spec.get("command", "")) if runner.error == "not_found" else ""
@@ -710,7 +688,7 @@ class Hub:
                 "state": runner.state, "error": runner.error, "detail": runner.detail,
                 "retry_in": max(0, round(runner.retry_at - time.time())) if runner.retry_at else 0,
                 "tools": tools, "cut": runner.cut,
-                "groups": {group: self.grants.group(name, group) for group in ("read", "write")},
+                "write": self.grants.group(name),
                 "always_start": self.grants.started(name, spec) if runner.local else False,
                 "folder": str(mt.server_folder(self.home, name)),
                 "signed_in": not runner.local and KeptTokens(self.home, name).signed_in(),

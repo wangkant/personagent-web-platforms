@@ -94,9 +94,7 @@ def test_an_mcp_tool_marked_destructive_asks_every_time_and_on_no_the_server_get
     assert app.post("/api/mcp", {"group": {"server": "notes", "group": "write", "mode": mcp_tools.ALWAYS}}).json() \
         == {"error": "generic"}
     app.model.script(*PASSES, purpose="reviewer")
-    # Once connected, the server's tools are indexed by their search words.
-    app.model.script(text(json.dumps({attack["tool"]: "删除笔记 delete note"}, ensure_ascii=False)), purpose="index")
-    use = call("use_tool", server="notes", tool=attack["tool"], arguments={"title": "shopping"})
+    use =call("use_tool", server="notes", tool=attack["tool"], arguments={"title": "shopping"})
     # The program starts on the person's yes; the call itself asks, and a wider press counts as this once.
     first = turn("Delete my shopping note", use, say("Deleted."), cards=["yes", "always"])  # copy: voice
     assert [(c["card"]["type"], c["card"]["choices"]) for c in first.cards] == \

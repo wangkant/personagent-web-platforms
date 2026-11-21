@@ -146,8 +146,8 @@ def mount(app, workspace, body) -> None:
 
     @app.post("/api/mcp")
     async def mcp_change(request: Request):
-        """Settings: add, remove, switch, retry, fetch Node.js or uv, allow a start, a tool's mode, read-only, a
-        value."""
+        """Settings: add, remove, switch, retry, fetch Node.js or uv, allow a start, a tool's mode, the mode of the
+        tools that write, a value."""
         payload = await body(request)
         home = workspace.home
         if isinstance(payload.get("add"), str):
@@ -195,13 +195,12 @@ def mount(app, workspace, body) -> None:
                 return _error("tools_unknown_tool")
             await asyncio.to_thread(hub.grants.set_mode, runner.name, tool, row["mode"])
         elif isinstance(payload.get("group"), dict):
-            # One mode for a server's read-only tools, or for those that write and delete, set at once.
+            # One mode for a server's tools that write and delete, set at once: auto or never, never always.
             row = payload["group"]
             runner = hub.runners.get(str(row.get("server") or ""))
-            if runner is None or row.get("group") not in ("read", "write") or row.get("mode") not in mt.MODES or \
-                    (row["group"] == "write" and row["mode"] == mt.ALWAYS):
+            if runner is None or row.get("group") != "write" or row.get("mode") not in (mt.AUTO, mt.NEVER):
                 return _error("generic")
-            await asyncio.to_thread(hub.grants.set_group, runner.name, row["group"], row["mode"], runner.tools)
+            await asyncio.to_thread(hub.grants.set_group, runner.name, row["mode"], runner.tools)
         elif isinstance(payload.get("value"), dict):
             row = payload["value"]
             await asyncio.to_thread(mt.set_value, home, str(row.get("server") or ""), str(row.get("kind") or ""),
@@ -264,7 +263,6 @@ def mount(app, workspace, body) -> None:
         ident, answer = payload.get("id"), payload.get("answer")
         if not isinstance(ident, str) or answer not in ("once", "chat", "always", "no"):
             return _error("generic")
-        # A server's form comes with what the person filled in; a value that does not fit keeps the card up. A
-        # server's first card brings its tick for read-only tools.
-        pressed = hub.press(ident, answer, payload.get("values"), payload.get("read_default"))
+        # A server's form comes with what the person filled in; a value that does not fit keeps the card up.
+        pressed = hub.press(ident, answer, payload.get("values"))
         return {"ok": pressed == "ok", **({"problem": pressed} if pressed not in ("ok", "gone") else {})}

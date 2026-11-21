@@ -14,7 +14,7 @@ A script is a list of rounds, one per request, taken first in, first out. A roun
     drop()                        the connection closed with no answer
 
 Inner calls go to their own scripts by purpose, recognised from the constant each module sends first
-(review.POLICY, pagejudge.SYSTEM, consolidate's prompt, ingestion's vision prompt, mcp_tools.WORDS_PROMPT), never
+(review.POLICY, pagejudge.SYSTEM, consolidate's prompt, ingestion's vision prompt), never
 from prose. A request
 with max_tokens 1 is the endpoint probe a character makes when it starts, answered "ok" unless the test
 scripts "probe". Every request is recorded, with its key apart from its headers (None when none was sent).
@@ -32,7 +32,7 @@ import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from mibo import consolidate, ingestion, mcp_tools, review
+from mibo import consolidate, ingestion, review
 from mibo.web import pagejudge
 
 MODEL = "scripted"
@@ -42,8 +42,6 @@ SYSTEM_OF = {
     "judge": pagejudge.SYSTEM,
     "fold": consolidate._PERSON_PROMPT,
     "vision": ingestion.ContentIngestion.VISION_READ_PROMPT,
-    # The search words an MCP server's tools are indexed by, once it connects.
-    "index": mcp_tools.WORDS_PROMPT,
 }
 PURPOSES = ("reply", "probe", *SYSTEM_OF)
 

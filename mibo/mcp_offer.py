@@ -30,25 +30,49 @@ OUT_SHOWN = 300
 LINE_CHARS = 100
 FOUND = 5
 
+# What the model reads when a call or a search did not run: every line begins "Error: " and holds for that call only.
 _STATUS = {
-    "unwatched": "Not called: tools run only during a turn they started in the app's chat.",
-    "declined": "Not called: they said no on the card. Nothing was done. Do not try it another way this turn.",
-    "unanswered": "Not called: the card waited ten minutes with no answer. Say in one sentence that it still needs "
-                  "their confirmation and that 继续 under this reply asks again; then stop.",
-    "never": "Not called: they set this tool to never in Settings › Tools and connectors. Tell them so; do not "
-             "try another tool to get round it.",
-    "changed": "Not called: the tool changed between the card and the press, so nothing was done.",
-    "refused": "Not called: the app's reviewer found this call is not what they asked for. Tell them why in one "
-               "sentence; do not try another tool to get round it.",
-    "start_declined": "Not started: they did not allow this server's program to start. They can allow it in "
-                      "Settings › Tools and connectors.",
-    "unknown_server": "There is no MCP server of that name.",
-    "unknown_tool": "That server has no tool of that name: find it with find_tools first.",
-    "not_connected": "That server is not connected now; Settings › Tools and connectors says why. Tell them.",
-    "failed": "The call failed",
-    "no_app": "Not called: the app's page is not there.",
-    "held": "Not called: they said no on a card this turn. Tell them how it stands.",
+    "unwatched": "Error: not run: tools run only during a turn they started in the app's chat.",
+    "declined": "Error: they said no on the card, so {tool} was not called and nothing was done. Do not try it "
+                "another way.",
+    "unanswered": "Error: the card for {tool} waited with no answer, so nothing was done. Say in one sentence that it "
+                  "still needs their confirmation and that 继续 under this reply asks again; then stop.",
+    "never": "Error: they set {tool} to never in Settings › Connectors, so it was not called. Tell them so; do not try "
+             "another tool to get round it.",
+    "changed": "Error: {tool} changed between the card and the press, so it was not called.",
+    "refused": "Error: the app's review declined: {reason}; do not try another way",
+    "start_declined": "Error: they did not allow {server} to start, so nothing was done. Say so in one sentence and "
+                      "offer another way.",
+    "unknown_server": "Error: there is no MCP server named {server}; their servers are: {servers}",
+    "unknown_anywhere": 'Error: unknown tool "{tool}": find it with find_tools first',
+    "unknown_tool": "Error: {server} has no tool named {tool}; its tools are: {tools}",
+    "bad_arguments": "Error: invalid arguments for {tool}: {problem}. Its parameters: {parameters}. Call it once more "
+                     'with them under "arguments".',
+    "failed": "Error: the call to {tool} failed ({error}), so it was not done. Tell them it did not work; do not say "
+              "it was done.",
+    "no_app": "Error: not called: the app's page is not there.",
 }
+# Why a server is not connected, by its state, for a call or a search that needed it.
+_NOT_CONNECTED = {
+    "signin": "Error: {server} needs them to sign in first (Settings › Connectors, Sign in), so nothing was done. "
+              "Tell them in one sentence.",
+    "off": "Error: {server} is switched off in Settings › Connectors, so nothing was done. Tell them.",
+    "failed": "Error: {server} is not running ({error}); Settings › Connectors shows why. Nothing was done; tell them.",
+}
+
+
+def _said(outcome: dict, server: str, tool: str) -> str:
+    """The Error line for an outcome that is not done, filled from what the page sent back."""
+    status = outcome.get("status") or "no_app"
+    if status == "not_connected":
+        line = _NOT_CONNECTED.get(outcome.get("state"), "Error: {server} did not start in time, so nothing was done.")
+    else:
+        line = _STATUS.get(status, "Error: not called (" + status + ").")
+    values = {"server": server, "tool": tool, "error": outcome.get("error") or "", "reason": outcome.get("reason") or "",
+              "problem": outcome.get("problem") or "", "servers": ", ".join(outcome.get("servers") or []),
+              "tools": ", ".join(outcome.get("tools") or []),
+              "parameters": json.dumps(outcome.get("parameters") or {}, ensure_ascii=False)}
+    return line.format(**values)
 
 
 def _home():
@@ -78,7 +102,7 @@ def servers() -> list[str]:
 def _server_lines(offer: dict) -> str:
     rows = []
     for row in offer.get("servers") or []:
-        if row.get("state") == "waiting":
+        if row.get("state") in ("waiting", "declined"):
             rows.append(f"- {row['name']}: not started yet; find_tools with server={row['name']!r} asks them on a "
                         "card to start it")
         elif row.get("state") == "starting":
@@ -116,7 +140,7 @@ def functions(deferred: list[dict], names: list[str]) -> list[dict]:
                 "use_tool.\n" + "\n".join(listed)),
             "parameters": {"type": "object", "properties": {
                 "query": {"type": "string", "description": "a tool's name, several names, or what you need in a few "
-                                                          "words, in their language or English"},
+                                                          "English words (tools are mostly described in English)"},
                 "server": {"type": "string", "description": "one MCP server's name, to look only there; with no "
                                                            "query, its whole list"}},
                 "required": []}}},
@@ -182,12 +206,8 @@ async def use(agent, called: dict, lookups) -> str:
     args = args if isinstance(args, dict) else {}
     if called.get("name") == FIND:
         return await _find(args, lookups)
+    # A server's tool called without its server goes to the one connected server that has it (the page decides).
     server, tool, arguments = str(args.get("server") or ""), str(args.get("tool") or ""), args.get("arguments")
-    if not server and len(servers()) == 1:
-        # A server's tool called without its server, where they have only one.
-        server = servers()[0]
-    if not server:
-        return f'Error: unknown tool "{tool[:60]}": find it with find_tools first'
     if isinstance(arguments, str):
         try:
             arguments = json.loads(arguments)
@@ -214,7 +234,8 @@ async def _find(args: dict, lookups) -> str:
     if not server:
         # One server not started yet that their message or the query names: started (on its card) and searched
         # in this same call, a round sooner than a second find_tools would.
-        waiting = [row["name"] for row in current().get("servers") or [] if row.get("state") == "waiting"
+        waiting = [row["name"] for row in current().get("servers") or []
+                   if row.get("state") in ("waiting", "declined")
                    and (_named(row["name"], getattr(lookups, "said", "")) or _named(row["name"], query))]
         server = waiting[0] if len(waiting) == 1 else ""
     lookups.doing("mcp", query or server)
@@ -231,7 +252,7 @@ async def _find(args: dict, lookups) -> str:
     now = "\nTheir servers now:\n" + mt.fence("their_mcp_servers", _server_lines(current()))
     if status != "ok":
         return (head + json.dumps(rows, ensure_ascii=False) + "\n" if rows else "") + \
-            f"find_tools: {_STATUS.get(status, status)}" + now
+            _said(found, server, "find_tools") + now
     tools = found.get("tools") or []
     waiting = found.get("waiting") or []
     later = (f"\nNot started yet, so their tools are not known: {', '.join(waiting)}. If one of these could do it, "
@@ -239,6 +260,10 @@ async def _find(args: dict, lookups) -> str:
     if not tools and not rows:
         return (f"No tool matches {query!r}. Their servers: {', '.join(found.get('servers') or []) or 'none connected'}. "
                 "Try other words, or a server's name alone for its list." + later + now)
+    if found.get("unmatched"):
+        # No tool's words fit the search: every tool follows, and the model must not take a near one for it.
+        head = (f"No tool's name or description matches {query!r}. Every tool of their servers follows: call one "
+                "only if it does what they asked; if none does, tell them so.\n")
     rows += [{"server": t["server"], "tool": t["tool"], "parameters": t["parameters"],
               **({"read_only": True} if t.get("readonly") else {})} for t in tools]
     about = "\n".join(f"- {t['server']} / {t['tool']}: {t['description'][:200]}" for t in tools)
@@ -248,8 +273,6 @@ async def _find(args: dict, lookups) -> str:
 
 
 async def _call(agent, server: str, tool: str, arguments: dict, lookups) -> str:
-    if getattr(lookups, "mcp_held", ""):
-        return _STATUS["held"]
     lookups.doing("mcp", f"{server} · {tool}")
     lookups.away_since = time.monotonic()
     try:
@@ -261,10 +284,6 @@ async def _call(agent, server: str, tool: str, arguments: dict, lookups) -> str:
         lookups.away_s, lookups.away_since = lookups.away(), None
     status = outcome.get("status") or "no_app"
     logger.info("[Agent] MCP %s/%s -> %s", server, tool, status)
-    if status in ("declined", "start_declined"):
-        lookups.mcp_held = "they said no on a card"
-    elif status == "unanswered":
-        lookups.mcp_held = "a card is still waiting for their answer"
     shown = ""
     if status == "done":
         shown = outcome.get("text") or ""
@@ -287,13 +306,4 @@ async def _call(agent, server: str, tool: str, arguments: dict, lookups) -> str:
             left_out, pictures = left_out + ["image"], []
         return mt.result_for_model(server, tool, outcome.get("text") or "", bool(outcome.get("is_error")),
                                    left_out, len(pictures))
-    reason = _STATUS.get(status, status)
-    if status == "failed":
-        reason += f" ({outcome.get('error')}). Tell them it did not work; do not say it was done."
-    elif status == "bad_arguments":
-        reason = f"Not called: the arguments do not fit the tool ({outcome.get('problem')}). Fix them and call once more."
-    elif status == "unknown_tool":
-        reason += " Its tools: " + ", ".join(outcome.get("tools") or [])
-    elif status == "unknown_server":
-        reason += " Their servers: " + ", ".join(outcome.get("servers") or [])
-    return f"{tool} ({server}): {reason}"
+    return _said(outcome, server, tool)

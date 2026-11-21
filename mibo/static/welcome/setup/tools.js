@@ -100,11 +100,11 @@
       tools: "工具（{n}）",
       mode: { auto: "自动审查", always: "始终允许", never: "禁止" },
       modeLabel: (name) => `${name} 的权限`,
-      readonlyHint: "提供方标注为只读",
+      modeRead: "直接运行",
       destructiveHint: "提供方标注为可能删除或覆盖数据",
       changed: "已更改，需要重新确认",
       groupRead: (n) => `只读工具（${n}）`,
-      groupReadText: "提供方标注为只读、且未标注会删除数据的工具。此标注由提供方填写，Mibo 无法核实。",
+      groupReadText: "提供方标注为只读、且未标注会删除数据的工具，无需确认即可运行。此标注由提供方填写，Mibo 无法核实；如需阻止，可将单个工具设为禁止。",
       groupWrite: (n) => `写入与删除工具（${n}）`,
       groupWriteText: "其余工具，可能新建、修改或删除数据。提供方标注为可能删除数据的工具每次都需要确认。",
       logFold: (n) => (n ? `调用记录（${n}）` : "调用记录"),
@@ -286,11 +286,11 @@
       tools: "Tools ({n})",
       mode: { auto: "Auto review", always: "Always allow", never: "Never" },
       modeLabel: (name) => `Permission for ${name}`,
-      readonlyHint: "Its maker marks it read-only",
+      modeRead: "Runs without asking",
       destructiveHint: "Its maker marks it as able to delete or overwrite data",
       changed: "Changed: asks again",
       groupRead: (n) => `Read-only tools (${n})`,
-      groupReadText: "Tools their maker marks read-only, and not as deleting data. The maker writes that mark; Mibo cannot check it.",
+      groupReadText: "Tools their maker marks read-only, and not as deleting data, run without asking. The maker writes that mark; Mibo cannot check it. To stop one, set it to Never.",
       groupWrite: (n) => `Tools that write or delete (${n})`,
       groupWriteText: "The other tools, which may make, change or delete data. Tools their maker marks as deleting data ask every time.",
       logFold: (n) => (n ? `Call record (${n})` : "Call record"),
@@ -681,29 +681,32 @@
         }
         box.append(fold.node);
       }
-      // Its tools in two groups, read-only and write or delete (Claude's connectors), each group set at once, and
-      // each tool asking, always allowed or never; what writes is never always allowed as a group, nor a tool
-      // marked destructive.
+      // Its tools in two groups (Claude's connectors): those marked read-only run without asking, each may be set
+      // to never; those that write or delete are set at once to auto review or never, and each also to always,
+      // except a tool marked destructive, which asks every time.
       if (row.tools.length) {
         const fold = kit.fold(kit.fill(t.tools, { n: row.tools.length }));
         for (const group of ["read", "write"]) {
           const tools = row.tools.filter((tool) => tool.group === group);
           if (!tools.length) continue;
           const name = group === "read" ? t.groupRead(tools.length) : t.groupWrite(tools.length);
-          const entries = Object.entries(t.mode).filter(([mode]) => group === "read" || mode !== "always");
-          const pickGroup = kit.choices(t.modeLabel(name), entries, (mode) =>
-            change({ group: { server: row.name, group, mode } }, line));
-          pickGroup.set(row.groups[group]);
           const head = kit.optionRow(name, group === "read" ? t.groupReadText : t.groupWriteText);
-          head.words.append(pickGroup.group);
+          if (group === "write") {
+            const pickGroup = kit.choices(t.modeLabel(name), Object.entries(t.mode).filter(([mode]) => mode !== "always"),
+              (mode) => change({ group: { server: row.name, group, mode } }, line));
+            pickGroup.set(row.write);
+            head.words.append(pickGroup.group);
+          }
           fold.body.append(head.row);
           for (const tool of tools) {
-            const marks = [tool.readonly ? t.readonlyHint : "", tool.destructive ? t.destructiveHint : "",
-              tool.changed ? t.changed : ""].filter(Boolean).join(zh ? "；" : "; ");
-            const pickMode = kit.choices(t.modeLabel(tool.name),
-              Object.entries(t.mode).filter(([mode]) => !tool.destructive || mode !== "always"), (mode) =>
-                change({ tool: { server: row.name, tool: tool.name, mode } }, line));
-            pickMode.set(tool.mode);
+            const marks = [tool.destructive ? t.destructiveHint : "", tool.changed ? t.changed : ""]
+              .filter(Boolean).join(zh ? "；" : "; ");
+            const read = group === "read";
+            const modes = read ? [["auto", t.modeRead], ["never", t.mode.never]]
+              : Object.entries(t.mode).filter(([mode]) => !tool.destructive || mode !== "always");
+            const pickMode = kit.choices(t.modeLabel(tool.name), modes, (mode) =>
+              change({ tool: { server: row.name, tool: tool.name, mode } }, line));
+            pickMode.set(read && tool.mode === "always" ? "auto" : tool.mode);
             const r = kit.optionRow(tool.title && tool.title !== tool.name ? `${tool.title} · ${tool.name}` : tool.name, tool.description);
             if (marks) r.words.append(el("p", "setup-help", marks));
             r.words.append(pickMode.group);

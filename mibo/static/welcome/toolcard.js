@@ -1,7 +1,8 @@
 "use strict";
 // The card in the chat before one of the person's MCP servers is used (mcp_hub.py): starting a local program the
-// first time, with its exact command, or calling a tool, with its arguments in plain words and the raw JSON under a
-// fold; and what a server asks of the person during a call, a form they fill in (sent to the server alone) or a page
+// first time, named by the program it runs with its exact command under a fold, or calling a tool that writes or
+// deletes, with its arguments in plain words and the raw JSON under a fold; and what a server asks of the person
+// during a call, a form they fill in (sent to the server alone) or a page
 // they choose to open. Only a press here answers it (POST /api/mcp/card), never words typed in the chat or text from
 // a server.
 (() => {
@@ -128,11 +129,14 @@
     const facts = el("dl", "op-card-facts");
     const fact = (name, value, cls = "") => facts.append(el("dt", "", name), el("dd", cls, value));
     if (start) {
-      node.append(head("start", fill(t.startTitle, card), t.startMeta));
+      // The server and the program it runs in one line; the exact command, folder and values under the fold.
+      node.append(head("start", fill(t.startTitle, card), `${t.startMeta} · ${card.program}`));
       fact(t.command, card.command, "op-card-text");
       fact(t.folder, card.cwd);
       fact(t.env, card.env.length ? card.env.join(", ") : t.none);
-      node.append(facts, el("p", "op-card-meta", t.startNote));
+      const fold = el("details", "shell-card-command");
+      fold.append(el("summary", "", t.startDetails), facts);
+      node.append(el("p", "op-card-meta", t.startNote), fold);
     } else if (asked) {
       node.append(head(link ? "link" : "ask", fill(link ? t.linkTitle : t.askTitle, card), fill(t.askMeta, card)));
       if (card.message) node.append(el("p", "op-card-quote", card.message));
@@ -151,23 +155,12 @@
       if (card.review) node.append(el("p", "op-card-why", card.review));
       if (card.changed) node.append(el("p", "op-card-never", t.changed));
       if (card.destructive) node.append(el("p", "op-card-never", t.destructive));
-      else if (card.readonly) node.append(el("p", "op-card-meta", t.readonly));
       for (const [name, value] of card.args) fact(name, value, "op-card-text");
       if (!card.args.length) node.append(el("p", "op-card-meta", t.noArgs));
       else node.append(facts);
       const fold = el("details", "shell-card-command");
       fold.append(el("summary", "", t.raw), el("pre", "", card.raw));
       node.append(fold);
-    }
-    // A server's first card: whether its read-only tools ask, chosen once, as the provider marks them.
-    let readDefault = null;
-    if (card.read_default) {
-      const row = el("label", "op-card-field op-card-field-check");
-      readDefault = el("input", "pa-check");
-      readDefault.type = "checkbox";
-      readDefault.checked = true;
-      row.append(readDefault, el("span", "", t.readDefault));
-      node.append(row, el("p", "op-card-meta", t.readDefaultNote));
     }
     const answer = async (value) => {
       const filled = values && value === "once" ? values() : undefined;
@@ -185,8 +178,7 @@
           headers: { "Content-Type": "application/json",
             "X-Mibo-Setup-Token": sessionStorage.getItem("mibo-setup-token") || "",
             "X-Mibo-Window": sessionStorage.getItem("mibo-frame") || "" },
-          body: JSON.stringify({ id: card.id, answer: value, values: filled,
-            ...(readDefault ? { read_default: readDefault.checked } : {}) }),
+          body: JSON.stringify({ id: card.id, answer: value, values: filled }),
         });
         const said = await response.json().catch(() => ({}));
         if (said.problem) {
