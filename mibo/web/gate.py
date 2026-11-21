@@ -126,6 +126,21 @@ SEND_WORDS = _words(["send", "send message", "enviar", "envoyer", "senden", "о�
                     ["发送", "发出", "送信", "送る", "보내기", "전송"])
 POST_WORDS = _words(["post", "publish", "tweet", "share", "repost", "retweet", "quote"],
                     ["发布", "发表", "转发", "分享", "发帖", "发微博", "发动态", "投稿"])
+# Ours: a consent banner's most private choice, as its whole name: only the necessary cookies, or turning the
+# others down. Pressing it shares nothing and clears what covers the page, so it is a step of any errand.
+PRIVATE_CONSENT = re.compile(
+    r"(?:仅|只)(?:接受|允许|保留|使用|同意)?(?:严格)?(?:必要|必需)的?\s*(?:cookies?|缓存)?|"
+    r"(?:全部|一律)?拒绝(?:全部|所有|非必要|可选|其他|其余)?的?\s*cookies?|"
+    r"(?:accept|allow|use)?\s*(?:only)?\s*(?:the)?\s*(?:strictly\s+)?(?:necessary|essential|required)\s*"
+    r"(?:cookies)?\s*only|(?:accept|allow|use)\s+(?:only\s+)?(?:strictly\s+)?(?:necessary|essential|required)"
+    r"(?:\s+cookies)?|only\s+(?:strictly\s+)?(?:necessary|essential|required)(?:\s+cookies)?|"
+    r"(?:reject|decline|refuse|deny)\s+(?:all\s+)?(?:optional\s+|non-?essential\s+|additional\s+)?cookies", re.I)
+
+
+def private_consent(name: str) -> bool:
+    """Whether a control's whole name is a consent banner's most private choice ("仅必要 Cookie", "Reject all
+    cookies", "Necessary only")."""
+    return bool(PRIVATE_CONSENT.fullmatch(" ".join(str(name or "").split())))
 
 
 def classify(mode: str, name: str, role: str, facts: dict, url: str = "") -> tuple[str, str]:

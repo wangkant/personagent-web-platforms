@@ -69,6 +69,44 @@ def test_an_endpoint_that_refuses_the_thinking_switch_still_gets_its_review():
     assert len(Thinker.bodies) == 2 and "temperature" not in Thinker.bodies[-1]
 
 
+class Cramped(Thinker):
+    """A model whose verdict does not fit the reviewer's answer room: cut off with nothing in it at that cap,
+    answered when given more room; `room` is the least it needs (0: it never answers)."""
+    room = 0
+
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        Thinker.bodies.append(body)
+        fits = Cramped.room and body["max_tokens"] >= Cramped.room
+        self._send(200, {"choices": [{"message": {"content": json.dumps(PASS) if fits else ""},
+                                      "finish_reason": "stop" if fits else "length"}],
+                         "usage": {"prompt_tokens": 10, "completion_tokens": 5 if fits else body["max_tokens"]}})
+
+
+def ask_cramped(room: int) -> review.Verdict:
+    Cramped.room, Thinker.bodies = room, []
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Cramped)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        ask = review.endpoint(f"http://127.0.0.1:{server.server_address[1]}/v1", "k", "cramped")
+        return asyncio.run(review.review(["看看我桌面上有什么"], {**ACTION, "area": "commands"}, ask=ask))  # copy: voice
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_an_answer_cut_off_empty_at_the_reviewers_cap_is_asked_again_with_more_room():
+    got = ask_cramped(room=4000)
+    assert (got.decision, got.by) == ("go", "review")
+    assert Thinker.bodies[0]["max_tokens"] < 4000 <= Thinker.bodies[1]["max_tokens"]
+
+
+def test_a_reviewer_that_never_answers_says_it_gave_no_answer_not_that_it_was_unclear():
+    got = ask_cramped(room=0)
+    assert (got.decision, got.by) == ("ask", "failed")
+    assert got.reason == review.said("failed", "zh") != review.said("unclear", "zh")
+
+
 def test_a_step_in_the_folder_the_person_named_is_not_flagged_as_outside_it():
     said = ["帮我打开桌面上的grok bot"]  # copy: voice
     inside = {"area": "commands", "kind": "command", "where": "C:\\Users\\li\\Desktop",

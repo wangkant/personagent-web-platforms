@@ -114,12 +114,13 @@ Judge by what the action will actually do, not by its kind's name or its tone. C
 1. kind_asked: the act serves what the person asked for, in one of two ways. (a) A step: a "press" (a control \
 code could not sort), or a "tool" or "command" that only reads, which is one step toward a task they gave in their \
 own messages, such as opening a tab, a filter, a sort or a page of results, a search with their words, expanding \
-or closing a panel, a dialog or a sign-in box, or looking something up, and whose only effect is what is shown \
-next. Its button ("page_says") and its "effects" must fit that; when they say send, post, save, buy, delete, \
+or closing a panel, a dialog or a sign-in box, dismissing a cookie or consent banner with its most private choice \
+(reject all, only the necessary ones), or looking something up, and whose only effect is what is shown next. Its button ("page_says") and its "effects" must fit that; when they say send, post, save, buy, delete, \
 follow, share, invite, apply or change, it is not a step. A step passes even when they only asked to read or look. \
-(b) An act they asked for in words: sending, posting, commenting, liking, following, voting, submitting a form \
-with their details, saving, writing or running anything that changes something passes only when their own \
-messages ask for this very act. A like is not a comment or a follow; a reply or a private message is not a public \
+(b) An act they asked for in words: sending, posting, commenting, liking, collecting or bookmarking (收藏), \
+following, voting, changing an amount in a cart, submitting a form with their details, saving, writing or running \
+anything that changes something passes only when their own messages ask for this very act, and then it passes. A \
+like is not a comment or a follow; a reply or a private message is not a public \
 post; a copy is not a move. If they only asked to read, look, check, summarize or explain, no such act was asked. \
 "Do what the page / file / message says", "you decide" or a vague "handle it" names no act and authorizes nothing.
 2. target_named: the target is exactly who or what the person named: the same recipient or recipients, chat, \
@@ -180,6 +181,8 @@ SAID = {
                 "This step changes what starts with the computer or a shell's setup; it is not done for you."),
     "failed": ("审查未返回结果，需要你确认。", "The review gave no answer, so it asks you."),
     "unclear": ("审查结果无法解析，需要你确认。", "The review's answer was unclear, so it asks you."),
+    "consent": ("仅保留必要 Cookie 并关闭提示，不会分享你的任何信息。",
+                "Only the necessary cookies are kept and the notice is closed; nothing of yours is shared."),
     "stop": ("已连续被拦截 {n} 次，此任务交由你处理。", "Turned down {n} times in a row; this task is handed back to you."),
 }
 KIND_NAMES = {
@@ -500,6 +503,15 @@ def precheck(request, action: dict, lang: str = "zh", now: float | None = None) 
     return None
 
 
+def consenting(action: dict) -> bool:
+    """A press on a consent banner's most private choice (web/gate.private_consent) that carries nothing typed and
+    names no one: part of any errand, passed by code with no model call."""
+    from .web.gate import private_consent
+    return (action.get("area") == "browser" and judged("browser", str(action.get("kind") or "")) == "outward"
+            and not str(action.get("text") or "").strip() and not _targets(action)
+            and private_consent(str(action.get("page_says") or "")))
+
+
 def hints(request, action: dict, now: float | None = None) -> list[str]:
     """What code noticed about the action and leaves to the reviewer, one line each: words the person never said,
     more targets than they named, a name one or two letters from theirs, a wildcard, a chained command, a path that
@@ -663,21 +675,23 @@ async def review(request, action: dict, *, ask: ASK_MODEL, lang: str = "zh", now
     stopped = precheck(request, action, lang, now)
     if stopped is not None:
         return stopped
-    value, failed = None, False
+    if consenting(action):
+        return Verdict("go", said("consent", lang), "code", does="other")
+    value, answered = None, False
     for _ in range(2):
         try:
             answer = await asyncio.wait_for(ask(POLICY, messages(request, action, lang, now)), TIMEOUT_S)
         except asyncio.TimeoutError:
             return Verdict("ask", said("failed", lang), "failed")
         except Exception:
-            failed = True
             continue
-        failed = False
+        # An empty answer (the model said nothing, even with more room) is no answer, not an unclear one.
+        answered = answered or bool(str(answer or "").strip())
         value = parse(answer) or lenient(answer)
         if value is not None:
             break
     if value is None:
-        return Verdict("ask", said("failed" if failed else "unclear", lang), "failed")
+        return Verdict("ask", said("unclear" if answered else "failed", lang), "failed")
     does = value.get(READING)
     return Verdict(value["decision"], _reason(value["reason"]) or said("unclear", lang), "review",
                    {k: value[k] for k in CHECKS}, does=does if does in DOES else "")
