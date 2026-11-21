@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from mibo import db as _db
 from mibo import home as _home
 from mibo import modelcatalog as _modelcatalog
 from mibo import paths as _paths
@@ -41,6 +42,9 @@ def _one_home_at_a_time(tmp_path_factory: pytest.TempPathFactory):
     os.environ.pop("AGENT_RUNTIME_DIR", None)
     _paths.use_home(own)
     yield own
+    # Every database a test opened is closed with it: a run of a thousand homes would hold three files open for each.
+    for opened in list(_db._open):
+        _db.close(Path(opened).parent)
     for key in set(os.environ) - set(environment):
         del os.environ[key]
     os.environ.update(environment)

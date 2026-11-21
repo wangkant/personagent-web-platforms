@@ -275,13 +275,17 @@ class ModelCalls:
                         e.status_code == 404 and (pictured or "response_format" in payload)):
                     raise
                 field = adapt_rejected_payload(payload, e.response.text)
-                if not field and asking and "thinking" in payload:
-                    # An endpoint being asked may refuse it in words of its own.
+                if field:
+                    # The service named the field it refuses: known from now on, to a call made beside this one too.
+                    self._remember_refusal(url, model, field)
+                elif asking and "thinking" in payload:
+                    # An endpoint being asked may refuse it in words of its own: a guess, kept once the resend is
+                    # answered.
                     payload.pop("thinking")
                     field = "thinking"
+                    refused.append(field)
                 if not field or not tries_left:
                     raise
-                refused.append(field)
         self._count_usage(model, body)
         for field in refused:
             self._remember_refusal(url, model, field)

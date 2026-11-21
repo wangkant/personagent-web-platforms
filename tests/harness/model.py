@@ -27,7 +27,7 @@ import hashlib
 import itertools
 import json
 import re
-import select
+import selectors
 import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -299,8 +299,11 @@ class ScriptedModel:
 
 def _gone(connection: socket.socket) -> bool:
     """Whether the asker closed the connection: readable with nothing to read, or reset."""
-    if not select.select([connection], [], [], 0)[0]:
-        return False
+    # Not select.select: on Linux it cannot take a descriptor numbered past 1023, which a long run reaches.
+    with selectors.DefaultSelector() as watch:
+        watch.register(connection, selectors.EVENT_READ)
+        if not watch.select(0):
+            return False
     try:
         return not connection.recv(1, socket.MSG_PEEK)
     except OSError:
