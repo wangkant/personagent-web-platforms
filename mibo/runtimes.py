@@ -8,6 +8,10 @@ copy of nodejs.org; the wheel astral-sh publishes on PyPI, from PyPI or its Tsin
 against the sha256 written for it, so a mirror never changes what is unpacked. Local servers start with those
 folders first on PATH, and what the runtimes fetch in turn (npm packages, uv's cache and the Python it may fetch
 for uvx) is kept beside them, so nothing lands elsewhere on the computer and removing the home removes all of it.
+
+Electron for the app's window comes the same way (ELECTRON, started by host/launch.py): fetched on the window's first
+start from Electron's GitHub release, or npmmirror's copy of it, and checked against the release's SHASUMS256.txt. It
+is not one of the runtimes an MCP server is offered.
 """
 from __future__ import annotations
 
@@ -17,6 +21,7 @@ import io
 import os
 import platform
 import shutil
+import stat
 import sys
 import tarfile
 import zipfile
@@ -36,6 +41,12 @@ def _uv(file: str, sha256: str, size: int, wheel: str, wheel_sha256: str, wheel_
         (f"{base}/packages/{wheel}", wheel_sha256, wheel_size)
         for base in ("https://files.pythonhosted.org", "https://pypi.tuna.tsinghua.edu.cn",
                      "https://mirrors.aliyun.com/pypi")]
+
+
+def _electron(file: str, sha256: str, size: int) -> list[tuple[str, str, int]]:
+    return [(f"{base}/v44.11.5/{file}", sha256, size)
+            for base in ("https://github.com/electron/electron/releases/download",
+                         "https://registry.npmmirror.com/-/binary/electron")]
 
 
 # name -> what the page calls it, the release, and per (system, machine) where its archive is, each with the
@@ -82,6 +93,21 @@ RELEASES = {
                             "5435c5ce14a56431208ca0996416d310f1598e8c2c8ba707688985a16bb82dbe", 18026789),
     }},
 }
+# The Electron the app's window runs on (the version mibo/electron/package.json pins), as RELEASES lists a runtime.
+ELECTRON = {"title": "Electron", "version": "44.11.5", "source": "github.com/electron/electron", "builds": {
+    ("windows", "x64"): _electron("electron-v44.11.5-win32-x64.zip",
+                                  "2938040ee81382bb8a99954425a316fee17f23d55f5be0ef413275f7e793c8af", 158322092),
+    ("windows", "arm64"): _electron("electron-v44.11.5-win32-arm64.zip",
+                                    "b761722597942aed068be74768fdbb1137b0cafce6c91e9b31e454c82ffa6a39", 156552141),
+    ("darwin", "arm64"): _electron("electron-v44.11.5-darwin-arm64.zip",
+                                   "0bed9868a3074ec80af72d15c022a17e74aec52bd7057d207f33d48a6bf0f43b", 130889686),
+    ("darwin", "x64"): _electron("electron-v44.11.5-darwin-x64.zip",
+                                 "c26253fb081f758a29412e51f21b00f6f79170e279dbb614bde428ed73d6be8a", 134496461),
+    ("linux", "x64"): _electron("electron-v44.11.5-linux-x64.zip",
+                                "765b846228245704d7796aaa8621b753cc5bbb9aec8d7ccd32c5fc268aa0348a", 123245398),
+    ("linux", "arm64"): _electron("electron-v44.11.5-linux-arm64.zip",
+                                  "0bf637f2cecbd000a158d25b956b7982e30fd720a7537084f024a1a367f6cb11", 124264009),
+}}
 # The commands that need each runtime.
 COMMANDS = {"npx": "node", "npm": "node", "node": "node", "uvx": "uv", "uv": "uv"}
 # The program whose presence says a runtime is unpacked.
@@ -92,7 +118,7 @@ def _build(name: str):
     system = {"win32": "windows", "darwin": "darwin"}.get(sys.platform, "linux")
     machine = platform.machine().lower()
     machine = "arm64" if machine in ("arm64", "aarch64") else "x64" if machine in ("amd64", "x86_64") else machine
-    return RELEASES[name]["builds"].get((system, machine))
+    return (ELECTRON if name == "electron" else RELEASES[name])["builds"].get((system, machine))
 
 
 def folder(home: Path, name: str) -> Path:
@@ -179,7 +205,18 @@ def _unpack(data: bytes, url: str, into: Path) -> None:
         return
     if url.endswith(".zip"):
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
-            archive.extractall(into)
+            for info in archive.infolist():
+                # The mode the archive keeps: Electron's programs carry their x bits, and its macOS app its
+                # frameworks' links (Versions/Current), which a plain extract would write as small files.
+                mode = info.external_attr >> 16
+                target = into / info.filename
+                if stat.S_ISLNK(mode):
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.symlink_to(archive.read(info).decode())
+                    continue
+                archive.extract(info, into)
+                if mode & 0o111 and not info.is_dir():
+                    target.chmod(mode & 0o777)
     else:
         # The archive is the one whose sha256 is written above, so its own paths are taken as they are.
         with tarfile.open(fileobj=io.BytesIO(data)) as archive:

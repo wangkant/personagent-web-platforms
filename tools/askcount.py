@@ -4,14 +4,14 @@ hub (mcp_hub.py) on a small stand-in server whose tools carry the provider's rea
 
     python tools/askcount.py [--out <folder>] [--tree <folder holding mibo>] [--only shell,mcp]
 
-Each errand is run under each way of answering the card that the tree offers: `once` (本次允许, every card), `chat`
-(本次对话内允许 where the card offers it, else once), `always` (始终允许 where offered, else once), and, for commands,
-`auto` (the commands mode set to automatic review, cards answered once) and `auto+always` (that mode, 始终允许 where
-offered). A push and an install are answered no. One line per run with the cards per conversation, the reviewer's
+Each errand is run under each way of answering the card: `once` (本次允许, every card), `chat` (本次对话内允许 where
+the card offers it, else once) and `always` (始终允许 where offered, else once), in the one acting mode, automatic
+review. A push and an install are answered no. One line per run with the cards per conversation, the reviewer's
 calls and what each step came to; <out>/askcount.json keeps them. --tree measures another copy of the code (a snapshot
 from before a change). The reviewer is a stand-in that passes whatever code sends it (--reviewer go) or one that
 never answers (--reviewer none), so the count shows what code leaves to the reviewer; tools/review_score.py
-measures the real reviewer's judgment.
+measures the real reviewer's judgment. That a delete, a push, an install and a tool marked destructive ask every
+time, whatever the reviewer says, is a test now (tests/floors/asked).
 """
 from __future__ import annotations
 
@@ -95,10 +95,7 @@ def workspace_for(home: Path) -> SimpleNamespace:
 
 def stand_in(verdict: str) -> None:
     """acting.reviewer replaced by a stand-in: "go" passes what code sends it, "none" never answers."""
-    try:
-        from mibo import acting
-    except ImportError:
-        return
+    from mibo import acting
 
     def reviewer(workspace):
         async def ask(system: str, messages: list) -> str:
@@ -114,10 +111,7 @@ def stand_in(verdict: str) -> None:
 def fresh_day() -> None:
     """Each run is its own day: the reviewer's passes a day (review.Tally) start from none, as they would for one
     person, instead of adding up across the runs of this process."""
-    try:
-        from mibo import review
-    except ImportError:
-        return
+    from mibo import review
     review.TALLY.passes.clear()
     review.TALLY.refused.clear()
 
@@ -148,8 +142,7 @@ class Turn:
 
 def choose(card: dict, policy: str, refuse: bool):
     """The press for `card` under `policy`: what the card offers, the narrowest that stops the repeat."""
-    # A card from before the choices were listed offers what its buttons did: MCP cards once or always.
-    offered = card.get("choices") or (["once", "always"] if str(card.get("type")).startswith("mcp_") else [])
+    offered = card.get("choices") or []
     if refuse:
         return "no"
     if policy in ("chat", "always") and policy in offered:
@@ -183,25 +176,14 @@ async def shell_run(out: Path, policy: str) -> dict:
     app = SimpleNamespace(state=SimpleNamespace(window=None))
     shell = panel.Shell(app, workspace)
     shell.grants.add(str(proj))
-    from mibo.acting import Modes
-    if hasattr(shell.grants, "set_on"):
-        # A snapshot from before the one mode: commands had their own switch and mode.
-        shell.grants.set_on(True)
-        if policy.startswith("auto"):
-            Modes(shell.desktop).set("commands", "auto")
 
     def press(card: dict, answer: str) -> None:
-        if hasattr(shell, "press"):
-            shell.press(card["id"], answer)
-        else:
-            shell.cards.press(card["id"], answer != "no")
+        shell.press(card["id"], answer)
 
-    # "auto+always": auto-edit with the cards answered "always"; plain "auto" answers them "once".
-    press_as = policy.partition("+")[2] or ("once" if policy == "auto" else policy)
     result = {"conversations": []}
-    for n, conversation in enumerate(("c1", "c2")):
+    for conversation in ("c1", "c2"):
         log, steps, state = [], [], {"refuse": False}
-        task = asyncio.ensure_future(presser(shell.cards, press, log, press_as, state))
+        task = asyncio.ensure_future(presser(shell.cards, press, log, policy, state))
         try:
             async with Turn(workspace, shell.desktop, conversation):
                 for i, step in enumerate(SHELL_STEPS):
@@ -283,7 +265,7 @@ def main() -> int:
     stand_in(args.reviewer)
     runs = {}
     only = args.only.split(",")
-    for policy in ("once", "chat", "always", "auto", "auto+always"):
+    for policy in ("once", "chat", "always"):
         if "shell" in only:
             REVIEWED["calls"] = 0
             fresh_day()
@@ -297,7 +279,7 @@ def main() -> int:
                    for s in got["conversations"][0]["steps"]]
             print(f"shell {policy:11} cards c1={per[0]} c2={per[1]} total={sum(per)} reviewed {got['reviewed']} | "
                   f"{' '.join(ran)}")
-        if "mcp" in only and not policy.startswith("auto"):
+        if "mcp" in only:
             REVIEWED["calls"] = 0
             got = asyncio.run(mcp_run(out, policy))
             got["reviewed"] = REVIEWED["calls"]

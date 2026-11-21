@@ -34,6 +34,7 @@ are ours.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import re
 import threading
@@ -644,6 +645,8 @@ class Tally:
 
 
 TALLY = Tally()
+# The verdicts of the turn under way, for its ceiling on refusals (loop.py); None outside a turn.
+turn_verdicts: contextvars.ContextVar[list | None] = contextvars.ContextVar("turn_verdicts", default=None)
 
 
 async def decide(area: str, request, action: dict, *, ask: ASK_MODEL, attended: bool, lang: str = "zh",
@@ -665,6 +668,8 @@ async def decide(area: str, request, action: dict, *, ask: ASK_MODEL, attended: 
         if tally.refused[area] >= REFUSALS_STOP:
             tally.refused[area] = 0
             verdict.stop = True
+    if turn_verdicts.get() is not None:
+        turn_verdicts.get().append(verdict)
     return verdict
 
 

@@ -28,6 +28,7 @@ from .dm import DirectMessages
 from .followup import FollowUp
 from .ingestion import ContentIngestion
 from .llm import ModelCalls
+from .loop import ToolLoop
 from .memory import Memory
 from .messages import MessageParsing
 from .prompt import PromptBuilder
@@ -104,7 +105,7 @@ def _loop_time() -> float:
 
 
 class Agent(Turns, DirectMessages, MessageParsing, ReplyDecision, PromptBuilder,
-            Retrieval, ModelCalls, WebSearch, FollowUp, Consolidation, Memory,
+            Retrieval, ModelCalls, ToolLoop, WebSearch, FollowUp, Consolidation, Memory,
             DataViews, ContentIngestion):
     def __init__(self, settings: Optional[AgentSettings] = None, **overrides):
         """Wire one agent from one settings record: ``Agent(settings)``, or

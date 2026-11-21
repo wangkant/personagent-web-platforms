@@ -28,10 +28,6 @@ logger = logging.getLogger("mibo.shell")
 
 NAME = "use_computer"
 OUT_SHOWN = 300
-# Rounds of calls and seconds of model time a computer task may take; a plan of n steps gets 6 + 3n rounds.
-STEPS = 16
-STEPS_MAX = 30
-WITHIN_S = 240.0
 # How often the waiting row says how long a command has run.
 PROGRESS_S = 3.0
 
@@ -159,34 +155,6 @@ def _lang() -> str:
     return "zh" if (langs.normalize(os.getenv("AGENT_LANG", "")) or "en").startswith("zh") else "en"
 
 
-# ---------------------------------------------------------------- the budget of a task of many steps
-
-def started(lookups) -> None:
-    """A computer tool was called this turn: the turn may take a computer task's rounds and time."""
-    lookups.__dict__.setdefault("steps", STEPS)
-
-
-def rounds(lookups, default: int) -> int:
-    """Rounds of calls this turn may take: the chat's few, or a computer task's budget once one began."""
-    return max(default, lookups.__dict__.get("steps", 0))
-
-
-def within(lookups, default: float) -> float:
-    """Seconds of model time the turn's calls may take."""
-    return WITHIN_S if "steps" in lookups.__dict__ else default
-
-
-def out_of_steps(lookups, used: int) -> str:
-    """Said to the last answer when a computer task ended without the model's own answer (its steps or time
-    ran out, or the model failed): what is done and what is not, plainly."""
-    if "steps" not in lookups.__dict__:
-        return ""
-    left = [p["step"] for p in lookups.__dict__.get("plan", []) if p.get("status") != "completed"]
-    return (f"[Note from the app] This task stopped after {used} steps, before it was finished: its steps or time "
-            "for one message ran out. Say plainly what is done and what is not"
-            + (f" (not done yet: {'; '.join(left)})" if left else "") + "; they can say 继续 to go on.")
-
-
 # ---------------------------------------------------------------- the plan
 
 def plan(args: dict, lookups) -> str:
@@ -195,9 +163,6 @@ def plan(args: dict, lookups) -> str:
             for s in args.get("steps") or [] if isinstance(s, dict) and str(s.get("step") or "").strip()][:12]
     if not rows:
         return "(give the steps, each with step and status)"
-    started(lookups)
-    lookups.__dict__["plan"] = rows
-    lookups.__dict__["steps"] = max(lookups.__dict__["steps"], min(STEPS_MAX, 6 + 3 * len(rows)))
     now = next((r["step"] for r in rows if r["status"] == "in_progress"),
                next((r["step"] for r in rows if r["status"] == "pending"), rows[-1]["step"]))
     marks = {"completed": "✓", "in_progress": "→", "pending": "·"}
@@ -213,8 +178,7 @@ def plan(args: dict, lookups) -> str:
     done = sum(r["status"] == "completed" for r in rows)
     if done == len(rows):
         return "Plan kept: every step is done. Now tell them plainly what was done, with the names and numbers."
-    return (f"Plan kept ({done} of {len(rows)} done; up to {lookups.__dict__['steps']} steps this message). Go on "
-            "with the next step; tick each off as it is done.")
+    return f"Plan kept ({done} of {len(rows)} done). Go on with the next step; tick each off as it is done."
 
 
 # ---------------------------------------------------------------- calls
@@ -305,7 +269,6 @@ async def use(agent, args: dict, lookups) -> str:
         return "(give the PowerShell command to run)"
     if getattr(lookups, "shell_held", ""):
         return f"(no more commands this turn: {lookups.shell_held}. Tell them how it stands.)"
-    started(lookups)
     home = today.runtime_of(agent).parent
     lang = _lang()
     plain = await asyncio.to_thread(_ask, home, "POST", "/api/shell/read", 30, json={"command": command, "folder": folder})
@@ -370,7 +333,6 @@ async def use_file(agent, name: str, args: dict, lookups) -> str:
     from ..browsed import _ask
     if getattr(lookups, "shell_held", "") and OPS[name] not in ("read", "list", "search"):
         return f"(no more changes this turn: {lookups.shell_held}. Tell them how it stands.)"
-    started(lookups)
     home = today.runtime_of(agent).parent
     lang = _lang()
     from .words import file_doing

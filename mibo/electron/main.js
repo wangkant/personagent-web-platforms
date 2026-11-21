@@ -1,9 +1,11 @@
 // Mibo's Electron main process: one window holding browser views, driven by the Python app over a local websocket.
 //
-// stdin carries one line, {"port", "token", "downloads", "held"}, and is then closed: the main process connects to
-// ws://127.0.0.1:<port>, sends {"hello": token} and answers requests {"id", "op", ...} with {"id", "result"} or
-// {"id", "error"}. Events go the other way as {"event", ...}. The token is never written to disk or argv, and the
-// main process listens on no port of its own: page operation goes through webContents.debugger, in process.
+// stdin carries one line, {"port", "token", "data", "downloads", "held"}, and is then closed: the main process
+// connects to ws://127.0.0.1:<port>, sends {"hello": token} and answers requests {"id", "op", ...} with
+// {"id", "result"} or {"id", "error"}. Events go the other way as {"event", ...}. The token is never written to
+// disk or argv, and the main process listens on no port of its own: page operation goes through
+// webContents.debugger, in process. Its profile, caches and logs go to "data", a folder in the app's home, never to
+// the system's per-user folders.
 //
 // Ops:
 //   tab.create {place, offscreen, ua}   a view on the persistent partition, its debugger attached and never
@@ -213,4 +215,6 @@ app.on("window-all-closed", () => app.quit());
 
 // The app writes its one line and closes stdin: read whole, the same way on every system.
 const config = JSON.parse(fs.readFileSync(0, "utf8").split("\n")[0]);
+app.setPath("userData", config.data);
+app.setAppLogsPath(path.join(config.data, "logs"));
 app.whenReady().then(() => start(config));

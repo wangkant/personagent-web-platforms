@@ -2046,26 +2046,6 @@
     "failed": "That did not work. Try again later.",
     "unavailable": "The sites could not be listed. Try again later."
   },
-  "skilloffer": {
-    "waiting": "Waiting for your answer",
-    "ask": "Install the skill “{title}”?",
-    "meta": "{about} · {publisher}",
-    "scripts": "Has scripts",
-    "yes": "Install",
-    "no": "Don't install",
-    "installing": "Installing",
-    "done": "Installed “{title}”; carrying on with your request.",
-    "declined": "Not installed; carrying on with your request.",
-    "failed": "Not installed: {why} Carrying on with your request.",
-    "gone": "This card is no longer current. Nothing was done.",
-    "errors": {
-      "market_fetch_failed": "It could not be downloaded from its source.",
-      "market_hash_mismatch": "What arrived does not match the version the catalog recorded.",
-      "market_high_risk": "The safety check found high-risk content.",
-      "skill_exists": "A skill of that name is already there.",
-      "other": "The install did not work."
-    }
-  },
   "toolcard": {
     "waiting": "Waiting for your answer",
     "startTitle": "Start a program on this computer: {server}",

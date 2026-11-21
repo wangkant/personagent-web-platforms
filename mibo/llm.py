@@ -18,11 +18,16 @@ from . import abilities, schedule_tool, spend
 from .endpoints import (PROBLEMS, adapt_rejected_payload, chat_completions_url, endpoint_for,
                         model_problem, without_pictures)
 from .usage import USAGE_FILE, UsageBook
-from .textproc import (
-    _as_protocol_object, _is_protocol_dict, salvage_json_object,
-)
 
 logger = logging.getLogger("agent")
+
+# The reply's room in tokens: an eighth of the context window the host states (abilities.py), within these.
+ANSWER_TOKENS = (8192, 32768)
+
+
+def answer_tokens(record: dict | None) -> int:
+    low, high = ANSWER_TOKENS
+    return max(low, min(high, int((record or {}).get("context") or 0) // 8))
 
 # What the calls in this task are for, as counted in the usage tally
 # (usage.PURPOSES); a context, so no fake `_call_llm` needs a new argument.
@@ -380,13 +385,17 @@ class ModelCalls:
 
     async def _tool_round(self, system: str, messages: list[dict], model: str,
                           tools: list[dict], *, timeout: float, choice: str = "auto") -> dict | None:
-        """One reply-model call that may call `tools`, thinking off and no
-        response_format (with it, models stop calling tools): the answer's
+        """One reply-model call that may call `tools`, with no response_format
+        (with it, models stop calling tools), thinking at the person's effort
+        where the model was measured to think (abilities.reply_effort), and room
+        for the answer from the context window its host states: the answer's
         message. A call that fails is retried and moved to the fallback model
         as every model call is (`_recovered`), and raises when that fails too.
         None when the endpoint takes no tool calls (`_refuses_tools`) or model
         spending is paused.
-        `choice` "required": a call must be made, where the endpoint takes it."""
+        `choice` "required": a call must be made, where the endpoint takes it;
+        "none": no call may be, and an endpoint that refuses it is asked without
+        tools."""
         if spend.paused_for(self, _call_purpose.get()):
             return None
         began = time.monotonic()
@@ -394,11 +403,12 @@ class ModelCalls:
         def refused(resp) -> bool:
             return getattr(resp, "status_code", 200) in (400, 404, 422)
 
-        async def ask(mdl: str, max_tokens: int = 4096) -> dict | None:
+        async def ask(mdl: str, more: int = 1) -> dict | None:
             url, key = self._endpoint_for(mdl)
             if ("tools", url, mdl) in self._api_quirks:
                 return None
-            payload = {"model": mdl, "max_tokens": max_tokens, "tools": tools,
+            room = more * answer_tokens(abilities.record(abilities.runtime_of(self), url, mdl))
+            payload = {"model": mdl, "max_tokens": room, "tools": tools,
                        "tool_choice": "auto" if ("tool_choice", url, mdl) in self._api_quirks else choice,
                        "messages": ([{"role": "system", "content": system}] if system else []) + list(messages)}
             effort = self._reply_effort(url, mdl)
@@ -407,7 +417,12 @@ class ModelCalls:
             else:
                 self._thinking_off(payload, url)
             resp = await self._post_chat(url, key, payload, timeout=timeout)
-            if refused(resp) and payload["tool_choice"] != "auto":
+            if refused(resp) and choice == "none":
+                # The last call of a turn: the same request without tools.
+                payload.pop("tools")
+                payload.pop("tool_choice")
+                resp = await self._post_chat(url, key, payload, timeout=timeout)
+            elif refused(resp) and payload["tool_choice"] != "auto":
                 # Asked again with "auto", the round's own note saying it in words; taken that way, it is
                 # the required call this endpoint refuses.
                 payload["tool_choice"] = "auto"
@@ -428,7 +443,7 @@ class ModelCalls:
         if body is not None and body["choices"][0].get("finish_reason") == "length":
             # Cut off at the token cap: asked once more with four times the room.
             try:
-                body = await ask(used, 4 * 4096) or body
+                body = await ask(used, 4) or body
             except Exception as e:
                 logger.warning("[Agent] tool round not asked again with more room (model=%s): %s",
                                used, type(e).__name__)
@@ -660,16 +675,10 @@ class ModelCalls:
         disable_thinking: bool = False,
         temperature: float | None = None,
         json_object: bool = False,
-        plain_text_fallback: bool = False,
     ) -> str:
         """OpenAI-compatible chat completion with jittered retry and
-        error-driven fallback. `json_object` sets response_format, without which
-        a thinking model drops the JSON protocol on some turns.
-
-        `plain_text_fallback` (reply calls only, where `reply` IS the schema):
-        with response_format and a prior assistant turn DeepSeek can answer
-        blank, so a still-blank reply is asked once more without it and the
-        prose wrapped by `_as_protocol_object`."""
+        error-driven fallback. `json_object` sets response_format, for the
+        inner calls that answer in JSON."""
         if not (self.base_url and self.api_key):
             logger.warning("[Agent] missing base_url/api_key; cannot call LLM")
             return ""
@@ -677,14 +686,13 @@ class ModelCalls:
             return ""
         began = time.monotonic()
 
-        async def _do_call(mtok: int, mdl: str, force_disable_thinking: bool = False,
-                           force_plain_text: bool = False):
+        async def _do_call(mtok: int, mdl: str, force_disable_thinking: bool = False):
             # Per call: `mdl` changes across the rungs, and the endpoint with it.
             _url, _key = self._endpoint_for(mdl)
             payload = {"model": mdl, "max_tokens": mtok, "messages": _oai_messages}
             if temperature is not None:
                 payload["temperature"] = temperature
-            if json_object and not force_plain_text:
+            if json_object:
                 payload["response_format"] = {"type": "json_object"}
             effort = None if force_disable_thinking else self._reply_effort(_url, mdl)
             if effort:
@@ -805,31 +813,6 @@ class ModelCalls:
         elif not text:
             logger.warning("[Agent] LLM returned empty text; finish_reason=%s (model=%s)",
                            finish, used_model)
-        # Last rung, after the ladder so it catches whatever is still blank.
-        # JSON mode is a request, not a guarantee: prose is the reply.
-        if (text and json_object and plain_text_fallback
-                and not re.sub(r"^```(?:json)?\s*", "", text.lstrip(),
-                               flags=re.IGNORECASE).startswith(("{", "["))):
-            found = salvage_json_object(text)
-            if _is_protocol_dict(found):
-                # Prose, then the object asked for: the object, not the prose around it.
-                text = json.dumps(found, ensure_ascii=False)
-            else:
-                logger.info("[Agent] prose answer in JSON mode, wrapped (model=%s)",
-                            used_model)
-                text = _as_protocol_object(text)
-        if not text and json_object and plain_text_fallback:
-            logger.warning(
-                "[Agent] blank content in json_object mode (model=%s, "
-                "finish=%s); retrying once WITHOUT response_format",
-                used_model, finish)
-            again = await _once_more("plain-text retry", max_tokens,
-                                     force_plain_text=True)
-            plain = again[0] if again is not None else ""
-            if plain:
-                text = _as_protocol_object(plain)
-                logger.info("[Agent] plain-text retry recovered %d chars (model=%s)",
-                            len(plain), used_model)
         # Cache usage comes in DeepSeek's and the OpenAI-style spelling.
         usage = data.get("usage") or {}
         _hit = usage.get("prompt_cache_hit_tokens")

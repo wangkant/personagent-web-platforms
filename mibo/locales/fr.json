@@ -2052,26 +2052,6 @@
     "unavailable": "Impossible d'afficher la liste des sites. Réessayez plus tard.",
     "others_one": "{count} autre site conserve des cookies ici ; tout déconnecter les supprime aussi."
   },
-  "skilloffer": {
-    "waiting": "En attente de votre réponse",
-    "ask": "Installer la compétence « {title} » ?",
-    "meta": "{about} · {publisher}",
-    "scripts": "Contient des scripts",
-    "yes": "Installer",
-    "no": "Ne pas installer",
-    "installing": "Installation",
-    "done": "« {title} » installée ; la demande se poursuit.",
-    "declined": "Non installée ; la demande se poursuit.",
-    "failed": "Non installée : {why} La demande se poursuit.",
-    "gone": "Cette carte n'est plus d'actualité. Aucune action n'a été effectuée.",
-    "errors": {
-      "market_fetch_failed": "Impossible de la télécharger depuis sa source.",
-      "market_hash_mismatch": "Le contenu reçu ne correspond pas à la version enregistrée dans le catalogue.",
-      "market_high_risk": "La vérification de sécurité a détecté un contenu à haut risque.",
-      "skill_exists": "Une compétence portant ce nom existe déjà.",
-      "other": "L'installation a échoué."
-    }
-  },
   "toolcard": {
     "waiting": "En attente de votre réponse",
     "startTitle": "Lancer un programme sur cet ordinateur : {server}",

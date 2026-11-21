@@ -1,4 +1,4 @@
-"""Retrieval ranking: one score per row from lexical, embedding, scope and recency.
+"""Retrieval ranking: one score per row from lexical, embedding, recency, importance and use.
 
 Pure functions over fields computed ahead, so the ranking can be tested on
 hand-built rows and the prompt path never waits on anything in here."""
@@ -12,10 +12,6 @@ from operator import mul
 from typing import Iterable, Optional, Sequence
 
 from .embeddings import text_key
-
-#: Where a row came from, lowest first: a shipped seed, something this
-#: deployment learned for its persona, something learned in this conversation.
-SEED, PERSONA, CONVERSATION = 0, 1, 2
 
 BM25_K1 = 1.2
 BM25_B = 0.75
@@ -34,9 +30,6 @@ class Weights:
     half_life_days: float
     #: Per field of a row, in the order its fields are given.
     fields: tuple[float, ...] = (1.0,)
-    #: Bonus per scope tier: SEED, PERSONA, CONVERSATION.
-    scope: tuple[float, float, float] = (0.0, 0.0, 0.0)
-    mode: float = 0.0
     #: Times (imp - 1) / 4 for an importance of 1 to 5.
     importance: float = 0.0
     #: Times min(uses, 5) / 5.
@@ -45,12 +38,7 @@ class Weights:
     time_match: float = 0.0
 
 
-#: Examples and pairs; scope stays under the mode bonus, a preference not a filter.
-EXAMPLE_WEIGHTS = Weights(lexical=1.0, embedding=2.0, recency=0.3,
-                          half_life_days=14.0, fields=(1.0, 0.3),
-                          scope=(0.0, 0.2, 0.4), mode=0.5)
-#: Memories all belong to one conversation, so scope and mode say nothing;
-#: importance and use keep an old useful fact above new trivia.
+#: Importance and use keep an old useful fact above new trivia.
 MEMORY_WEIGHTS = Weights(lexical=0.5, embedding=1.0, recency=0.6,
                          half_life_days=14.0, importance=0.4, use=0.2,
                          time_match=2.0)
@@ -213,27 +201,15 @@ def age_phrase(age_s: float) -> str:
     return f"{days // 30} months ago"
 
 
-def scope_tier(row: dict, conv_id: str) -> int:
-    if row.get("_seed"):
-        return SEED
-    scope = row.get("scope")
-    if conv_id and isinstance(scope, dict) and scope.get("conv_id") == conv_id:
-        return CONVERSATION
-    return PERSONA
-
-
 def score(weights: Weights, *, lexical: float = 0.0,
-          similarity: Optional[float] = None, tier: int = SEED,
-          age_s: Optional[float] = None, mode_match: bool = False,
+          similarity: Optional[float] = None, age_s: Optional[float] = None,
           importance: Optional[float] = None, uses: int = 0,
           time_match: bool = False) -> float:
-    s = weights.lexical * lexical + weights.scope[tier]
+    s = weights.lexical * lexical
     if similarity is not None:
         s += weights.embedding * max(0.0, similarity)
     if age_s is not None:
         s += weights.recency * recency(age_s, weights.half_life_days)
-    if mode_match:
-        s += weights.mode
     if importance is not None:
         s += weights.importance * _importance_part(importance)
     if uses:

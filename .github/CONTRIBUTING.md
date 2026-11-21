@@ -25,9 +25,13 @@ The suite stubs the model and needs no key. The ruff line catches dead and undef
 
 | Workflow | Runs |
 |---|---|
-| `ci.yml` | The suite on Linux (Python 3.10–3.14) and Windows (3.12); builds the wheel and sdist, installs each into a clean venv and runs the two smoke scripts |
+| `ci.yml` | The suite on Linux x64 (Python 3.10–3.14), Linux arm64 and macOS (3.12) and Windows (3.12 and 3.14), with `--durations=25`; a browser test that skips fails there (`MIBO_REQUIRE_BROWSER=1`). Builds the wheel and sdist on Linux, Windows and macOS, installs each into a clean venv and runs the two smoke scripts. Each job stops at 15 minutes. These jobs gate a push |
 | `window.yml` | Opens the app window on Linux, macOS and Windows with a stand-in model (`tools/window_smoke.py`) |
+| `sandbox.yml` | The checks that need a real window, pointer or keys (`tools/sandbox/`), each system on a hosted runner of its own; reports, does not gate |
+| `xplat.yml` | The cross-system checks of `tools/xplat/` on Windows, macOS, Linux X11 and Linux Wayland: bash reading, the Electron pane and Cua Driver; reports, does not gate |
 | `release.yml` | See [Releasing](#releasing) |
+
+No workflow holds or asks for a model key.
 
 ### Smoke scripts
 
@@ -41,6 +45,10 @@ python -m venv /tmp/smoke-env
 python tools/package_smoke.py --mibo /tmp/smoke-env/bin/mibo --version X.Y.Z
 python tools/welcome_smoke.py --mibo /tmp/smoke-env/bin/mibo
 ```
+
+### Real-model benches
+
+The scripts under `tools/` that call a real model (`tools/everyday.py`, `tools/review_score.py`, `tools/memory_life.py`, `tools/recsim/` and the rest) run only on your own computer, by hand, never in CI. Give each run a scratch home of its own (`mibo --home DIR`, or `AGENT_HOME=DIR`) whose `.env` holds `LLM_BASE_URL`, `LLM_MODEL` and `LLM_API_KEY`; the key stays in that file and is never committed. Pass `--budget` where a script takes one. `tools/sandbox/everyday.py` reads its key from `SANDBOX_MODEL_KEY` and reports itself as not run without one.
 
 ### Tests
 

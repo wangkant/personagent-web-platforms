@@ -17,7 +17,6 @@ import ssl
 import time
 import warnings
 import zlib
-from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import urlencode, urlsplit
@@ -34,9 +33,12 @@ logger = logging.getLogger("agent")
 # Hard ceiling on any image the bot decodes or forwards.
 VISION_MAX_IMAGE_BYTES = env_int("VISION_MAX_IMAGE_BYTES", 5_000_000, minimum=1)
 
-# True while the person's message is read: a picture in it is their own, read out whole for
-# the reply (VISION_READ_PROMPT), not named in a few words.
-reads_own_pictures: ContextVar[bool] = ContextVar("reads_own_pictures", default=False)
+# A reading of a picture takes this many tokens at most: a screenshot's or a receipt's text, whole.
+VISION_READ_TOKENS = 1500
+# A busy vision model is asked this many times in all, waiting VISION_BACKOFF_S, then twice that, between.
+VISION_ATTEMPTS = 3
+VISION_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+VISION_BACKOFF_S = 1.0
 
 MAX_URL_LENGTH = 4096
 MAX_HTML_WIRE_BYTES = 128 * 1024
@@ -281,19 +283,6 @@ async def safe_fetch_url(
         except asyncio.TimeoutError:
             logger.warning("[Agent] DNS resolution timed out: %s", _url_for_log(current))
             return None
-        if resolved is None and client_factory is not None:
-            # Reserved .invalid hosts are for injected test transports; without
-            # an injected factory this stays fail-closed.
-            try:
-                test_host = (urlsplit(current).hostname or "").rstrip(".")
-            except Exception:
-                test_host = ""
-            if test_host.endswith(".invalid"):
-                test_scheme = urlsplit(current).scheme.lower()
-                test_port = urlsplit(current).port or (
-                    443 if test_scheme == "https" else 80
-                )
-                resolved = (test_host, "93.184.216.34", test_port)
         if resolved is None:
             logger.warning("[Agent] refusing internal/unresolvable URL hop: %s",
                            _url_for_log(current))
@@ -348,12 +337,7 @@ async def safe_fetch_url(
 
                     chunks: list[bytes] = []
                     wire_size = 0
-                    iterator = (
-                        response.aiter_raw()
-                        if hasattr(response, "aiter_raw")
-                        else response.aiter_bytes()
-                    )
-                    async for chunk in iterator:
+                    async for chunk in response.aiter_raw():
                         wire_size += len(chunk)
                         if wire_size > max_wire_bytes:
                             return None
@@ -427,20 +411,6 @@ class ContentIngestion:
     )
     _TITLE_TAG_PAT = re.compile(r'<title[^>]*>(.*?)</title>', re.IGNORECASE | re.DOTALL)
 
-    VISION_PROMPT = (
-        "This image is most likely a **reaction sticker / meme** in a group chat "
-        "(a conventional emotion symbol, not a real photo).\n"
-        "**Task: name the emotion/meme it conveys, at most ~20 words.**\n"
-        "\n"
-        "Hard rules:\n"
-        "1. If you can't make it out / can't open / fully black → reply \"can't see\". Never fabricate.\n"
-        "2. **Report meaning, not pixels.** Bad: \"a shiba dog sitting at a desk\"  Good: \"doge — smug / mocking\". Bad: \"a panda\"  Good: \"speechless panda — out of words\".\n"
-        "3. If there's **text on the image, quote it + describe the mood**. e.g. \"text 'you're right' — sarcastic agreement\" / \"text 'I'm about to lose it' — fake-angry\".\n"
-        "4. Famous memes: name them directly — doge, speechless panda, salaryman crying, sobbing cat, distressed mouse, NPC thinking, etc.\n"
-        "5. Real photo (not a sticker) → short subject description is fine. e.g. \"a real cat curled up on a couch\".\n"
-        "6. Don't prefix with \"this image / the picture shows / in the image\" — just say it."
-    )
-
     # A picture the person sent in their own chat: the reply model answers from this alone.
     VISION_READ_PROMPT = (
         "Someone sent this picture to their assistant and will ask about it. The assistant "
@@ -450,45 +420,21 @@ class ContentIngestion:
         "3. If you can't make it out, reply \"can't see\". Never invent anything."
     )
 
-    # A caption containing any of these means the model couldn't see the image.
-    _VISION_REJECT_TOKENS = (
-        # English
-        "can't see", "cannot see", "unable to see", "no image", "not visible",
-        "can't read", "cannot read", "can't open", "cannot open",
-        "unclear", "unrecognizable", "blank", "black screen", "empty image",
-        "failed to load", "cannot access",
-        # Chinese: some endpoints answer in Chinese whatever the prompt
-        "不清楚", "不确定", "看不到", "看不了", "看不清", "打不开",
-        "无法", "不存在", "无内容", "黑屏", "空白", "没看到",
-        "图片为空", "加载失败", "无法访问", "无法识别",
-    )
-
     async def _fetch_image_bytes(self, url: str) -> bytes | None:
-        """Image bytes from a base64:// or SSRF-guarded http(s) URL."""
-        if not url:
+        """The bytes of a picture the person attached, from its base64:// form; None when they are not a
+        picture within VISION_MAX_IMAGE_BYTES."""
+        encoded = url.removeprefix("base64://")
+        if len(encoded) > ((VISION_MAX_IMAGE_BYTES + 2) // 3) * 4 + 4:
+            logger.warning("[Agent] base64 image exceeds size limit")
             return None
-        if url.startswith("base64://"):
-            # A picture the person attached arrives inline.
-            encoded = url[len("base64://"):]
-            max_encoded = ((VISION_MAX_IMAGE_BYTES + 2) // 3) * 4 + 4
-            if len(encoded) > max_encoded:
-                logger.warning("[Agent] base64 image exceeds size limit")
-                return None
-            try:
-                data = base64.b64decode(encoded, validate=True)
-            except Exception as e:
-                logger.debug("[Agent] base64 image decode failed: %s", e)
-                return None
-            if len(data) > VISION_MAX_IMAGE_BYTES or not _detect_image_mime(data):
-                return None
-            return data
-        if len(url) > MAX_URL_LENGTH:
-            logger.warning("[Agent] image URL exceeds length limit")
+        try:
+            data = base64.b64decode(encoded, validate=True)
+        except Exception as e:
+            logger.debug("[Agent] base64 image decode failed: %s", e)
             return None
-        # SSRF guard: every redirect hop is re-checked.
-        return await self._safe_get_bytes(
-            url, timeout=15, headers={"User-Agent": "Mozilla/5.0"},
-            max_bytes=VISION_MAX_IMAGE_BYTES)
+        if len(data) > VISION_MAX_IMAGE_BYTES or not _detect_image_mime(data):
+            return None
+        return data
 
     @staticmethod
     def _format_bili_line(info: dict, title_fallback: str = "") -> str:
@@ -711,7 +657,6 @@ class ContentIngestion:
             allowed_content_types=("text/html", "application/xhtml+xml"),
             require_content_type=True,
             max_redirects=max_redirects,
-            client_factory=self.__dict__.get("_http"),
         )
         if result is None:
             return None
@@ -729,24 +674,6 @@ class ContentIngestion:
             content=result.content,
             request=request,
         )
-
-    async def _safe_get_bytes(self, url: str, *, timeout: float,
-                              headers: Optional[dict] = None,
-                              max_bytes: int,
-                              max_redirects: int = 5) -> bytes | None:
-        """Stream a bounded HTTP body while validating every redirect hop."""
-        result = await safe_fetch_url(
-            url,
-            timeout=timeout,
-            max_wire_bytes=max_bytes,
-            max_decoded_bytes=max_bytes,
-            headers=headers,
-            max_redirects=max_redirects,
-            client_factory=self.__dict__.get("_http"),
-        )
-        if result is None:
-            return None
-        return result.content if _detect_image_mime(result.content) else None
 
     @classmethod
     def _should_skip_url(cls, url: str) -> bool:
@@ -878,24 +805,15 @@ class ContentIngestion:
             url.encode("utf-8", errors="replace"),
         ).hexdigest()
 
-    def _accept_vision_caption(self, url: str, text: str, provider: str, *, whole: bool = False) -> str:
-        """A caption kept: a sticker's cut to 150 characters and dropped when it says it saw
-        nothing; `whole`, the reading of a person's own picture as the model wrote it."""
+    def _accept_vision_caption(self, url: str, text: str) -> str:
+        """The reading of a picture, kept whole as the model wrote it; "" for one too short to say anything."""
         text = (text or "").strip()
-        hit = ""
-        if not whole:
-            text = text[:150]
-            hit = next((t for t in self._VISION_REJECT_TOKENS if t in text), "")
-        if text and len(text) >= 4 and not hit:
+        if len(text) >= 4:
             self.image_caption_cache[self._image_cache_key(url)] = text
             self._gc_image_cache()
-            logger.info("[Agent] vision/%s (%s): %s", provider, _url_for_log(url),
-                        text[:60])
+            logger.info("[Agent] vision (%s): %s", _url_for_log(url), text[:60])
             return text
-        logger.info(
-            "[Agent] vision/%s rejected (%s, hit=%r, len=%d): %s",
-            provider, _url_for_log(url), hit, len(text), text[:80],
-        )
+        logger.info("[Agent] vision gave too little (%s): %r", _url_for_log(url), text)
         return ""
 
     @staticmethod
@@ -957,46 +875,40 @@ class ContentIngestion:
             mime = "image/png"
         return f"data:{mime};base64,{base64.b64encode(img_bytes).decode()}"
 
-    async def _vision_post(
-        self, prompt: str, data_url: str, *, max_tokens: int, temperature: float,
-        attempts: int, retryable: frozenset[int], backoff: float,
-        retry_errors: bool,
-    ) -> tuple[httpx.Response | None, Exception | None]:
-        """POST one image prompt, retrying `retryable` statuses (and transport
-        errors when `retry_errors`, else they raise) with exponential backoff.
-        A 400 refusing a field is resent at once in the spelling the endpoint
-        takes, which `_post_chat` remembers as it does for a reply. Returns
-        the last response (None if every try raised) and the last error."""
+    async def _vision_post(self, url: str, data_url: str) -> tuple[httpx.Response | None, Exception | None]:
+        """Ask the vision model at `url` to read one picture; asked again, after VISION_BACKOFF_S and then twice
+        that, while it is busy (VISION_RETRY_STATUSES) or the connection fails. A 400 refusing a field is resent
+        at once in the spelling the endpoint takes, which `_post_chat` remembers as it does for a reply. The last
+        response and the last error; no response when every try raised, or when the endpoint refused the picture
+        itself, since what it said without it is no reading of it."""
         payload = {
             "model": self.vision_model,
             "messages": [{
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": prompt},
+                    {"type": "text", "text": self.VISION_READ_PROMPT},
                     {"type": "image_url", "image_url": {"url": data_url}},
                 ],
             }],
-            "max_tokens": max_tokens,
-            "temperature": temperature,
+            "max_tokens": VISION_READ_TOKENS,
+            "temperature": 0.3,
         }
-        url = f"{self.vision_base_url}/chat/completions"
         # Hidden reasoning off, and K2 at the one temperature it takes that way.
         self._thinking_off(payload, url, k2_temperature=True)
         r = None
         last_exc = None
-        for attempt in range(attempts):
+        for attempt in range(VISION_ATTEMPTS):
             try:
-                r = await self._post_chat(url, self.vision_api_key, payload,
-                                          timeout=30)
+                r = await self._post_chat(url, self.vision_api_key, payload, timeout=30)
             except Exception as e:
-                if not retry_errors:
-                    raise
                 r, last_exc = None, e
             else:
-                if r.status_code not in retryable:
+                if r.status_code not in VISION_RETRY_STATUSES:
                     break
-            if attempt < attempts - 1:
-                await asyncio.sleep(backoff * 2 ** attempt)
+            if attempt < VISION_ATTEMPTS - 1:
+                await asyncio.sleep(VISION_BACKOFF_S * 2 ** attempt)
+        if not isinstance(payload["messages"][0]["content"], list):
+            return None, last_exc
         return r, last_exc
 
     @staticmethod
@@ -1006,23 +918,20 @@ class ContentIngestion:
                 .get("content", "") or "")
 
     async def _describe_image_vision(self, url: str) -> str | None:
-        """Caption an image through the OpenAI-compatible vision endpoint. None
-        means the call failed and may succeed later; "" means no usable caption."""
+        """A picture read out by the OpenAI-compatible vision endpoint. None means the call failed and may
+        succeed later; "" means no usable reading."""
         try:
+            endpoint = f"{self.vision_base_url}/chat/completions"
+            if ("images", endpoint, self.vision_model) in self._api_quirks:
+                # This model has said it takes no pictures.
+                return ""
             img_bytes = await self._fetch_image_bytes(url)
             if not img_bytes:
                 return None
             if len(img_bytes) < 200:
                 logger.debug("[Agent] vision: image too small (%d bytes), skipping", len(img_bytes))
                 return ""
-            if len(img_bytes) > VISION_MAX_IMAGE_BYTES:
-                logger.warning("[Agent] vision: image too large (%d bytes), skipping", len(img_bytes))
-                return ""
             mime = _detect_image_mime(img_bytes)
-            if not mime:
-                logger.debug("[Agent] vision: unknown image magic %s",
-                             img_bytes[:12].hex())
-                return ""
             # Vision endpoints commonly reject these.
             if mime in ("image/heic", "image/avif"):
                 logger.info("[Agent] vision: skip %s", mime)
@@ -1031,20 +940,13 @@ class ContentIngestion:
             if not data_url:
                 logger.info("[Agent] vision: skip GIF (first-frame extract failed)")
                 return ""
-            # Retry throttling, 5xx and timeouts. A 400 is mostly a model that
-            # cannot read images, and _post_chat already resends one naming a field.
-            reading = reads_own_pictures.get()
-            r, last_exc = await self._vision_post(
-                self.VISION_READ_PROMPT if reading else self.VISION_PROMPT, data_url,
-                max_tokens=1500 if reading else 120, temperature=0.3,
-                attempts=3, retryable=frozenset({429, 500, 502, 503, 504}),
-                backoff=1.0, retry_errors=True)
+            r, last_exc = await self._vision_post(endpoint, data_url)
             if r is None or r.status_code != 200:
                 logger.warning("[Agent] vision HTTP %d: %s (exc=%s)",
                                r.status_code if r else 0,
                                (r.text if r else "")[:200], last_exc)
                 return None
-            return self._accept_vision_caption(url, self._vision_text(r), "api", whole=reading)
+            return self._accept_vision_caption(url, self._vision_text(r))
         except Exception as e:
             logger.debug("[Agent] vision failed: %s: %s",
                          type(e).__name__, e)

@@ -1,30 +1,12 @@
-"""The memory helpers: how old a fact reads, and the call budget.
+"""The memory helpers: the call budget.
 
     python -m pytest tests/test_memory_store.py
 """
 from __future__ import annotations
 
-import time
 from pathlib import Path
 
-from mibo import ranking
-
 from helpers import check
-
-
-def test_the_age_phrase_starts_from_when_a_fact_was_first_noted() -> None:
-    now = time.time()
-    check("a two-week-old fact confirmed today",
-          ranking.memory_age(now - 14 * 86400, now, now)
-          == "first noted 14 days ago, confirmed today",
-          ranking.memory_age(now - 14 * 86400, now, now))
-    check("a fact written once", ranking.memory_age(now - 3 * 86400, now - 3 * 86400, now)
-          == "first noted 3 days ago")
-    check("a legacy row without born", ranking.memory_age(None, now, now)
-          == "first noted today")
-    check("gap phrases", (ranking.gap_phrase(10 * 60), ranking.gap_phrase(3 * 3600),
-                          ranking.gap_phrase(2 * 86400 + 5))
-          == ("10 minutes later", "3 hours later", "2 days later"))
 
 
 def test_the_call_budget(tmp: Path) -> None:

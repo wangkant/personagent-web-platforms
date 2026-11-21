@@ -12,13 +12,6 @@ logger = logging.getLogger("agent")
 #: Verdicts of `_final_reply`.
 SEND, PASS, BLOCKED = "send", "pass", "blocked"
 
-#: Appended to the system prompt for the one retry of a draft that had
-#: nothing to say (dm.py).
-EMPTY_DRAFT_RETRY_NOTE = (
-    "Your previous draft had no words to send. Emit the same JSON object "
-    "again — same keys, same shape — with a `reply` of at least one word."
-)
-
 
 def is_pass_sentinel(text: str) -> bool:
     """The model's bare PASS; "Pass auf dich auf" or "pass the salt" is a reply."""

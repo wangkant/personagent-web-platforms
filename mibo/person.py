@@ -29,8 +29,7 @@ FILE = "person.json"
 FORMAT = 1
 #: What a fact can be about.
 KINDS = ("who", "like", "dislike", "form", "life", "people", "health", "manner", "other")
-#: A reply's `mem` names the plans it asked about, at most OPS_MAX; every fact about them is the fold's,
-#: which files it better than a reply model writing in passing. Also the most facts one 记住 keeps.
+#: The most facts one 记住 keeps; every other fact about them is the fold's.
 OPS_MAX = 3
 TEXT_MAX = 60
 SLOT_MAX = 40
@@ -271,13 +270,6 @@ def _lapses(f: dict, tz) -> float:
         d = date.fromisoformat(f["day"]) + timedelta(days=DAY_FACT_DAYS + 1)
         return datetime(d.year, d.month, d.day, tzinfo=tz).timestamp()
     return _num(f.get("at")) + LIFE_DAYS * 86400 if f.get("kind") == "life" else 0.0
-
-
-def read_ops(value) -> list[dict]:
-    """The reply's `mem` as operations: its "asked" objects, at most OPS_MAX; anything else (a fact, a
-    plain note, a card) is not the person store's."""
-    items = value if isinstance(value, list) else []
-    return [item for item in items if isinstance(item, dict) and str(item.get("op") or "").lower() == "asked"][:OPS_MAX]
 
 
 class Person:
@@ -620,16 +612,10 @@ def chatlog_refs() -> int:
 
 # ---- the turn's operations -----------------------------------------------------
 
-def apply_turn(store: Person, ops: list[dict], reply: str, at: float, tz: Optional[tzinfo]) -> list[dict]:
-    """The open plans a sent reply asked about: those its asked operations name, and those due by today
-    that the reply shares two words with, op or not. What the person says of themselves is the fold's.
-    Never saves."""
+def apply_turn(store: Person, reply: str, at: float, tz: Optional[tzinfo]) -> list[dict]:
+    """The open plans a sent reply asked about: those due by today that the reply shares two words with.
+    What the person says of themselves is the fold's. Never saves."""
     asked = []
-    for op in ops:
-        row = store.get(str(op.get("plan") or ""))
-        if row is not None and row.get("status") == "open":
-            store.mark_asked(row, at)
-            asked.append(row)
     today = _day(at, tz).isoformat()
     said = _tokens(reply)
     for plan in store.plans("open"):
@@ -696,7 +682,7 @@ def about_of(slot: str, text: str) -> str:
 
 # A password's or a one-time code's word, in the ten chat languages.
 _SECRET_WORD = (r"密码|密碼|口令|验证码|驗證碼|校验码|校驗碼|动态码|動態碼|"
-                r"passwords?|passcodes?|passwd|\bpin\b|verification code|security code|one[- ]time code|\botp\b"
+                r"passwords?|passcodes?|passwd|\bpin\b|verification code|security code|one[- ]time code|\botp\b|\bapi[ _-]?keys?\b|密钥|秘钥|私钥"
                 r"|\bcvv2?\b|\bcvc\b|パスワード|暗証番号|認証コード|確認コード|ワンタイム(?:パスワード|コード)"
                 r"|비밀번호|암호|인증\s?번호|인증\s?코드|contraseña|código de (?:verificación|seguridad)"
                 r"|mot de passe|code de (?:vérification|sécurité|confirmation)|passwort|kennwort"

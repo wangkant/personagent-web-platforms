@@ -4,10 +4,11 @@ can move to Electron on Windows, macOS and Linux. It needs a screen (a runner's 
     python tools/xplat/epane_check.py [--out <folder>] [--port 59876] [--frames 59877] [--only list,form]
                                       [--google] [--electron <executable>]
 
-It starts tools/opsite twice (the page's site, and a second site for frames from another origin), a websocket on
-127.0.0.1 with a token, and Electron from mibo/electron (npm ci there first), which is handed the port and the
-token on stdin. Every check runs the committed operating code (web/operate.Hands, with optruth's scripted helper in
-place of a model) on a mibo.host.etab.ElectronTab. The checks:
+It starts tools/opsite twice (the page's site, and a second site for frames from another origin), and the shell
+through mibo.host.launch: the bridge on 127.0.0.1 with a token, and the pinned Electron, fetched into <out> as the
+app fetches it into a home (or --electron), handed the port and the token on stdin. Every check runs the committed
+operating code (web/operate.Hands, with optruth's scripted helper in place of a model) on a
+mibo.host.etab.ElectronTab. The checks:
 
     bridge      a connection with the wrong token, or from a page (an Origin header), is refused
     list        the whole-page look lists the rows a script drew into plain elements
@@ -40,17 +41,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
-import hmac
 import io
 import json
 import os
 import platform
 import re
-import secrets
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -64,92 +62,10 @@ from opfiles import alert, confirm, coupon, named  # noqa: E402
 from opframes import chat, see  # noqa: E402
 from optruth import Play, click, done, typed  # noqa: E402
 
-from mibo.host.etab import ElectronTab  # noqa: E402
+from mibo.host.launch import Bridge, command, fetch, places, start  # noqa: E402
 from mibo.web import gate, operate  # noqa: E402
 
-SHELL = ROOT / "mibo" / "electron"
 GOOGLE = "https://accounts.google.com/ServiceLogin?hl=en"
-
-
-class Bridge:
-    """The app's side of the connection: a websocket on 127.0.0.1 that takes one Electron, the one holding the token.
-    `call` waits for an answer; events go to the handlers `listen` and `on` gave."""
-
-    def __init__(self) -> None:
-        from websockets.sync.server import serve
-        self.token = secrets.token_urlsafe(32)
-        self.ws = None
-        self.hello = threading.Event()
-        self.lock = threading.Lock()
-        self.count = 0
-        self.waiting: dict[int, list] = {}
-        self.handlers: dict[tuple[str, str], list] = {}
-        self.server = serve(self._serve, "127.0.0.1", 0, process_request=self._no_pages, max_size=None)
-        self.port = self.server.socket.getsockname()[1]
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
-
-    def _no_pages(self, connection, request):
-        # A web page always sends its origin; Electron's main process sends none.
-        if request.headers.get("Origin"):
-            return connection.respond(403, "Forbidden\n")
-        return None
-
-    def _serve(self, ws) -> None:
-        try:
-            first = json.loads(ws.recv(timeout=10))
-        except Exception:
-            return
-        if self.ws is not None or not hmac.compare_digest(str(first.get("hello", "")), self.token):
-            ws.close(code=1008)
-            return
-        self.ws = ws
-        self.hello.set()
-        from websockets.exceptions import ConnectionClosed
-        try:
-            for raw in ws:
-                self._dispatch(json.loads(raw))
-        except ConnectionClosed:
-            # Electron quit.
-            pass
-
-    def _dispatch(self, message: dict) -> None:
-        if "id" in message:
-            waiter = self.waiting.pop(message["id"], None)
-            if waiter:
-                waiter[1] = message
-                waiter[0].set()
-            return
-        key = (message.get("tab", ""), message["method"]) if message["event"] == "cdp" else ("", message["event"])
-        for handler in list(self.handlers.get(key, [])):
-            if message["event"] == "cdp":
-                handler(message.get("params") or {}, message.get("session", ""))
-            else:
-                handler(message)
-
-    def call(self, op: str, timeout: float = 30.0, **fields) -> dict:
-        with self.lock:
-            self.count += 1
-            ident = self.count
-            waiter = self.waiting[ident] = [threading.Event(), None]
-            self.ws.send(json.dumps({"id": ident, "op": op, **fields}))
-        if not waiter[0].wait(timeout):
-            self.waiting.pop(ident, None)
-            raise RuntimeError(f"{op} had no answer in {timeout:.0f} s")
-        if "error" in waiter[1]:
-            raise RuntimeError(waiter[1]["error"])
-        return waiter[1]["result"]
-
-    def cdp(self, tab: str, method: str, params: dict, session: str = "") -> dict:
-        return self.call("cdp", tab=tab, method=method, params=params, session=session)
-
-    def listen(self, tab: str, event: str, handler) -> None:
-        self.handlers.setdefault((tab, event), []).append(handler)
-
-    def on(self, event: str, handler) -> None:
-        self.handlers.setdefault(("", event), []).append(handler)
-
-    def tab(self, **options) -> ElectronTab:
-        return ElectronTab(self, self.call("tab.create", **options)["tab"])
 
 
 class EPlay(Play):
@@ -406,13 +322,6 @@ def bridge_refuses(bridge: Bridge) -> tuple[bool, dict]:
     return closed and refused and not bridge.hello.is_set(), {"status": "checked", "steps": steps}
 
 
-def executable(given: str) -> Path:
-    if given:
-        return Path(given)
-    package = SHELL / "node_modules" / "electron"
-    return package / "dist" / (package / "path.txt").read_text(encoding="utf-8").strip()
-
-
 def size_of(folder: Path) -> int:
     return sum(path.stat().st_size for path in folder.rglob("*") if path.is_file() and not path.is_symlink())
 
@@ -479,20 +388,11 @@ async def main_async(args, out: Path, site: str, frames: str, report: dict) -> N
     print(f"{'PASS' if ok else 'FAIL'}  bridge: {'; '.join(seen['steps'])}", flush=True)
     downloads = out / "downloads"
     downloads.mkdir(exist_ok=True)
-    exe = executable(args.electron)
-    env = {k: v for k, v in os.environ.items() if k != "ELECTRON_RUN_AS_NODE"}
-    log = (out / "electron.log").open("wb")
+    exe = Path(args.electron) if args.electron else await fetch(out)
+    held = places(out)["held"]
     began = time.monotonic()
-    shell = subprocess.Popen([str(exe), str(SHELL)], stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT,
-                             env=env)
-    held = out / "held"
-    shell.stdin.write((json.dumps({"port": bridge.port, "token": bridge.token, "downloads": str(downloads),
-                                   "held": str(held)})
-                       + "\n").encode())
-    shell.stdin.close()
+    shell = start(command(exe), bridge, out, downloads)
     try:
-        if not bridge.hello.wait(60):
-            raise RuntimeError("Electron never said hello")
         report["measures"]["hello_s"] = round(time.monotonic() - began, 2)
         first = await asyncio.to_thread(bridge.tab)
         await first.goto(site + "/e/list.html")
@@ -562,8 +462,7 @@ async def main_async(args, out: Path, site: str, frames: str, report: dict) -> N
             shell.wait(15)
         except subprocess.TimeoutExpired:
             shell.kill()
-        log.close()
-        bridge.server.shutdown()
+        bridge.close()
 
 
 def main(argv: list[str]) -> int:

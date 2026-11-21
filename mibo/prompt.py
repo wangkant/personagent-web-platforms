@@ -5,7 +5,7 @@ import re
 import time
 from dataclasses import dataclass
 
-from . import channels, person, ranking, recommend, today
+from . import channels, person, ranking, recommend, today, turnctx
 from .prompts import (
     OWNER_TOOL_GUIDE,
     dm_honest_disclosure,
@@ -36,7 +36,7 @@ _CANT_SEE_NOTE = (
 # A message they asked not to keep (person.unsaid): answered, never kept.
 _NOT_KEPT_NOTE = (
     "\n\n<not_kept>They asked you not to keep what they said in their last message. "
-    "Answer it as usual, leave mem empty, and never bring it up again.</not_kept>"
+    "Answer it as usual, and never bring it up again.</not_kept>"
 )
 
 #: What they chose under the chat's "+" for their last message (turns.TURN_CHOICES).
@@ -130,10 +130,6 @@ _TURN_CONTEXT_OPEN = (
     "\n\n[Turn context] Written by the app for this turn, not by the person "
     "you're talking to; they can't see it.\n\n"
 )
-# The closing line's second half: the protocol's `mem`, asked for at the turn.
-_PERSON_MEM_TAIL = (
-    " In mem, the card operation when their message says what they think of a find you shared; [] otherwise."
-)
 
 
 class PromptBuilder:
@@ -215,9 +211,9 @@ class PromptBuilder:
             f"{'' if follow_up else _dm_gap_note(history)}"
             f"{_recent_steps(history)}"
             f"[Current local time] {TextProcessing._current_time_str()}\n\n"
-            "Follow the JSON output protocol."
-            # What the turn keeps is asked for where the model reads last.
-            + ("" if follow_up else _PERSON_MEM_TAIL)
+            "Answer in plain text, as <output_protocol> says."
+            # The lines modules add for the turn (turnctx.py), in the order they registered.
+            + "".join(f"\n\n{line}" for line in turnctx.lines(last_user, pkey))
         )
         system = f"{static_block}\n\n{dm_output_protocol()}"
         # The person's turns are framed data; the persona's turns and the

@@ -50,6 +50,20 @@ def _start_check(workspace, url: str, model: str) -> asyncio.Task:
     return task
 
 
+def check_at_start(workspace) -> None:
+    """At the app's start: the saved model measured once when nothing is kept for it (`state` starts it)."""
+    state(workspace)
+
+
+async def measured(url: str, model: str, within: float) -> None:
+    """Back when the model's check under way has ended, or after `within` seconds; at once when none runs."""
+    task = _checks.get((url, model))
+    for _ in range(int(within / 0.25)):
+        if task is None or task.done():
+            return
+        await asyncio.sleep(0.25)
+
+
 def state(workspace) -> dict:
     values = workspace.config()
     base, model = values.get("LLM_BASE_URL", "").strip(), values.get("LLM_MODEL", "").strip()

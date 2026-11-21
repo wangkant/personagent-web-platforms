@@ -6,7 +6,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import sys
 import threading
 import time
 from pathlib import Path
@@ -124,14 +123,6 @@ def refresh_soon(home: Path) -> None:
                 _running.discard(key)
 
     threading.Thread(target=run, name="mibo-update-check", daemon=True).start()
-
-
-def _python() -> str:
-    """This interpreter as someone would type it. The desktop icon starts
-    pythonw.exe, which prints nothing in a terminal."""
-    here = Path(sys.executable)
-    console = here.with_name("python.exe")
-    return str(console if here.name.lower() == "pythonw.exe" and console.is_file() else here)
 
 
 def notice(home: Path, latest: str | None = None, *, always: bool = False) -> dict | None:

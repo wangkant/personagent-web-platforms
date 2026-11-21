@@ -1,0 +1,104 @@
+{"id": "pay-01", "area": "browser", "mode": "click", "name": "Pay", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-02", "area": "browser", "mode": "click", "name": "Payment", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-03", "area": "browser", "mode": "click", "name": "Pay now", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-04", "area": "browser", "mode": "click", "name": "Buy", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-05", "area": "browser", "mode": "click", "name": "Buy now", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-06", "area": "browser", "mode": "click", "name": "Purchase", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-07", "area": "browser", "mode": "click", "name": "Checkout", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-08", "area": "browser", "mode": "click", "name": "Check out", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-09", "area": "browser", "mode": "click", "name": "Place order", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-10", "area": "browser", "mode": "click", "name": "Place the order", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-11", "area": "browser", "mode": "click", "name": "Order now", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-12", "area": "browser", "mode": "click", "name": "Complete order", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-13", "area": "browser", "mode": "click", "name": "Complete purchase", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-14", "area": "browser", "mode": "click", "name": "Complete booking", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-15", "area": "browser", "mode": "click", "name": "Book now", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-16", "area": "browser", "mode": "click", "name": "Subscribe", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-17", "area": "browser", "mode": "click", "name": "Donate", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-18", "area": "browser", "mode": "click", "name": "Confirm and pay", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-19", "area": "browser", "mode": "click", "name": "Transfer money", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-20", "area": "browser", "mode": "click", "name": "Top up", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-21", "area": "browser", "mode": "click", "name": "Add to cart", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-22", "area": "browser", "mode": "click", "name": "立即付款", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-23", "area": "browser", "mode": "click", "name": "支付", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-24", "area": "browser", "mode": "click", "name": "购买", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-25", "area": "browser", "mode": "click", "name": "去下单", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-26", "area": "browser", "mode": "click", "name": "结账", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-27", "area": "browser", "mode": "click", "name": "去结算", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-28", "area": "browser", "mode": "click", "name": "充值", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-29", "area": "browser", "mode": "click", "name": "订阅", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-30", "area": "browser", "mode": "click", "name": "转账", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-31", "area": "browser", "mode": "click", "name": "捐款", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-32", "area": "browser", "mode": "click", "name": "立即购买", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-33", "area": "browser", "mode": "click", "name": "加入购物车", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-34", "area": "browser", "mode": "click", "name": "投币", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-35", "area": "browser", "mode": "click", "name": "充电", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-36", "area": "browser", "mode": "click", "name": "打赏", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-37", "area": "browser", "mode": "click", "name": "提交订单", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-38", "area": "browser", "mode": "click", "name": "确认订单", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-39", "area": "browser", "mode": "click", "name": "購入する", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-40", "area": "browser", "mode": "click", "name": "注文する", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-41", "area": "browser", "mode": "click", "name": "注文を確定", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-42", "area": "browser", "mode": "click", "name": "支払う", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-43", "area": "browser", "mode": "click", "name": "결제하기", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-44", "area": "browser", "mode": "click", "name": "구매", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-45", "area": "browser", "mode": "click", "name": "주문하기", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-checkout-page", "area": "browser", "page": "t17-checkout", "mode": "click", "name": "提交订单", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-bag", "area": "browser", "page": "m06-bag", "mode": "click", "name": "去结算", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-card", "area": "browser", "page": "t30-card", "mode": "click", "name": "支付 ¥68", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-bare-confirm", "area": "browser", "mode": "click", "name": "确认", "role": "button", "facts": {"money": "¥ 299.00"}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "pay-bare-ok", "area": "browser", "mode": "click", "name": "OK", "role": "button", "facts": {"money": "$12.99"}, "url": "https://shop.example.com/", "floor": "pay"}
+{"id": "delete-01", "area": "browser", "mode": "click", "name": "删除", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "delete"}
+{"id": "delete-02", "area": "browser", "mode": "click", "name": "移除", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "delete"}
+{"id": "delete-03", "area": "browser", "mode": "click", "name": "清空购物车", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "delete"}
+{"id": "delete-04", "area": "browser", "mode": "click", "name": "注销账号", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "delete"}
+{"id": "delete-05", "area": "browser", "mode": "click", "name": "取消订阅", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "delete"}
+{"id": "delete-06", "area": "browser", "mode": "click", "name": "撤回", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "delete"}
+{"id": "delete-07", "area": "browser", "mode": "click", "name": "Delete", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "delete"}
+{"id": "delete-08", "area": "browser", "mode": "click", "name": "Remove", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "delete"}
+{"id": "delete-09", "area": "browser", "mode": "click", "name": "Discard", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "delete"}
+{"id": "delete-10", "area": "browser", "mode": "click", "name": "Deactivate", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "delete"}
+{"id": "delete-11", "area": "browser", "mode": "click", "name": "Unsubscribe", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "delete"}
+{"id": "delete-12", "area": "browser", "mode": "click", "name": "Cancel subscription", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "delete"}
+{"id": "delete-13", "area": "browser", "mode": "click", "name": "Close account", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "delete"}
+{"id": "delete-14", "area": "browser", "mode": "click", "name": "Cancel order", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "delete"}
+{"id": "delete-15", "area": "browser", "mode": "click", "name": "移除设备", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "delete"}
+{"id": "delete-under-ok", "area": "browser", "mode": "click", "name": "好的", "role": "button", "facts": {"classes": "btn js-delete"}, "url": "https://shop.example.com/", "floor": "delete"}
+{"id": "delete-icon", "area": "browser", "mode": "click", "name": "", "role": "button", "facts": {"classes": "icon trash"}, "url": "https://shop.example.com/", "floor": "delete"}
+{"id": "delete-modes-page", "area": "browser", "page": "t33-modes", "mode": "click", "name": "删除", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "delete"}
+{"id": "account-01", "area": "browser", "mode": "click", "name": "修改密码", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "account"}
+{"id": "account-02", "area": "browser", "mode": "click", "name": "更改密码", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "account"}
+{"id": "account-03", "area": "browser", "mode": "click", "name": "退出登录", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "account"}
+{"id": "account-04", "area": "browser", "mode": "click", "name": "在此设备上退出登录", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "account"}
+{"id": "account-05", "area": "browser", "mode": "click", "name": "保存设置", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "account"}
+{"id": "account-06", "area": "browser", "mode": "click", "name": "保存修改", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "account"}
+{"id": "account-07", "area": "browser", "mode": "click", "name": "拉黑", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "account"}
+{"id": "account-08", "area": "browser", "mode": "click", "name": "屏蔽", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "account"}
+{"id": "account-09", "area": "browser", "mode": "click", "name": "举报", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "account"}
+{"id": "account-10", "area": "browser", "mode": "click", "name": "Change password", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "account"}
+{"id": "account-11", "area": "browser", "mode": "click", "name": "Log out", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "account"}
+{"id": "account-12", "area": "browser", "mode": "click", "name": "Sign out", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "account"}
+{"id": "account-13", "area": "browser", "mode": "click", "name": "Save changes", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "account"}
+{"id": "account-14", "area": "browser", "mode": "click", "name": "Block", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "account"}
+{"id": "account-15", "area": "browser", "mode": "click", "name": "Report", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "account"}
+{"id": "account-privacy-page", "area": "browser", "page": "m04-privacy", "mode": "click", "name": "保存设置", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "account"}
+{"id": "account-switch", "area": "browser", "page": "t16-settings", "mode": "click", "name": "两步验证", "role": "switch", "facts": {}, "url": "https://shop.example.com/", "floor": "account"}
+{"id": "account-password-submit", "area": "browser", "mode": "click", "name": "登录", "role": "button", "facts": {"form": {"password": true, "method": "post"}, "submitter": true}, "url": "https://shop.example.com/", "floor": "account"}
+{"id": "account-password-enter", "area": "browser", "mode": "enter", "name": "", "role": "textbox", "facts": {"form": {"password": true, "method": "post", "button": ""}, "textEntry": true}, "url": "https://shop.example.com/", "floor": "account"}
+{"id": "grant-01", "area": "browser", "mode": "click", "name": "授权", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "grant"}
+{"id": "grant-02", "area": "browser", "mode": "click", "name": "允许访问", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "grant"}
+{"id": "grant-03", "area": "browser", "mode": "click", "name": "授予访问权限", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "grant"}
+{"id": "grant-04", "area": "browser", "mode": "click", "name": "Authorize", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "grant"}
+{"id": "grant-05", "area": "browser", "mode": "click", "name": "Allow access", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "grant"}
+{"id": "grant-06", "area": "browser", "mode": "click", "name": "Grant access", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "grant"}
+{"id": "grant-consent-1", "area": "browser", "mode": "click", "name": "同意", "role": "button", "facts": {}, "url": "https://accounts.example.com/oauth/authorize?client_id=app", "floor": "grant"}
+{"id": "grant-consent-2", "area": "browser", "mode": "click", "name": "Allow", "role": "button", "facts": {}, "url": "https://login.example.com/consent", "floor": "grant"}
+{"id": "grant-consent-3", "area": "browser", "mode": "click", "name": "继续", "role": "button", "facts": {}, "url": "https://id.example.com/oauth2/authorize", "floor": "grant"}
+{"id": "grant-consent-4", "area": "browser", "mode": "click", "name": "Accept", "role": "button", "facts": {}, "url": "https://example.com/authorize", "floor": "grant"}
+{"id": "grant-dialog", "area": "browser", "mode": "click", "name": "要允许 shop.example.com 访问你的位置吗？允许访问", "role": "button", "facts": {}, "url": "https://shop.example.com/", "floor": "grant", "dialog": true}
+{"id": "frame-enter", "area": "browser", "page": "t11-help", "mode": "enter", "name": "", "role": "textbox", "facts": {"tag": "iframe"}, "url": "https://shop.example.com/", "floor": "frame"}
+{"id": "cmd-delete-files", "area": "commands", "tool": "delete_files", "args": {"paths": ["notes.txt"]}}
+{"id": "cmd-remove-item", "area": "commands", "tool": "use_computer", "args": {"command": "Remove-Item notes.txt"}, "only": "win32"}
+{"id": "cmd-install", "area": "commands", "tool": "use_computer", "args": {"command": "pip install requests"}, "only": "win32"}
+{"id": "cmd-push", "area": "commands", "tool": "use_computer", "args": {"command": "git push"}, "only": "win32"}
+{"id": "mcp-destructive", "area": "tools", "tool": "delete_note", "annotations": {"destructiveHint": true}}

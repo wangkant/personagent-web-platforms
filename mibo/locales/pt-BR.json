@@ -2052,26 +2052,6 @@
     "unavailable": "Não foi possível listar os sites. Tente novamente mais tarde.",
     "others_one": "Mais {count} site guarda cookies aqui; sair de todos também os remove."
   },
-  "skilloffer": {
-    "waiting": "Aguardando sua resposta",
-    "ask": "Instalar a habilidade “{title}”?",
-    "meta": "{about} · {publisher}",
-    "scripts": "Contém scripts",
-    "yes": "Instalar",
-    "no": "Não instalar",
-    "installing": "Instalando",
-    "done": "“{title}” instalada; continuando com seu pedido.",
-    "declined": "Não instalada; continuando com seu pedido.",
-    "failed": "Não instalada: {why} Continuando com seu pedido.",
-    "gone": "Este cartão não é mais válido. Nada foi feito.",
-    "errors": {
-      "market_fetch_failed": "Não foi possível baixar da origem.",
-      "market_hash_mismatch": "O conteúdo recebido não corresponde à versão registrada no catálogo.",
-      "market_high_risk": "A verificação de segurança encontrou conteúdo de alto risco.",
-      "skill_exists": "Já existe uma habilidade com esse nome.",
-      "other": "A instalação não funcionou."
-    }
-  },
   "toolcard": {
     "waiting": "Aguardando sua resposta",
     "startTitle": "Iniciar um programa neste computador: {server}",

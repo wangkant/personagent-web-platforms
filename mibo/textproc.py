@@ -7,7 +7,6 @@ import json
 import logging
 import os
 import re
-import time
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -310,105 +309,6 @@ def salvage_json_object(raw: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-#: The keys `_parse_model_output` reads; `_is_protocol_dict` is the one test.
-_PROTOCOL_KEYS = frozenset({"reply", "reasoning", "intent", "mem", "wonder"})
-
-
-def _protocol_key(key) -> str:
-    """The protocol key `key` spells, case aside, or ""."""
-    name = key.lower() if isinstance(key, str) else ""
-    return name if name in _PROTOCOL_KEYS else ""
-
-
-def _is_protocol_dict(value) -> bool:
-    """A dict with at least one protocol key; other keys don't disqualify it."""
-    return isinstance(value, dict) and any(_protocol_key(k) for k in value)
-
-
-# (model, drift kind) pairs already logged, so a model's habit is said once;
-# capped, since the model chooses what it sends.
-_PROTOCOL_DRIFT_LOGGED: set[tuple[str, str]] = set()
-_PROTOCOL_DRIFT_LOG_CAP = 256
-# model -> when an object with no reply was last reported.
-_NO_REPLY_WARNED: dict[str, float] = {}
-_NO_REPLY_WARN_EVERY_S = 300.0
-
-
-def _short_repr(value, limit: int = 40) -> str:
-    text = repr(value)
-    return text if len(text) <= limit else text[:limit - 3] + "..."
-
-
-def _protocol_fields(data: dict, model: str = "") -> Optional[dict]:
-    """Protocol fields of a model's object, or None if `reply`/`mem` is unusable; a `reply` that is a list of texts is joined.
-    Extra keys and miscased keys are read past, logged once per model; a list `mem` reads as ""."""
-    fields: dict = {}
-    drift: list[tuple[str, str]] = []
-    extras: list[str] = []
-    for key, value in data.items():
-        name = _protocol_key(key)
-        if not name:
-            extras.append(_short_repr(key))
-            drift.append(("extra key", extras[-1]))
-            continue
-        if key != name:
-            if name in data:
-                continue
-            drift.append(("key spelled", _short_repr(key)))
-        fields[name] = value
-    reply = fields.get("reply")
-    if isinstance(reply, list) and all(isinstance(part, str) for part in reply):
-        # A reply written as a list of messages is its lines.
-        fields["reply"] = "\n".join(reply)
-    elif reply is not None and not isinstance(reply, str):
-        return None
-    mem = fields.get("mem")
-    if mem is not None and not isinstance(mem, str):
-        if not isinstance(mem, list):
-            return None
-        # The app's own chat writes a list of operations; dm.py reads it from the raw object.
-        fields["mem"] = ""
-    for name in ("reasoning", "intent"):
-        if fields.get(name) is not None and not isinstance(fields[name], str):
-            drift.append((f"{name} as {type(fields[name]).__name__}", ""))
-            fields[name] = ""
-    for kind, example in drift:
-        if ((model, kind) in _PROTOCOL_DRIFT_LOGGED
-                or len(_PROTOCOL_DRIFT_LOGGED) >= _PROTOCOL_DRIFT_LOG_CAP):
-            continue
-        _PROTOCOL_DRIFT_LOGGED.add((model, kind))
-        logger.warning("[Agent] parser: model %s's JSON has %s%s; read past "
-                       "it (said once per model)", model or "?", kind,
-                       f" {example}" if example else "")
-    if fields.get("reply") is None:
-        now = time.monotonic()
-        if now - _NO_REPLY_WARNED.get(model, -_NO_REPLY_WARN_EVERY_S) >= _NO_REPLY_WARN_EVERY_S:
-            _NO_REPLY_WARNED[model] = now
-            logger.warning("[Agent] parser: model %s's JSON has no \"reply\"%s, so "
-                           "there is nothing to send", model or "?",
-                           f" (its keys of its own: {', '.join(extras[:5])})"
-                           if extras else "")
-    return fields
-
-
-def _as_protocol_object(content: str) -> str:
-    """Wrap `_call_llm`'s plain-text retry in the parser's JSON shape.
-
-    Nothing asked that retry for reasoning, so none can leak from it. A reply
-    that already is a protocol object, or an array of one, passes as is."""
-    try:
-        parsed = json.loads(strip_json_fences(content))
-    except (json.JSONDecodeError, TypeError, ValueError):
-        parsed = None
-    if isinstance(parsed, list):
-        parsed = next((item for item in parsed if _is_protocol_dict(item)),
-                      None)
-    if _is_protocol_dict(parsed):
-        return content
-    return json.dumps({"reasoning": "", "intent": "chat",
-                       "reply": content, "mem": ""}, ensure_ascii=False)
-
-
 # The character's night, on its own clock: it is shown asleep, and asks after no plan then.
 SLEEP_HOUR_START = 2          # 02:00 (inclusive)
 
@@ -520,56 +420,6 @@ class TextProcessing:
         else:
             part = "late night"
         return f"{now.strftime('%Y-%m-%d %H:%M')} UTC{now.isoformat()[-6:]} {weekdays[now.weekday()]} {part}"
-
-    @staticmethod
-    def _parse_model_output(raw: str, model: str = "") -> tuple[str, str, str, str]:
-        """Parse the JSON protocol object into (reply, reasoning, intent, mem).
-
-        An object in the model's own keys with one text in it ({"response": "..."}) gives
-        that text as the reply; what is not an object, or has no text to send, yields
-        ("", raw[:240], "", ""). Fences, a wrapping array and trailing objects are tolerated."""
-        if not raw or not raw.strip():
-            return "", "", "", ""
-        s = raw.strip()
-        s = re.sub(r"^```(?:json)?\s*", "", s, flags=re.IGNORECASE)
-        s = re.sub(r"\s*```$", "", s)
-        try:
-            data = json.loads(s)
-        except (json.JSONDecodeError, TypeError):
-            data = None
-        if isinstance(data, list):
-            # The first protocol-shaped dict; else the first dict, for the key
-            # check below to reject and log.
-            dicts = [item for item in data if isinstance(item, dict)]
-            data = next((d for d in dicts if _is_protocol_dict(d)),
-                        dicts[0] if dicts else None)
-        if not isinstance(data, dict):
-            start = s.find('{')
-            if start >= 0:
-                try:
-                    data, _end = json.JSONDecoder().raw_decode(s[start:])
-                except json.JSONDecodeError:
-                    data = None
-        if not isinstance(data, dict):
-            logger.warning("[Agent] parser: model output is not JSON, dropping it (%d chars)", len(raw))
-            return "", raw.strip()[:240], "", ""
-        if _is_protocol_dict(data):
-            fields = _protocol_fields(data, model)
-        else:
-            texts = [value for value in data.values() if isinstance(value, str) and value.strip()]
-            fields = {"reply": texts[0]} if len(texts) == 1 else None
-        if fields is None:
-            logger.warning("[Agent] parser: invalid JSON protocol field types/keys")
-            return "", raw.strip()[:240], "", ""
-        reply = (fields.get("reply") or "").strip()
-        reasoning = (fields.get("reasoning") or "").strip()
-        intent = (fields.get("intent") or "").strip().lower()
-        mem_raw = fields.get("mem")
-        mem = mem_raw.strip() if mem_raw is not None else ""
-        # Placeholder words count as empty (model occasionally fills "无" / "none" / etc.)
-        if mem.lower() in {"无", "none", "n/a", "null", "无内容", "无可记"}:
-            mem = ""
-        return reply, reasoning, intent, mem
 
     @staticmethod
     def _is_blind_content(text: str) -> bool:

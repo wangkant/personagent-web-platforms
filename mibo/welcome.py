@@ -41,6 +41,7 @@ from . import pacing
 from . import recommend
 from . import updates
 from . import window as appwindow
+from .panels import modelbar
 from .character import PERSON_ACTIONS, Character, NotReady
 from .endpoints import model_problem
 from .library import Library, item_id
@@ -62,7 +63,7 @@ PAGE_ASSETS = ("i18n.js", "app.js", "app.css", "chat.js", "chat.css", "finds.js"
                "pet.js", "pet.css", "card.js", "card.css", "characters.js", "characters.css",
                "browse.js", "browsetabs.js", "browsemenu.js", "browsestrip.js", "browse.css", "plus.js", "plus.css", "activity.js", "activity.css",
                "linkcard.js", "linkcard.css", "modelbar.js", "modelbar.css", "providermarks.js", "sites.js", "sites.css",
-               "toolcard.js", "skilloffer.js", "petux.css", "petbox.js", "petline.js", "petedge.js", "petdial.js",
+               "toolcard.js", "petux.css", "petbox.js", "petline.js", "petedge.js", "petdial.js",
                "petclick.js", "petoff.js", "compact.js", "compact.css", "schedulechat.js")
 # Settings' sections, each a script of its own under ASSETS/setup (setup.js is their shell).
 SETUP_PARTS = ("character", "model", "connect", "language", "recs", "walks", "memory", "privacy", "device", "about", "shell", "programs",
@@ -495,15 +496,15 @@ class Workspace:
     def history(self, after: int | None = None, chat: str = MAIN_CHAT) -> dict:
         room = self._chat(chat)
         view = room.view(after)
-        # While a reply is on its way: the step it is on (search.ChatLookups.doing).
+        # While a reply is on its way: the step it is on (loop.ChatLookups.doing).
         if self._chat_lock.locked():
             doing = sw._read_json(self._runtime() / "desktop" / "chat-doing.json")
             if (doing.get("conversation") == room.conversation
                     and doing.get("tool") in ("recall", "search", "read", "pick", "write", "look", "pages", "operate",
-                                              "shell", "desk", "mcp", "skill_offer")
+                                              "shell", "desk", "mcp")
                     # A step in the browser, a command or a program may wait minutes on the person's press.
                     and time.time() - float(doing.get("at") or 0) < (300 if doing["tool"] in ("operate", "shell", "desk",
-                                                                                              "mcp", "skill_offer")
+                                                                                              "mcp")
                                                                       else 120)):
                 view["doing"] = {"tool": doing["tool"], "what": str(doing.get("what") or "")[:120]}
         return view
@@ -590,7 +591,7 @@ class Workspace:
                      # search of past chats keeps the chats it found (pastchats.py).
                      | ({k: str(t.get(k, ""))[:600] for k in ("out", "status", "confirmed")}
                         if t.get("tool") in ("operate", "plan", "chats") else {})
-                     # A task on this computer may take up to 30 steps (shell/tool.py STEPS_MAX).
+                     # At most 32 steps of a long task (loop.py allows up to 50 rounds).
                      for t in item.get("trace") or [] if isinstance(t, dict)][:32]
             # The reply's reasoning where the model returned it: seconds and text (abilities.note_reasoning).
             thought = item.get("thinking") if isinstance(item.get("thinking"), dict) else {}
@@ -598,8 +599,12 @@ class Workspace:
                         "text": str(thought.get("text") or "")[:8000]} if thought.get("text") else None
             # The memories the reply drew on (dm.py), listed under it.
             used = _memories((item.get("memory") or {}).get("used"))
+            # One entry for each call the turn made (loop.ChatLookups.note).
+            activity = [{k: str(a.get(k) or "")[:200] for k in ("place", "mark", "line", "status", "thumb")}
+                        for a in item.get("activity") or [] if isinstance(a, dict)][:50]
             return {"role": "assistant", "text": str(item["text"]), **({"card": card} if card else {}),
                     **({"sources": sources} if sources else {}), **({"trace": trace} if trace else {}),
+                    **({"activity": activity} if activity else {}),
                     **({"thinking": thinking} if thinking else {}), **({"memory": {"used": used}} if used else {})}
         if kind == "memory" and _memories(item.get("saved")):
             # What a fold kept from this chat: one quiet 已记住 line (character.py).
@@ -704,6 +709,8 @@ class Workspace:
                     for key in ("what", "out"):
                         if isinstance(step.get(key), str):
                             step[key] = person.mask(step[key], values)[0]
+                for entry in m.get("activity") or []:
+                    entry["line"] = person.mask(entry["line"], values)[0]
         chat.save()
         self._prune_pictures()
         self.chat_changed()
@@ -1262,6 +1269,8 @@ def create_app(home: Path, token: str, *, workspace: Workspace | None = None) ->
     async def lifespan(app):
         # The character, with its own loops: its memory, its walks, the follow-up of a plan.
         await workspace.character.start()
+        # The saved model measured once when nothing is kept for it, before the first reply (loop.py waits for it).
+        modelbar.check_at_start(workspace)
         # Another program in front, or another tab: maybe a good moment to bring something (pacing.py).
         quiet.on_front(lambda: asyncio.ensure_future(workspace.pace.look()))
         # Games and fullscreen in front: the background loops wait and the pet hides (quiet.py).

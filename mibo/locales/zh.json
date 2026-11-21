@@ -2054,26 +2054,6 @@
     "failed": "操作失败，请稍后重试。",
     "unavailable": "无法读取网站列表，请稍后重试。"
   },
-  "skilloffer": {
-    "waiting": "等待确认",
-    "ask": "安装技能“{title}”？",
-    "meta": "{about} · {publisher}",
-    "scripts": "含脚本",
-    "yes": "安装",
-    "no": "不安装",
-    "installing": "正在安装",
-    "done": "已安装技能“{title}”，继续处理当前请求。",
-    "declined": "未安装，继续处理当前请求。",
-    "failed": "未能安装：{why}继续处理当前请求。",
-    "gone": "此卡片已失效，未进行任何操作。",
-    "errors": {
-      "market_fetch_failed": "无法从来源下载。",
-      "market_hash_mismatch": "下载的内容与目录记录的版本不一致。",
-      "market_high_risk": "安全检查发现高风险内容。",
-      "skill_exists": "已有同名的技能。",
-      "other": "安装未成功。"
-    }
-  },
   "toolcard": {
     "waiting": "等待确认",
     "startTitle": "启动本机程序：{server}",

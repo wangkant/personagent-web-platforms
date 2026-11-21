@@ -132,7 +132,7 @@ def _no_update_check(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def _no_walks(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No service a test starts goes out to real sites; tests/test_roam.py turns walks on."""
+    """No service a test starts goes out to real sites; tests/parts/finds/test_walks.py turns walks on."""
     monkeypatch.setenv("ROAM_ENABLED", "false")
 
 
@@ -154,6 +154,8 @@ def _same_on_every_machine(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_LANG", "en")
     monkeypatch.setattr(os, "fsync", lambda fd: None)
     monkeypatch.setattr(_shell_run, "elevated", lambda: False)
+    # A browser test draws no window, not even a minimized one, on the desk of whoever runs the suite.
+    monkeypatch.setenv("PERSONA_BROWSER_HEADLESS", "1")
 
 
 @pytest.fixture

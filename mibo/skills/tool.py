@@ -26,7 +26,7 @@ FILES_LISTED = 40
 MAX_FILE = 2 * 1024 * 1024
 DESCRIBED = 80
 
-# What search.py adds to CHAT_TOOLS; the list of skills is filled in from the installed ones (`offered`).
+# The skill module's tool in the catalog (catalog.py); the list of skills is filled in from the installed ones (`offered`).
 TOOL = {"type": "function", "function": {
     "name": NAME,
     "description": "",
@@ -128,8 +128,8 @@ _KINDS = (
 def _their_tools(body: str) -> str:
     """For a skill written for another agent: one line naming the tools it mentions and this app's tools that do the
     same, as offered this turn. A name counts only where it reads as a tool (`Read`, the Read tool, Read(...))."""
-    from ..search import offered_tools
-    here = {t["function"]["name"] for t in offered_tools()}
+    from ..catalog import offered
+    here = {t["function"]["name"] for t in offered()}
     pairs = []
     for names, ours in _KINDS:
         named = [n for n in names if n != ours and re.search(rf"`{n}`|\b{n} tool\b|\b{n}\(", body)]

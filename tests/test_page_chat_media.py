@@ -1,9 +1,7 @@
-"""The page's chat: pictures the character sends, and messages it sends later. What the picture route
-refuses (other paths, links, folders that lead elsewhere) is a floor in tests/floors/boundary/."""
+"""The page chat's failure report through the character's private reply seam, which the reply loop's rebuild
+replaces; the rest of the page chat is in tests/interface/page_chat/ and its picture route is a floor in
+tests/floors/boundary/."""
 from __future__ import annotations
-
-import asyncio
-import base64
 
 from fastapi.testclient import TestClient
 import pytest
@@ -13,9 +11,6 @@ from mibo import welcome
 
 TOKEN = "test-local-capability"
 HEADERS = {welcome.TOKEN_HEADER: TOKEN}
-# The smallest PNG: one transparent pixel.
-PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
 
 
 @pytest.fixture
@@ -24,138 +19,6 @@ def workspace(tmp_path):
     sw.write_env(value.env, {"LLM_API_KEY": "key"})
     yield value
     value.close()
-
-
-@pytest.fixture
-def client(workspace):
-    with TestClient(welcome.create_app(workspace.home, TOKEN, workspace=workspace),
-                    base_url="http://127.0.0.1") as value:
-        yield value
-
-
-def _replying(monkeypatch, workspace, replies, events=None):
-    """The character answers every message with `replies`; `events` takes what each turn was given."""
-    async def reply(conversation, parts, *, choices=(), run=None):
-        if events is not None:
-            events.append({"conversation": conversation, "parts": parts, "choices": list(choices)})
-        return [dict(item) for item in replies]
-
-    monkeypatch.setattr(workspace.character, "reply", reply)
-
-
-def test_a_picture_reply_is_kept_shown_and_served_only_to_the_page(client, workspace, monkeypatch):
-    _replying(monkeypatch, workspace, [{"type": "text", "text": "look"},
-                                       {"type": "image", "b64": base64.b64encode(PNG).decode()}])
-    answer = client.post("/api/chat", headers=HEADERS, json={"text": "hi"}).json()
-    picture = answer["messages"][-1]["picture"]
-    assert [m.get("text") for m in answer["messages"][:2]] == ["hi", "look"]
-    assert welcome.PICTURE_NAME.fullmatch(picture)
-    served = client.get(f"/api/chat/picture/{picture}", headers=HEADERS)
-    assert served.status_code == 200 and served.content == PNG
-    assert served.headers["content-type"] == "image/png"
-    assert client.get(f"/api/chat/picture/{picture}").status_code == 403
-    # Still there for a page opened again.
-    again = welcome.Workspace(workspace.home)
-    try:
-        assert again.history()["messages"][-1]["picture"] == picture
-    finally:
-        again.close()
-
-
-def test_a_removed_picture_is_missing_and_what_is_not_a_picture_is_not_kept(client, workspace):
-    name = workspace._keep_picture(base64.b64encode(PNG).decode())
-    workspace._append([{"role": "assistant", "picture": name}])
-    (workspace._pictures / name).unlink()
-    assert client.get(f"/api/chat/picture/{name}", headers=HEADERS).status_code == 404
-    assert workspace._keep_picture(base64.b64encode(b"<svg onload=x>").decode()) == ""
-    assert workspace._keep_picture("not base64!") == ""
-
-
-def test_pictures_leave_with_the_messages_that_showed_them(monkeypatch, workspace):
-    _replying(monkeypatch, workspace, [{"type": "image", "b64": base64.b64encode(PNG).decode()}])
-    asyncio.run(workspace.chat("hi"))
-    assert list(workspace._pictures.iterdir())
-    workspace.reset_chat()
-    assert not list(workspace._pictures.iterdir())
-
-
-def test_a_failed_message_is_kept_unanswered_and_can_be_sent_again(monkeypatch, workspace, tmp_path):
-    async def down(conversation, parts, **kwargs):
-        raise ConnectionError("down")
-
-    monkeypatch.setattr(workspace.character, "reply", down)
-    with pytest.raises(ConnectionError):
-        asyncio.run(workspace.chat("hi"))
-    expected = [{"role": "user", "text": "hi", "seq": 1, "failed": "chat_failed"}]
-
-    def kept(ws):
-        # Each message also carries when it was sent.
-        return [{k: v for k, v in m.items() if k != "at"} for m in ws.history()["messages"]]
-
-    assert kept(workspace) == expected
-    again = welcome.Workspace(workspace.home)
-    try:
-        assert kept(again) == expected, "a restart keeps it"
-    finally:
-        again.close()
-    # The character never had that turn.
-    from mibo import dm
-    assert dm._page_turns(workspace._history_path, workspace._main.conversation) == []
-    _replying(monkeypatch, workspace, [{"type": "text", "text": "here"}])
-    answer = asyncio.run(workspace.chat("hi", retry=1))
-    assert [(m["text"], m.get("failed")) for m in workspace.history()["messages"]] == [
-        ("hi", None), ("here", None)]
-    assert [m["text"] for m in answer["messages"]] == ["hi", "here"]
-
-
-def test_a_character_that_does_not_start_keeps_the_message(monkeypatch, workspace):
-    async def broken(conversation, parts, **kwargs):
-        raise welcome.NotReady("the memory file is damaged")
-
-    monkeypatch.setattr(workspace.character, "reply", broken)
-    with pytest.raises(welcome.NotReady):
-        asyncio.run(workspace.chat("hello"))
-    assert workspace.history()["messages"][-1]["failed"] == "agent_failed"
-
-
-def test_the_kept_chat_starts_at_a_turn_and_says_it_was_cut(monkeypatch, workspace):
-    replies = [{"type": "text", "text": "one"}, {"type": "text", "text": "two"},
-               {"type": "text", "text": "three"}]
-    _replying(monkeypatch, workspace, replies)
-    for n in range(13):
-        asyncio.run(workspace.chat(f"m{n}"))
-    seen = workspace.history()
-    assert seen["trimmed"] is True
-    assert seen["messages"][0]["role"] == "user", "never the tail of a reply"
-    assert len(seen["messages"]) <= welcome.CHAT_KEPT
-    again = welcome.Workspace(workspace.home)
-    try:
-        assert again.history()["trimmed"] is True and again.history()["messages"] == seen["messages"]
-    finally:
-        again.close()
-    workspace.reset_chat()
-    assert workspace.history()["trimmed"] is False
-
-
-def test_history_since_a_number(client, workspace):
-    workspace._history_path.parent.mkdir(parents=True, exist_ok=True)
-    workspace._history_path.write_text(
-        '{"conversation": "c1", "seq": 2, "messages": [{"role": "user", "text": "a", "seq": 1}, '
-        '{"role": "assistant", "text": "b", "seq": 2}]}', encoding="utf-8")
-    kept = welcome.Workspace(workspace.home)
-    try:
-        assert kept.history(1)["messages"] == [{"role": "assistant", "text": "b", "seq": 2}]
-    finally:
-        kept.close()
-    assert client.get("/api/chat/history?after=0", headers=HEADERS).json()["messages"] == []
-    assert client.get("/api/chat/history?after=x", headers=HEADERS).status_code == 422
-    assert workspace.history()["kept"] == welcome.CHAT_KEPT
-
-
-def test_a_reply_that_cannot_be_shown_leaves_no_empty_picture(monkeypatch, workspace):
-    _replying(monkeypatch, workspace, [{"type": "text", "text": "here"}, {"type": "image", "b64": "x"}])
-    asyncio.run(workspace.chat("hi"))
-    assert [m.get("text") for m in workspace.history()["messages"]] == ["hi", "here"]
 
 
 def _page_agent(tmp_path):
@@ -180,7 +43,7 @@ def test_a_model_failure_is_reported_in_the_page_and_never_stored(monkeypatch, w
     async def chat_dm(history, pkey="", **kwargs):
         if fail[0]:
             raise TimeoutError("model down")
-        return "hi back", ""
+        return "hi back"
 
     agent._chat_dm = chat_dm
     _through(monkeypatch, workspace, agent)

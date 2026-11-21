@@ -41,7 +41,7 @@ logger = logging.getLogger("agent")
 
 FILE = "model-abilities.json"
 NAMES = ("tools", "pictures", "json", "thinking")
-# auto: as the app decides (thinking off for its protocol calls); the others are the person's choice.
+# auto: standard wherever the model was measured to think; the others are the person's choice.
 EFFORTS = ("auto", "off", "standard", "deep")
 # Each level as an effort word and a thinking budget in tokens; "probe" is the check's own.
 LEVELS = {"standard": ("medium", 4096), "deep": ("high", 12288), "probe": ("low", 1024)}
@@ -144,14 +144,14 @@ def set_effort(runtime, level: str) -> None:
 
 
 def reply_effort(runtime, url: str, model: str):
-    """(level, parameter) when replies should think at a level the model was
-    measured to take; None leaves the call as the app decides."""
+    """(level, parameter) when replies think: the model was measured to think,
+    at the person's level ("auto" is standard); None for thinking off."""
     if runtime is None:
         return None
-    level = effort(runtime)
-    if level not in ("standard", "deep"):
-        return None
+    level = {"auto": "standard"}.get(effort(runtime), effort(runtime))
     rec = record(runtime, url, model)
+    if level == "off" or (rec or {}).get("thinking") != "yes":
+        return None
     param = ((rec or {}).get("thinking_detail") or {}).get("param") or ""
     return (level, param) if param in PARAMS else None
 

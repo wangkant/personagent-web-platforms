@@ -351,7 +351,7 @@ def dm_style_guide(style: PersonaStyle, reply_style=None) -> str:
         + _RECS_RULES[style.recs] +
         "- When something truly cannot be done, say the real reason in a sentence, and what you can do instead. Asked to remind them or to do something at a set time or on a rhythm, make it with schedule_create in that same reply and say back the rhythm and next time it gives; without that call nothing will happen, so never promise it\n"
         "\n"
-        "[LANGUAGE] Reply in the language they write to you in, whatever language these instructions or your persona are in, and switch when they do\n"
+        "[LANGUAGE] Reply in the language of their last message, whatever language these instructions, your persona or the tool results are in, and switch when they do\n"
         "- Lines these rules quote show the move, not the wording: never copy them or translate them word for word\n"
         "\n"
         "[FORMAT]\n"
@@ -402,7 +402,7 @@ def dm_style_guide(style: PersonaStyle, reply_style=None) -> str:
     )
 
 
-# The reply model calls the tools itself (search.offered_tools, the same list every turn): the order of the ways to
+# The reply model calls the tools itself (catalog.offered, the same list every turn): the order of the ways to
 # do something, said once. It names only tools that list holds; another program's window is Windows only.
 _PROGRAM_WAY = ("5. A program's window or a shortcut on their desktop (\"打开桌面的…\"): use_program.\n"
                 if sys.platform == "win32" else "")
@@ -423,34 +423,11 @@ OWNER_TOOL_GUIDE = (
 )
 
 
-# `mem`: the plans a reply asked about (person.py) and what they said of a find.
-PERSON_MEM = (
-    'mem (a list of at most 3 objects; [] when there is none). What they say about themselves, how to call them and how they want you to talk, the app keeps by itself after the chat: never write it here.\n'
-    '  - {\"op\": \"asked\", \"plan\": \"<id>\"} when this reply asks how one of their plans in <about_them> went.\n'
-    '  - {\"op\": \"card\", \"id\": \"<its id in <finds_in_this_chat>>\", \"verdict\": \"like\" | \"skip\"} when their message says what they think of a find you shared (a quoted card, \"this\"), unless you called note_reaction for it.\n'
-    "  - When they ask you not to keep something (\"别记这个\", \"don't remember this\"), mem is [] and you never bring it up again.\n"
-)
-
-
 def dm_output_protocol() -> str:
-    """The reply object. There is no PASS: nobody else is here. Its `mem` is
-    a list of typed operations (person.py)."""
+    """How the reply is written: plain text, after any tool calls."""
     return (
         "<output_protocol>\n"
-        "**Output a single JSON object — no markdown fences around it, nothing outside it.** If you call a tool, call it first: the JSON object is your final answer.\n"
-        "**Keys: reasoning / reply / mem, and wonder when you have one. No others.**\n"
-        "\n"
-        "Shape (single-line or multi-line is fine, what matters is valid JSON):\n"
-        '{\"reasoning\": \"...\", \"reply\": \"...\", \"mem\": []}\n'
-        "\n"
-        "reasoning (string, ≤100 chars, internal — they never see it): what they are asking for, in their words or in a picture or file; what a short line answers when it follows something you asked or offered; whether it needs a tool or a lookup this turn (anything current, any name you are not sure of → it does).\n"
-        "\n"
-        "reply (string, what they will actually see — **never empty, and never the literal \"PASS\"**): a one-on-one chat has no way to say nothing, so with nothing to add it is a short reply. Markdown, code blocks and line breaks go inside the string, escaped like any text (```python\\\\n...\\\\n```).\n"
-        "\n"
-        + PERSON_MEM +
-        "\n"
-        "wonder (optional string, leave it out almost always): when the talk touched something you genuinely want to look into on your own later, a few search words for it (\"蛋白质语言模型 新进展\"). Not what you already looked up this turn, not small talk.\n"
-        "\n"
-        "**JSON validity is the most important constraint**: escape quotes inside string values as \\\\\", use \\\\n for line breaks. Self-check that json.loads would accept your output before sending.\n"
+        "Your reply is plain text in the language of their last message, whatever language the tool results are in.\n"
+        "It says only what the tool results show was found or done; anything no result shows was not done.\n"
         "</output_protocol>"
     )

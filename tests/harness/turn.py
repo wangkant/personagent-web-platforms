@@ -71,10 +71,12 @@ class TurnResult:
         return None
 
 
-def run_turn(app, message: str, *script, cards="yes", conversation: str = "main") -> TurnResult:
-    """Send `message` in a chat; `script` rounds are queued on the model first. `cards` answers every card: one
-    of "yes", "no", "always", "never", or a list taken in order. Fails when the model was asked something no
-    script covers or a scripted round was never asked for."""
+def run_turn(app, message: str, *script, cards="yes", conversation: str = "main",
+             attachments: list | None = None) -> TurnResult:
+    """Send `message` in a chat, with `attachments` as chat.js sends them ({"kind": "picture", "data": base64});
+    `script` rounds are queued on the model first. `cards` answers every card: one of "yes", "no", "always",
+    "never", or a list taken in order. Fails when the model was asked something no script covers or a scripted
+    round was never asked for."""
     model = app.model
     model.script(*script)
     seen = len(model.requests)
@@ -85,7 +87,8 @@ def run_turn(app, message: str, *script, cards="yes", conversation: str = "main"
 
     def post() -> None:
         try:
-            sent["response"] = app.post("/api/chat", {"text": message, "chat": conversation}, timeout=300)
+            sent["response"] = app.post("/api/chat", {"text": message, "chat": conversation,
+                                                      "attachments": attachments or []}, timeout=300)
         finally:
             done.set()
 

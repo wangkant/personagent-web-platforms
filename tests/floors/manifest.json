@@ -2,23 +2,36 @@
   "about": "Each safety floor and the tests that hold it. Every test listed here carries the floor marker; the hygiene test fails when one no longer exists, so moving, renaming or removing a floor test changes this file in the same diff. An empty list is a floor nothing tests yet.",
   "floors": {
     "secrets": [
-      "tests/test_welcome.py::test_one_key_is_enough_and_state_does_not_leak_it",
-      "tests/test_welcome.py::test_changing_the_api_endpoint_never_sends_the_saved_key",
-      "tests/test_panel_signin.py::test_signing_in_saves_the_form_with_the_new_key_and_never_shows_it",
-      "tests/test_panel_signin.py::test_the_listing_marks_the_free_models_and_keeps_the_key_on_the_server",
-      "tests/test_panel_tuning.py::test_view_lists_every_field_and_never_a_key",
-      "tests/test_panel_tuning.py::test_backup_model_key_is_kept_with_its_address_and_never_returned",
-      "tests/test_panel_detect.py::test_a_key_in_the_environment_is_named_and_never_shown",
-      "tests/test_panel_detect.py::test_a_key_from_the_environment_goes_only_to_its_own_service",
-      "tests/test_panel_desk.py::test_a_backup_holds_the_home_but_no_keys_logs_sign_ins_or_chat_record",
-      "tests/test_panel_desk.py::test_data_names_the_places_and_no_secret",
+      "tests/interface/first_run/test_setup.py::test_one_key_is_enough_and_state_does_not_leak_it",
+      "tests/interface/first_run/test_setup.py::test_changing_the_api_endpoint_never_sends_the_saved_key",
+      "tests/interface/first_run/test_signin.py::test_signing_in_saves_the_form_with_the_new_key_and_never_shows_it",
+      "tests/interface/first_run/test_model_listing.py::test_the_listing_marks_the_free_models_and_keeps_the_key_on_the_server",
+      "tests/interface/settings/test_tuning.py::test_view_lists_every_field_and_never_a_key",
+      "tests/interface/settings/test_tuning.py::test_backup_model_key_is_kept_with_its_address_and_never_returned",
+      "tests/interface/first_run/test_detect.py::test_a_key_in_the_environment_is_named_and_never_shown",
+      "tests/interface/first_run/test_detect.py::test_a_key_from_the_environment_goes_only_to_its_own_service",
+      "tests/interface/settings/test_desk.py::test_a_backup_holds_the_home_but_no_keys_logs_sign_ins_or_chat_record",
+      "tests/interface/settings/test_desk.py::test_data_names_the_places_and_no_secret",
       "tests/test_mcp_tools.py::test_a_server_program_never_sees_the_apps_secrets",
       "tests/test_mcp_tools.py::test_secrets_go_to_the_credential_store_and_only_their_own_names_are_filled",
       "tests/floors/secrets/test_env_file.py::test_no_value_can_write_a_line_of_its_own",
+      "tests/floors/secrets/test_said_in_chat.py::test_secrets_said_in_a_chat_are_kept_nowhere_but_in_their_masked_form",
+      "tests/floors/secrets/test_page_copy.py::test_the_page_keeps_a_chat_with_its_card_number_masked_and_opens_it_the_same_after_a_restart",
+      "tests/floors/secrets/test_key_files.py::test_a_key_file_is_neither_listed_nor_searched_and_a_binary_is_found_by_name",
+      "tests/floors/secrets/test_key_files.py::test_a_plain_command_never_prints_a_key_files_name",
+      "tests/floors/secrets/test_key_files.py::test_a_key_files_name_in_what_a_command_prints_is_hidden",
       "tests/parts/endpoints/test_endpoints.py::test_a_separate_embeddings_address_is_never_sent_the_main_key",
-      "tests/test_ingestion.py::test_a_fetched_url_is_logged_as_its_host_only"
+      "tests/floors/boundary/test_safe_fetch.py::test_a_fetched_address_is_logged_as_its_host_only"
     ],
-    "asked": [],
+    "asked": [
+      "tests/floors/asked/test_paying_deleting_account_and_access.py::test_every_paying_deleting_account_and_access_control_asks_on_a_card",
+      "tests/floors/asked/test_paying_deleting_account_and_access.py::test_the_floor_kinds_ask_on_every_site_and_a_sensitive_site_asks_for_everything",
+      "tests/floors/asked/test_paying_deleting_account_and_access.py::test_an_act_that_sends_out_of_the_page_is_never_free_even_without_words",
+      "tests/floors/asked/test_paying_deleting_account_and_access.py::test_a_reviewer_that_would_pass_anything_is_never_asked_about_a_floor_act",
+      "tests/floors/asked/test_paying_deleting_account_and_access.py::test_in_another_program_paying_deleting_settings_and_opening_ask_and_editing_stays_free",
+      "tests/floors/asked/test_commands_and_tools_ask.py::test_a_delete_an_install_or_a_push_asks_every_time_and_on_no_nothing_happens",
+      "tests/floors/asked/test_commands_and_tools_ask.py::test_an_mcp_tool_marked_destructive_asks_every_time_and_on_no_the_server_gets_no_call"
+    ],
     "injection": [
       "tests/floors/injection/test_memory_gate.py::test_the_memory_gate_refuses_instructions_and_keeps_facts",
       "tests/floors/injection/test_memory_gate.py::test_a_note_that_instructs_is_kept_nowhere_when_added_or_pasted_on_the_memory_page",
@@ -27,9 +40,16 @@
       "tests/floors/injection/test_hidden_text.py::test_zwj_emoji_survive_the_scrubber",
       "tests/floors/injection/test_hidden_text.py::test_the_escaper_reads_what_a_model_reads",
       "tests/test_mcp_tools.py::test_third_party_words_are_bounded_and_fenced",
-      "tests/test_roam.py::test_the_prompt_fences_page_text"
+      "tests/parts/finds/test_walks.py::test_the_prompt_fences_page_text"
     ],
-    "grants": [],
+    "grants": [
+      "tests/floors/grants/test_what_is_granted.py::test_a_write_outside_what_was_granted_asks_for_the_folder_and_on_no_nothing_is_written",
+      "tests/floors/grants/test_what_is_granted.py::test_the_acting_mode_holds_off_waits_for_the_person_and_read_only_changes_nothing",
+      "tests/floors/grants/test_what_is_granted.py::test_no_file_tool_reaches_the_home_a_key_file_or_an_ungranted_folder",
+      "tests/floors/grants/test_what_is_granted.py::test_a_run_that_starts_on_a_site_nobody_named_asks_first",
+      "tests/floors/grants/test_what_is_granted.py::test_the_programs_on_the_never_list_are_never_operated",
+      "tests/test_mcp_tools.py::test_a_local_program_starts_only_once_allowed_and_each_call_asks"
+    ],
     "private": [],
     "boundary": [
       "tests/floors/boundary/test_local_routes.py::test_the_page_loads_without_the_token_and_every_api_route_refuses_without_it",
@@ -53,19 +73,22 @@
       "tests/floors/boundary/test_signin_callback.py::test_a_refusal_without_the_state_cannot_end_the_attempt",
       "tests/floors/boundary/test_signin_callback.py::test_the_state_binds_the_callback_to_its_attempt_once",
       "tests/floors/boundary/test_signin_callback.py::test_a_link_replayed_while_its_code_is_being_exchanged_finishes_nothing",
-      "tests/test_ingestion.py::test_every_non_global_address_is_internal",
-      "tests/test_ingestion.py::test_host_is_internal",
-      "tests/test_ingestion.py::test_ssrf_redirect_hops",
-      "tests/test_ingestion.py::test_dns_resolution_is_pinned_once",
-      "tests/test_ingestion.py::test_html_wire_cap",
-      "tests/test_ingestion.py::test_html_decoded_cap",
-      "tests/test_roam.py::test_internal_addresses_are_refused_by_rule"
+      "tests/floors/boundary/test_safe_fetch.py::test_no_internal_address_is_connected_to_by_name_or_written_out",
+      "tests/floors/boundary/test_safe_fetch.py::test_a_name_with_one_internal_answer_among_public_ones_is_refused",
+      "tests/floors/boundary/test_safe_fetch.py::test_names_that_mean_this_computer_are_refused",
+      "tests/floors/boundary/test_safe_fetch.py::test_a_redirect_to_an_inside_address_is_refused_at_that_hop",
+      "tests/floors/boundary/test_safe_fetch.py::test_dns_is_asked_once_and_the_connection_goes_to_the_address_it_gave",
+      "tests/floors/boundary/test_safe_fetch.py::test_a_lookup_that_does_not_answer_fails_closed",
+      "tests/floors/boundary/test_safe_fetch.py::test_a_body_past_the_wire_cap_is_refused",
+      "tests/floors/boundary/test_safe_fetch.py::test_a_body_that_unpacks_past_the_decoded_cap_is_refused",
+      "tests/floors/boundary/test_safe_fetch.py::test_links_in_a_message_to_inside_addresses_are_never_fetched",
+      "tests/parts/finds/test_walks.py::test_internal_addresses_are_refused_by_rule"
     ],
     "honesty": [
-      "tests/test_disclosure.py::test_the_dm_prompt_does_not_instruct_denial",
-      "tests/test_disclosure.py::test_the_prompt_carries_the_honest_disclosure_clause",
-      "tests/test_disclosure.py::test_the_safety_exception_still_reaches_the_prompt",
-      "tests/test_persona_register.py::test_the_companionship_register_survives_every_knob_combination"
+      "tests/floors/honesty/test_honesty.py::test_the_chat_prompt_never_instructs_denial_and_an_admission_is_said",
+      "tests/floors/honesty/test_honesty.py::test_the_prompt_carries_the_honest_answer_after_the_persona",
+      "tests/floors/honesty/test_honesty.py::test_the_safety_exception_reaches_the_prompt",
+      "tests/floors/honesty/test_honesty.py::test_the_companionship_register_survives_every_knob_combination"
     ]
   }
 }

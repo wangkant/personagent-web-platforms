@@ -1639,7 +1639,6 @@ window.paChat = (() => {
         showShellCard(null);
         showDeskCard(null);
         window.paToolCard.show(null, null);
-        window.paSkillOffer.show(null, null);
         cut = stopping = null;
         hooks.doing("");
         sending = false;
@@ -1875,12 +1874,6 @@ window.paChat = (() => {
             clearTimeout(turnLimit);
             turnLimit = setTimeout(() => stopReply("timeout"), TURN_MS);
             window.paToolCard.show(waiting, (await ctx.api("mcp/card")).card, keepEnd);
-          }
-          // A skill from the market offered before the reply waits on the person's press (skilloffer.js).
-          if (step?.tool === "skill_offer" && sending) {
-            clearTimeout(turnLimit);
-            turnLimit = setTimeout(() => stopReply("timeout"), TURN_MS);
-            window.paSkillOffer.show(waiting, (await ctx.api("skills/offer")).card, keepEnd);
           }
           // The sidebar's line under the character's name says it too (app.js).
           if (sending) hooks.doing(line);

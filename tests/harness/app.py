@@ -12,6 +12,7 @@ import httpx
 import uvicorn
 
 from mibo import paths, situation, welcome
+from mibo.panels import modelbar
 from mibo import setup_wizard as sw
 from mibo.storage import atomic_write_text
 
@@ -72,5 +73,7 @@ async def _no_probe(runtime, lang: str = "") -> None:
 
 
 def quiet_start(monkeypatch) -> None:
-    """What every app in a test leaves out: the first start's probe of public sites."""
+    """What every app in a test leaves out: the first start's probe of public sites, and the start's measure of
+    the model (a test that wants it scripts it and calls modelbar.check_at_start)."""
     monkeypatch.setattr(situation, "probe", _no_probe)
+    monkeypatch.setattr(modelbar, "check_at_start", lambda workspace: None)

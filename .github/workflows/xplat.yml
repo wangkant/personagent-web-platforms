@@ -1,13 +1,25 @@
 name: Cross-system
 
 # One job per system for the checks of the three-system work, each on a hosted runner of its own: Windows, macOS,
-# Linux on X11 with AT-SPI, and Linux on Wayland. Later stages add their checks (tools/xplat/) as steps of these
-# jobs. tools/xplat/wsl_run.sh runs the same checks in WSL on a virtual screen.
+# Linux on X11 with AT-SPI, and Linux on Wayland. Each job holds the checks under tools/xplat/ for its system:
+# bash reading (bashjudge_check.py), Electron fetched and started from a fresh home (electron_check.py), page
+# operation in an Electron view (epane_check.py) and Cua Driver on other programs (cua_check.py). tools/xplat/wsl_run.sh runs the same checks in WSL on a virtual screen. A stage branch
+# (ci/xplat-*) starts this workflow by pushing.
 on:
   push:
     branches: [main, "ci/xplat-*"]
     paths:
       - tools/xplat/**
+      - tools/opfiles.py
+      - tools/opframes.py
+      - tools/optruth.py
+      - mibo/electron/**
+      - mibo/host/**
+      - mibo/runtimes.py
+      - mibo/shell/**
+      - mibo/mcp_client.py
+      - mibo/web/gate.py
+      - mibo/web/operate.py
       - .github/workflows/xplat.yml
   workflow_dispatch:
 
@@ -18,6 +30,12 @@ concurrency:
   group: xplat-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  CUA_TAG: cua-driver-rs-v0.28.0
+  # Cua Driver reports to its makers unless told not to.
+  CUA_DRIVER_RS_TELEMETRY_ENABLED: "0"
+  PYTHONUTF8: "1"
+
 jobs:
   windows:
     runs-on: windows-2022
@@ -25,6 +43,9 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      CUA_ASSET: cua-driver-rs-0.28.0-windows-x86_64-binary.zip
+      CUA_SHA256: 9db2096df8d80da4e73ffb797947dcdfab2a362faddd9d1b77682c77aace5aa9
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -34,12 +55,81 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - name: The system
         run: python -c "import platform; print(platform.platform(), platform.machine())"
+      - name: Install mibo and the fixture's Qt
+        run: python -m pip install -e . PySide6-Essentials==6.10.1
+      - name: Bash reading, held to the floor
+        run: python tools/xplat/bashjudge_check.py "$(mktemp -d)"
+      # A person's first window start: the pinned Electron fetched into a fresh home, checked, started and quit.
+      - name: Electron fetched, checked and started from a fresh home
+        run: python tools/xplat/electron_check.py --home "$RUNNER_TEMP/electron-home" --out electron-out
+      # The second start with Python and Electron refused the network by the firewall (loopback stays open).
+      - name: The second start with the network off
+        shell: pwsh
+        run: |
+          $python = python -c "import sys; print(sys.executable)"
+          $electron = "$env:RUNNER_TEMP\electron-home\runtime\bin\electron\electron.exe"
+          Set-NetFirewallProfile -All -Enabled True
+          foreach ($program in @($python, $electron)) {
+            New-NetFirewallRule -DisplayName "mibo offline" -Direction Outbound -Action Block -Program $program | Out-Null
+          }
+          try {
+            python tools/xplat/electron_check.py --home "$env:RUNNER_TEMP\electron-home" --offline --out electron-out
+            $code = $LASTEXITCODE
+          } finally {
+            Remove-NetFirewallRule -DisplayName "mibo offline"
+          }
+          exit $code
+      - name: Operate pages in an Electron view
+        run: python tools/xplat/epane_check.py --google --out epane-out
+      - name: Download Cua Driver and check it against the published checksum
+        run: |
+          mkdir -p cua && cd cua
+          curl -fsSLO "https://github.com/trycua/cua/releases/download/$CUA_TAG/$CUA_ASSET"
+          curl -fsSLO "https://github.com/trycua/cua/releases/download/$CUA_TAG/checksums.txt"
+          grep -q "^$CUA_SHA256  $CUA_ASSET\$" checksums.txt
+          echo "$CUA_SHA256  $CUA_ASSET" | sha256sum -c -
+          unzip -q "$CUA_ASSET" -d bin
+          find bin -type f | head -20
+          echo "CUA_DRIVER=$(cygpath -w "$(find "$PWD/bin" -name cua-driver.exe | head -1)")" >> "$GITHUB_ENV"
+          du -sh bin
+      - name: Cua Driver, fixture in Tk
+        continue-on-error: true
+        run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --toolkit tk
+      - name: Cua Driver, fixture in Qt
+        continue-on-error: true
+        run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --toolkit qt
+      - name: Cua Driver on Notepad, beside desk/uia.py
+        continue-on-error: true
+        run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --program notepad --uia
+      - name: Cua Driver summary
+        if: always()
+        run: python tools/xplat/cua_check.py --report cua-out >> "$GITHUB_STEP_SUMMARY"
+      - name: Keep the results and pictures
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: xplat-windows
+          path: |
+            epane-out/*.json
+            epane-out/**/*.png
+            epane-out/**/*.jpg
+            epane-out/runtime/desktop/electron.log
+            electron-out/*.json
+            ${{ runner.temp }}/electron-home/runtime/desktop/electron.log
+            cua-out
+          if-no-files-found: ignore
+          retention-days: 14
 
   macos:
     runs-on: macos-15
     timeout-minutes: 30
+    env:
+      CUA_ASSET: cua-driver-rs-0.28.0-darwin-universal-binary.tar.gz
+      CUA_SHA256: aaaa29538fe7b1f103afb4eddeefe2dc137690f91f8074e333cfe0e76b49918d
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -49,12 +139,142 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - name: The system
         run: python -c "import platform; print(platform.platform(), platform.machine())"
+      - name: Install mibo and the fixture's Qt
+        run: python -m pip install -e . PySide6-Essentials==6.10.1
+      - name: Bash reading, held to the floor
+        run: python tools/xplat/bashjudge_check.py "$(mktemp -d)"
+      # A person's first window start: the pinned Electron fetched into a fresh home, checked, started and quit.
+      - name: Electron fetched, checked and started from a fresh home
+        run: python tools/xplat/electron_check.py --home "$RUNNER_TEMP/electron-home" --out electron-out
+      # The second start with pf dropping every packet past this computer, for the few seconds it takes. (A
+      # sandbox-exec profile cannot be used: Chromium's own sandbox cannot start inside one, and its views hang.)
+      - name: The second start with the network off
+        run: |
+          printf 'block drop out quick inet proto { tcp, udp } from any to ! 127.0.0.0/8\nblock drop out quick inet6 proto { tcp, udp } from any to ! ::1\n' > "$RUNNER_TEMP/offline.pf"
+          sudo pfctl -a com.apple/mibo-offline -f "$RUNNER_TEMP/offline.pf"
+          token=$(sudo pfctl -E 2>&1 | sed -n 's/^Token : //p')
+          set +e
+          python tools/xplat/electron_check.py --home "$RUNNER_TEMP/electron-home" --offline --out electron-out
+          code=$?
+          sudo pfctl -a com.apple/mibo-offline -F all
+          sudo pfctl -X "$token"
+          exit $code
+      - name: Operate pages in an Electron view
+        run: python tools/xplat/epane_check.py --google --out epane-out
+      - name: Download Cua Driver and check it against the published checksum
+        run: |
+          mkdir -p cua && cd cua
+          curl -fsSLO "https://github.com/trycua/cua/releases/download/$CUA_TAG/$CUA_ASSET"
+          curl -fsSLO "https://github.com/trycua/cua/releases/download/$CUA_TAG/checksums.txt"
+          grep -q "^$CUA_SHA256  $CUA_ASSET\$" checksums.txt
+          echo "$CUA_SHA256  $CUA_ASSET" | shasum -a 256 -c -
+          mkdir bin && tar -xzf "$CUA_ASSET" -C bin
+          find bin | head -20
+          driver="$(find "$PWD/bin" -type f -name cua-driver | head -1)"
+          echo "CUA_DRIVER=$driver" >> "$GITHUB_ENV"
+          echo "PYTHON_REAL=$(python -c 'import os, sys; print(os.path.realpath(sys.executable))')" >> "$GITHUB_ENV"
+          du -sh bin; codesign -dv "$driver" 2>&1 | head -8 || true
+      # The Cua Driver steps change the runner's privacy grants, so they come after every other check.
+      - name: The grants the image already holds
+        run: |
+          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
+            "SELECT service, client, auth_value FROM access WHERE service IN \
+            ('kTCCServiceAccessibility','kTCCServicePostEvent','kTCCServiceScreenCapture')" | tee tcc-before.txt
+          csrutil status || true
+          sw_vers
+      # Which process must hold the grant when Mibo's python starts Cua Driver? The image grants its own
+      # agent, so those rows go first; then the driver alone, python alone, and both.
+      - name: The processes above this step
+        run: |
+          pid=$$
+          while [ "$pid" -gt 1 ]; do ps -o pid=,ppid=,comm= -p "$pid"; pid=$(ps -o ppid= -p "$pid" | tr -d ' '); done
+      - name: A. The image's own grants, fixture in Qt
+        continue-on-error: true
+        run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --toolkit qt --label macos-A-image
+      - name: A. Fixture in Tk
+        continue-on-error: true
+        run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --toolkit tk
+      - name: A. TextEdit
+        continue-on-error: true
+        run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --program TextEdit
+      - name: Remove the image's grants
+        run: |
+          sudo sqlite3 -cmd ".timeout 10000" "/Library/Application Support/com.apple.TCC/TCC.db" \
+            "DELETE FROM access WHERE service IN ('kTCCServiceAccessibility','kTCCServicePostEvent','kTCCServiceScreenCapture')"
+          sudo launchctl stop com.apple.tccd || true
+          sleep 2
+      - name: B. No grant at all
+        continue-on-error: true
+        run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --toolkit qt --label macos-B-none
+      - name: C. Grant Cua Driver alone
+        run: bash tools/xplat/grant_tcc.sh "$CUA_DRIVER"
+      - name: C. Fixture with Cua Driver granted
+        continue-on-error: true
+        run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --toolkit qt --label macos-C-driver
+      - name: D. Grant python alone, the parent that starts Cua Driver
+        run: |
+          sudo sqlite3 -cmd ".timeout 10000" "/Library/Application Support/com.apple.TCC/TCC.db" \
+            "DELETE FROM access WHERE client='$CUA_DRIVER'"
+          bash tools/xplat/grant_tcc.sh "$PYTHON_REAL"
+      - name: D. Fixture with python granted
+        continue-on-error: true
+        run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --toolkit qt --label macos-D-python
+      - name: E. Grant both
+        run: bash tools/xplat/grant_tcc.sh "$CUA_DRIVER"
+      - name: E. Fixture with both granted
+        continue-on-error: true
+        run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --toolkit qt --label macos-E-both
+      # The process launchd started for the job is the responsible one: give it back its grant alone.
+      - name: F. Grant the runner's agent alone
+        run: |
+          sudo sqlite3 -cmd ".timeout 10000" "/Library/Application Support/com.apple.TCC/TCC.db" \
+            "DELETE FROM access WHERE client IN ('$CUA_DRIVER','$PYTHON_REAL')"
+          bash tools/xplat/grant_tcc.sh /opt/hca/hosted-compute-agent
+      - name: F. Fixture with the agent granted
+        continue-on-error: true
+        run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --toolkit qt --label macos-F-agent
+      - name: G. Grant the shell launchd started, and its script
+        run: |
+          bash tools/xplat/grant_tcc.sh /bin/bash
+          bash tools/xplat/grant_tcc.sh /opt/hca/start_hca.sh
+      - name: G. Fixture with the launchd shell granted
+        continue-on-error: true
+        run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --toolkit qt --label macos-G-launchd
+      - name: Cua Driver summary
+        if: always()
+        run: |
+          mkdir -p cua-out
+          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
+            "SELECT service, client, auth_value FROM access WHERE client LIKE '%cua%' OR client LIKE '%python%'" \
+            > cua-out/tcc-after.txt || true
+          cp tcc-before.txt cua-out/ || true
+          python tools/xplat/cua_check.py --report cua-out >> "$GITHUB_STEP_SUMMARY"
+      - name: Keep the results and pictures
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: xplat-macos
+          path: |
+            epane-out/*.json
+            epane-out/**/*.png
+            epane-out/**/*.jpg
+            epane-out/runtime/desktop/electron.log
+            electron-out/*.json
+            ${{ runner.temp }}/electron-home/runtime/desktop/electron.log
+            cua-out
+          if-no-files-found: ignore
+          retention-days: 14
 
   linux-x11:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      CUA_ASSET: cua-driver-rs-0.28.0-linux-x86_64-binary.tar.gz
+      CUA_SHA256: 120cd7f40340c5e012422aca393932767e228c224dd8b9df2124ca29c5e48226
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -64,11 +284,21 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Install a display, a window manager, D-Bus and AT-SPI
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install a display, a window manager, D-Bus, AT-SPI, gedit and what Qt and Electron load
         run: |
           sudo apt-get update
           sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            xvfb openbox dbus dbus-x11 at-spi2-core xdotool x11-utils
+            xvfb openbox dbus dbus-x11 at-spi2-core xdotool x11-utils gedit tk \
+            libxkbcommon0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-render-util0 \
+            libxcb-image0 libxcb-shape0 libegl1 libgl1 libfontconfig1 \
+            libnss3 libgbm1 libasound2t64 libgtk-3-0t64 libxss1 libxtst6 libatk-bridge2.0-0t64 libdrm2
+          # Ubuntu 24.04 forbids unprivileged user namespaces, which Chromium's sandbox needs; an installed
+          # build gets them from its AppArmor profile. Allowing them here keeps Electron's sandbox on, as it is there.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Install mibo and the fixture's Qt
+        run: python -m pip install -e . PySide6-Essentials==6.10.1
       # Xvfb, the session bus and the AT-SPI daemons start in one shell and stay up for the later steps, which get
       # their addresses through GITHUB_ENV (xa11y's setup-a11y recipe, see NOTICE).
       - name: Start the display, the window manager, the session bus and AT-SPI
@@ -82,7 +312,8 @@ jobs:
           eval "$(dbus-launch --sh-syntax)"
           echo "DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS" >> "$GITHUB_ENV"
           echo "DBUS_SESSION_BUS_PID=$DBUS_SESSION_BUS_PID" >> "$GITHUB_ENV"
-          printf '%s\n' NO_AT_BRIDGE=0 AT_SPI_CLIENT=true ACCESSIBILITY_ENABLED=1 >> "$GITHUB_ENV"
+          printf '%s\n' NO_AT_BRIDGE=0 AT_SPI_CLIENT=true ACCESSIBILITY_ENABLED=1 QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 \
+            >> "$GITHUB_ENV"
           /usr/libexec/at-spi-bus-launcher --launch-immediately >/dev/null 2>&1 &
           sleep 1
           /usr/libexec/at-spi2-registryd >/dev/null 2>&1 &
@@ -100,10 +331,64 @@ jobs:
           dbus-send --session --print-reply --dest=org.a11y.Bus /org/a11y/bus \
             org.freedesktop.DBus.Properties.Get string:org.a11y.Status string:IsEnabled | grep -q true
           echo "X11 :99 with openbox and AT-SPI is up"
+      - name: Bash reading, held to the floor
+        run: python tools/xplat/bashjudge_check.py "$(mktemp -d)"
+      # A person's first window start: the pinned Electron fetched into a fresh home, checked, started and quit.
+      - name: Electron fetched, checked and started from a fresh home
+        run: python tools/xplat/electron_check.py --home "$RUNNER_TEMP/electron-home" --out electron-out
+      # The second start in a network namespace of its own with only loopback up.
+      - name: The second start with the network off
+        run: |
+          unshare --user --map-current-user --net --keep-caps bash -c 'ip link set lo up &&
+            exec python tools/xplat/electron_check.py --home "$RUNNER_TEMP/electron-home" --offline --out electron-out'
+      - name: Operate pages in an Electron view
+        run: python tools/xplat/epane_check.py --google --out epane-out
+      - name: Download Cua Driver and check it against the published checksum
+        run: |
+          mkdir -p cua && cd cua
+          curl -fsSLO "https://github.com/trycua/cua/releases/download/$CUA_TAG/$CUA_ASSET"
+          curl -fsSLO "https://github.com/trycua/cua/releases/download/$CUA_TAG/checksums.txt"
+          grep -q "^$CUA_SHA256  $CUA_ASSET\$" checksums.txt
+          echo "$CUA_SHA256  $CUA_ASSET" | sha256sum -c -
+          mkdir bin && tar -xzf "$CUA_ASSET" -C bin
+          find bin | head -20
+          echo "CUA_DRIVER=$(find "$PWD/bin" -type f -name cua-driver | head -1)" >> "$GITHUB_ENV"
+          du -sh bin
+      - name: Cua Driver, fixture in Tk
+        continue-on-error: true
+        run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --toolkit tk
+      - name: Cua Driver, fixture in Qt
+        continue-on-error: true
+        run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --toolkit qt
+      - name: Cua Driver on gedit
+        continue-on-error: true
+        run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --program gedit
+      - name: Cua Driver summary
+        if: always()
+        run: python tools/xplat/cua_check.py --report cua-out >> "$GITHUB_STEP_SUMMARY"
+      - name: Keep the results and pictures
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: xplat-linux-x11
+          path: |
+            epane-out/*.json
+            epane-out/**/*.png
+            epane-out/**/*.jpg
+            epane-out/runtime/desktop/electron.log
+            electron-out/*.json
+            ${{ runner.temp }}/electron-home/runtime/desktop/electron.log
+            cua-out
+          if-no-files-found: ignore
+          retention-days: 14
 
   linux-wayland:
+    # Headless sway: Cua Driver's result is recorded, a pass is not required.
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      CUA_ASSET: cua-driver-rs-0.28.0-linux-x86_64-binary.tar.gz
+      CUA_SHA256: 120cd7f40340c5e012422aca393932767e228c224dd8b9df2124ca29c5e48226
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -113,14 +398,19 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Install sway, XWayland and D-Bus
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install sway, XWayland, D-Bus, AT-SPI, gedit and Qt's libraries
         run: |
           sudo apt-get update
           sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            sway xwayland dbus dbus-x11
+            sway xwayland dbus dbus-x11 at-spi2-core gedit libxkbcommon0 libwayland-client0 libwayland-cursor0 \
+            libwayland-egl1 libegl1 libgl1 libfontconfig1 libxkbcommon-x11-0 libxcb-cursor0
+      - name: Install mibo and the fixture's Qt
+        run: python -m pip install -e . PySide6-Essentials==6.10.1
       # sway on its headless backend with one virtual output and no X display (xa11y's run_wayland_portal.sh, see
-      # NOTICE); the later steps get its sockets through GITHUB_ENV.
-      - name: Start a headless sway
+      # NOTICE), then the AT-SPI daemons; the later steps get their sockets through GITHUB_ENV.
+      - name: Start a headless sway and AT-SPI
         run: |
           set -euo pipefail
           export XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg"
@@ -138,6 +428,10 @@ jobs:
             sleep 0.2
           done
           if [ -z "$sock" ] || [ -z "$ipc" ]; then cat "$RUNNER_TEMP/sway.log"; exit 1; fi
+          /usr/libexec/at-spi-bus-launcher --launch-immediately >/dev/null 2>&1 &
+          sleep 1
+          /usr/libexec/at-spi2-registryd >/dev/null 2>&1 &
+          sleep 1
           {
             echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
             echo "XDG_SESSION_TYPE=wayland"
@@ -146,9 +440,40 @@ jobs:
             echo "SWAYSOCK=$ipc"
             echo "DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS"
           } >> "$GITHUB_ENV"
+          printf '%s\n' NO_AT_BRIDGE=0 ACCESSIBILITY_ENABLED=1 QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 \
+            QT_QPA_PLATFORM=wayland GDK_BACKEND=wayland CUA_DRIVER_RS_ENABLE_WAYLAND=1 >> "$GITHUB_ENV"
       - name: The compositor answers with its one output
         run: |
           set -euo pipefail
           test -z "${DISPLAY:-}"
           swaymsg -t get_outputs | grep -q HEADLESS-1
           echo "headless sway is up on $WAYLAND_DISPLAY"
+      - name: Download Cua Driver and check it against the published checksum
+        run: |
+          mkdir -p cua && cd cua
+          curl -fsSLO "https://github.com/trycua/cua/releases/download/$CUA_TAG/$CUA_ASSET"
+          curl -fsSLO "https://github.com/trycua/cua/releases/download/$CUA_TAG/checksums.txt"
+          grep -q "^$CUA_SHA256  $CUA_ASSET\$" checksums.txt
+          echo "$CUA_SHA256  $CUA_ASSET" | sha256sum -c -
+          mkdir bin && tar -xzf "$CUA_ASSET" -C bin
+          echo "CUA_DRIVER=$(find "$PWD/bin" -type f -name cua-driver | head -1)" >> "$GITHUB_ENV"
+      - name: Cua Driver, fixture in Qt (native Wayland)
+        continue-on-error: true
+        run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --toolkit qt --label linux-wayland-qt
+      - name: Cua Driver on gedit (native Wayland)
+        continue-on-error: true
+        run: python tools/xplat/cua_check.py --driver "$CUA_DRIVER" --out cua-out --program gedit --label linux-wayland-gedit
+      - name: Cua Driver summary
+        if: always()
+        run: |
+          mkdir -p cua-out
+          cp "$RUNNER_TEMP/sway.log" cua-out/ || true
+          python tools/xplat/cua_check.py --report cua-out >> "$GITHUB_STEP_SUMMARY"
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: xplat-linux-wayland
+          path: cua-out
+          if-no-files-found: ignore
+          retention-days: 14

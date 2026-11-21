@@ -17,6 +17,8 @@ NOT_SETTINGS = {
     "OPENAI_BASE_URL",
     # A hosted runner's own scratch folder, where the sandbox suites keep their homes (tools/sandbox/_suite.py).
     "RUNNER_TEMP",
+    # The freedesktop base folders, where Electron keeps its own folders by default (tools/xplat/electron_check.py).
+    "XDG_CONFIG_HOME", "XDG_CACHE_HOME",
 }
 # Switches the measuring scripts and benches set, kept out of the person's template until the author
 # decides otherwise.

@@ -53,6 +53,9 @@ class Window:
     def load_url(self, url: str) -> None:
         self.url = url
 
+    def evaluate_js(self, script: str) -> None:
+        """What the app tells its page (window.py's tell); no page runs here to hear it."""
+
     def destroy(self) -> None:
         self.calls.append("destroy")
         self._gone.set()

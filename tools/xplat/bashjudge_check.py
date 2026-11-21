@@ -48,7 +48,6 @@ def main() -> int:
     if posix:
         os.environ["AGENT_HOME"] = str(home)
         grants = Grants(home / "runtime" / "desktop", home)
-        grants.set_on(True)
         assert grants.add(str(files)) == "", grants.add(str(files))
 
     matrix: Counter = Counter()

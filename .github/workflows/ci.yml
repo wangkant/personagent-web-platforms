@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+# A browser test that skips fails instead: every runner below has a browser for the walks' tests.
+env:
+  MIBO_REQUIRE_BROWSER: "1"
+
 # A newer push to the same branch makes the older run pointless.
 concurrency:
   group: ci-${{ github.ref }}
@@ -19,6 +23,7 @@ concurrency:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -57,21 +62,26 @@ jobs:
         run: ruff check . --select F401,F811,F821,F841
       - name: Run the test suite
         run: |
-          python -m pytest -q
+          python -m pytest -q --durations=25
           python -m compileall -q .
 
   windows:
     # Windows is the main deployment platform and the only one running storage.FileLock's msvcrt branch.
     runs-on: windows-2022
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.14"]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Set up Python
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: pyproject.toml
       - name: Install dependencies
@@ -80,16 +90,17 @@ jobs:
         # bash: PowerShell reports only the last command of a step, which hid failing tests here.
         shell: bash
         run: |
-          python -m pytest -q
+          python -m pytest -q --durations=25
           python -m compileall -q .
 
   package:
     # A checkout hides packaging breakage, so the built artifacts are installed and run elsewhere.
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-2022]
+        os: [ubuntu-24.04, windows-2022, macos-15]
     defaults:
       run:
         shell: bash

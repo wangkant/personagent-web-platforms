@@ -16,7 +16,7 @@ from pathlib import Path
 from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 
-from . import market, offer, store
+from . import market, store
 
 logger = logging.getLogger("mibo.skills")
 
@@ -238,24 +238,3 @@ def mount(app, workspace, body) -> None:
         except ValueError as e:
             return _error(str(e))
         return added(names)
-
-    # ------------------------------------------------- the chat's offer --
-
-    @app.post("/api/skills/offer/ask")
-    async def offer_ask(request: Request):
-        """From the character's turn: the card for one entry, waiting for the press, and the install on 安装."""
-        return await offer.ask(home, str((await body(request)).get("id") or ""))
-
-    @app.get("/api/skills/offer")
-    async def offer_card():
-        return {"card": offer.card(home)}
-
-    @app.post("/api/skills/offer")
-    async def offer_press(request: Request):
-        """The person's press: from the app's own page on this computer alone."""
-        from ..panels.runtime import WINDOW_HEADER
-        window = getattr(app.state, "window", None)
-        if window is not None and not window.is_own_page(request.headers.get(WINDOW_HEADER, "")):
-            return _error("local_only", 403)
-        payload = await body(request)
-        return await offer.press(home, str(payload.get("id") or ""), payload.get("yes") is True)

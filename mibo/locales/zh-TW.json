@@ -2035,26 +2035,6 @@
     "failed": "操作失敗，請稍後再試。",
     "unavailable": "無法列出網站，請稍後再試。"
   },
-  "skilloffer": {
-    "waiting": "等待你的回覆",
-    "ask": "要安裝技能「{title}」嗎？",
-    "meta": "{about} · {publisher}",
-    "scripts": "包含指令碼",
-    "yes": "安裝",
-    "no": "不安裝",
-    "installing": "正在安裝",
-    "done": "已安裝「{title}」，繼續處理你的請求。",
-    "declined": "未安裝，繼續處理你的請求。",
-    "failed": "未安裝：{why} 繼續處理你的請求。",
-    "gone": "此卡片已失效，未執行任何操作。",
-    "errors": {
-      "market_fetch_failed": "無法從來源下載。",
-      "market_hash_mismatch": "下載的內容與目錄記錄的版本不符。",
-      "market_high_risk": "安全檢查發現高風險內容。",
-      "skill_exists": "已存在同名技能。",
-      "other": "安裝失敗。"
-    }
-  },
   "toolcard": {
     "waiting": "等待確認",
     "startTitle": "啟動本機程式：{server}",

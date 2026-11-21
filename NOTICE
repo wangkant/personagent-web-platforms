@@ -44,6 +44,12 @@ Code taken from other projects, under the licences they were released with:
   pwsh-local and its way of running each command in a fresh `-NoProfile`
   PowerShell with capped output and the whole process tree ended on stop:
   MIT License, Copyright (c) 2026 DeepSeek.
+- `mibo/loop.py` follows dsh's agent loop: its ceilings on rounds and calls,
+  read calls run side by side and every other call in order, the wording of
+  the loop's own errors, the reminder on a repeated call, pruning the middle
+  of older results, and the outcome-unknown result of a call stopped in
+  flight. `tests/harness/model.py` answers from scripts as dsh's
+  llm-mock-server does. MIT License, Copyright (c) 2026 DeepSeek.
 - `.github/workflows/xplat.yml` and `tools/xplat/wsl_run.sh` start the
   virtual screen, the session bus and the AT-SPI daemons as xa11y's
   setup-a11y action does (`action.yml`, `apt-packages.txt`), and headless

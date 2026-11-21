@@ -2052,26 +2052,6 @@
     "unavailable": "Die Websites konnten nicht aufgelistet werden. Versuchen Sie es später erneut.",
     "others_one": "{count} weitere Website speichert hier Cookies; „Überall abmelden“ entfernt auch diese."
   },
-  "skilloffer": {
-    "waiting": "Wartet auf Ihre Antwort",
-    "ask": "Skill „{title}“ installieren?",
-    "meta": "{about} · {publisher}",
-    "scripts": "Enthält Skripte",
-    "yes": "Installieren",
-    "no": "Nicht installieren",
-    "installing": "Wird installiert",
-    "done": "„{title}“ installiert; Ihre Anfrage wird fortgesetzt.",
-    "declined": "Nicht installiert; Ihre Anfrage wird fortgesetzt.",
-    "failed": "Nicht installiert: {why} Ihre Anfrage wird fortgesetzt.",
-    "gone": "Diese Karte ist nicht mehr aktuell. Es wurde nichts ausgeführt.",
-    "errors": {
-      "market_fetch_failed": "Der Download von der Quelle ist fehlgeschlagen.",
-      "market_hash_mismatch": "Der empfangene Inhalt stimmt nicht mit der im Katalog erfassten Version überein.",
-      "market_high_risk": "Die Sicherheitsprüfung hat Inhalte mit hohem Risiko gefunden.",
-      "skill_exists": "Ein Skill mit diesem Namen ist bereits vorhanden.",
-      "other": "Die Installation ist fehlgeschlagen."
-    }
-  },
   "toolcard": {
     "waiting": "Wartet auf Ihre Antwort",
     "startTitle": "Ein Programm auf diesem Computer starten: {server}",

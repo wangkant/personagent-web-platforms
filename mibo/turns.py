@@ -11,7 +11,7 @@ from . import chatlangs
 
 # A turn's model time for its answer, in LLM_TIMEOUT_S: one full-length call
 # and half of another, however many calls, retries and models it goes through.
-# A turn with tools has, before that, the time its tool loop may take.
+# A turn with tools has, before that, the time its tool loop may take (loop.WITHIN_S).
 _TURN_BUDGET_CALLS = 1.5
 
 #: What the person may choose for one message in the chat: no web search this time,
@@ -61,16 +61,16 @@ class Turns:
         past it the work is abandoned and OutOfTime raised."""
         answer = self.llm_timeout_s * _TURN_BUDGET_CALLS
         from .dm import chat_lookups
-        from .search import tools_time
+        from .loop import WITHIN_S
         lookups = chat_lookups.get()
         loop = asyncio.get_running_loop()
         work = asyncio.ensure_future(model_work)
         began = loop.time()
         try:
             while True:
-                # A turn with tools: what its tool loop allows itself (search.tools_time), ahead
-                # of the answer's own time.
-                budget = answer + (tools_time(lookups) if lookups is not None else 0.0)
+                # A turn with tools: what its tool loop allows itself, not counting the time spent
+                # waiting on the person, ahead of the answer's own time.
+                budget = answer + (WITHIN_S + lookups.away() if lookups is not None else 0.0)
                 left = began + budget - loop.time()
                 if left <= 0:
                     raise OutOfTime(f"no answer within the turn's {budget:g} s budget")

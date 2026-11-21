@@ -10,9 +10,11 @@ A script is a list of rounds, one per request, taken first in, first out. A roun
     error_in_200()                status 200 carrying an error object, as some hosts send
     content_filter()              a reply the host's filter cut off
     hang()                        no answer until the test ends
+    drop()                        the connection closed with no answer
 
 Inner calls go to their own scripts by purpose, recognised from the constant each module sends first
-(review.POLICY, pagejudge.SYSTEM, consolidate's prompt, ingestion's vision prompt), never from prose. A request
+(review.POLICY, pagejudge.SYSTEM, consolidate's prompt, ingestion's vision prompt, mcp_tools.WORDS_PROMPT), never
+from prose. A request
 with max_tokens 1 is the endpoint probe a character makes when it starts, answered "ok" unless the test
 scripts "probe". Every request is recorded, with its key apart from its headers."""
 from __future__ import annotations
@@ -23,7 +25,7 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from mibo import consolidate, ingestion, review
+from mibo import consolidate, ingestion, mcp_tools, review
 from mibo.web import pagejudge
 
 MODEL = "scripted"
@@ -33,15 +35,15 @@ SYSTEM_OF = {
     "judge": pagejudge.SYSTEM,
     "fold": consolidate._PERSON_PROMPT,
     "vision": ingestion.ContentIngestion.VISION_READ_PROMPT,
+    # The search words an MCP server's tools are indexed by, once it connects.
+    "index": mcp_tools.WORDS_PROMPT,
 }
 PURPOSES = ("reply", "probe", *SYSTEM_OF)
 
 
 def say(text: str) -> dict:
-    """The reply's final words. Today the reply ends in the JSON object dm.py reads; S4 makes it plain text,
-    and changes this function alone."""
-    return {"content": json.dumps({"reasoning": "", "intent": "chat", "reply": text, "mem": ""},
-                                  ensure_ascii=False)}
+    """The reply's final words: plain text, with no call."""
+    return {"content": text}
 
 
 def text(words: str) -> dict:
@@ -72,6 +74,10 @@ def content_filter() -> dict:
 
 def hang() -> dict:
     return {"hang": True}
+
+
+def drop() -> dict:
+    return {"drop": True}
 
 
 def _step(item) -> dict:
@@ -183,6 +189,8 @@ class ScriptedModel:
             # Held until the test ends; the asker has gone by then, so nothing is sent.
             self._released.wait()
             return 0, None
+        if step.get("drop"):
+            return 0, None
         if "fail" in step:
             return step["fail"], step["body"]
         message: dict = {"role": "assistant", "content": step.get("content", "")}
@@ -234,7 +242,10 @@ class ScriptedModel:
                     return self._send(200, {"object": "list", "model": MODEL, "data": [
                         {"object": "embedding", "index": n, "embedding": _vector(str(v))} for n, v in enumerate(inputs)]})
                 status, answer = model._answer(body)
-                if answer is not None:
+                if answer is None:
+                    # Nothing is sent, and the connection closes rather than waiting for another request.
+                    self.close_connection = True
+                else:
                     self._send(status, answer)
 
         return Handler

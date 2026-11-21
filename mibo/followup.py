@@ -69,7 +69,7 @@ class FollowUp:
             said = f" (they said \"{plan['said']}\")" if plan.get("said") else ""
             note = f"They had planned this for {plan['due']}{said}: {plan.get('text', '')}"
             try:
-                reply, _ = await self._within_turn_budget(self._chat_dm(history, pkey=pkey, follow_up=note))
+                reply = await self._within_turn_budget(self._chat_dm(history, pkey=pkey, follow_up=note))
             except Exception as e:
                 logger.warning("[Agent] follow-up of a plan failed: %s", e)
                 return None
