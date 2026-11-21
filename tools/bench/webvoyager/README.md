@@ -1,5 +1,11 @@
 # WebVoyager subset for the browser hands
 
+> **Runner retired on 2026-11-21.** `run.py` and `report.py` measured `web/operate.run`, the browser errand loop, which
+> went with it: the chat now works pages itself with `act` (mibo/surface.py). The task data here stays. A new
+> runner sends each task through the chat as `tools/oploop.py` does (the app in process, a stand-in pane over
+> headless Chromium, every model call counted). The rest of this file describes the retired runner and its
+> numbers as they were.
+
 Thirty tasks from WebVoyager on real sites, each worked the way Mibo works a page: pageops' lines from the
 accessibility tree, `web/operate.run`'s prompt, reply form and budget, every action sorted by `gate.py`. The page is
 a headless Edge tab (Playwright, `channel="msedge"`), signed out, fresh for each task, with the headless browser's

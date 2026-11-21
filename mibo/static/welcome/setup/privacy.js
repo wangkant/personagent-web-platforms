@@ -421,11 +421,6 @@
         feed.box.checked = row.feed.on;
         item.append(feed.row);
         const tools = el("div", "setup-site-tools");
-        if (row.procedures) {
-          tools.append(el("span", "setup-help", paI18n.t("setup_privacy.ways", { count: row.procedures })),
-            kit.button("setup-button-secondary setup-button-sm", t.waysOff,
-              () => changeSites("browser/sites", { site: row.site, forget: "procedures" })));
-        }
         if (row.learned || row.allowed.length || row.feed.on) {
           tools.append(kit.button("setup-button-secondary setup-button-sm", t.forget, async () => {
             const sure = await ctx.confirm({ title: paI18n.t("setup_privacy.forgetAsk", { site: row.site }), text: t.forgetText, ok: t.forget });

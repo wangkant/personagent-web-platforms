@@ -51,7 +51,8 @@
       "tests/floors/grants/test_what_is_granted.py::test_a_write_outside_what_was_granted_asks_for_the_folder_and_on_no_nothing_is_written",
       "tests/floors/grants/test_what_is_granted.py::test_the_acting_mode_holds_off_waits_for_the_person_and_read_only_changes_nothing",
       "tests/floors/grants/test_what_is_granted.py::test_no_file_tool_reaches_the_home_a_key_file_or_an_ungranted_folder",
-      "tests/floors/grants/test_what_is_granted.py::test_a_run_that_starts_on_a_site_nobody_named_asks_first",
+      "tests/layers/web_operate/test_act.py::test_an_upload_gives_the_page_only_a_file_they_named",
+      "tests/layers/web_operate/test_act.py::test_going_to_another_site_is_free_unless_the_address_carries_words_read_on_a_page",
       "tests/floors/grants/test_what_is_granted.py::test_the_programs_on_the_never_list_are_never_operated",
       "tests/test_mcp_tools.py::test_a_local_program_starts_only_once_allowed_and_each_call_asks"
     ],

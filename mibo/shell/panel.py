@@ -614,8 +614,9 @@ class Shell:
             if re.match(r"^https?://", job["path"], re.IGNORECASE):
                 # A page for them to see: in the app's own browser; their default browser only when the app
                 # window is not open.
-                from ..web.operate import Remote
-                if Remote(self.home)._post("show", 20, url=job["path"]).get("status") == "ok":
+                from ..browsed import _ask
+                if _ask(self.home, "POST", "/api/browser/op", 20, json={"op": "show", "url": job["path"]}).get(
+                        "status") == "ok":
                     return f"Opened {job['path']} in the app's browser, in front of them."
                 os.startfile(job["path"])
                 return f"Opened {job['path']} in their default browser: the app's own browser is not open."

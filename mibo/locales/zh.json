@@ -1413,8 +1413,6 @@
     "feedStopped": "上次读取时遇到验证或登录，已停止。确认无误后可重新开启。",
     "feedAsk": "在后台读取此网站？",
     "feedYes": "开启",
-    "ways_other": "已记录 {count} 个操作方法",
-    "waysOff": "删除操作方法",
     "forget": "忘记此网站",
     "forgetAsk": "忘记 {site}？",
     "forgetText": "已记录的操作方法、搜索方式、后台读取和“不再询问”设置都将清除。",

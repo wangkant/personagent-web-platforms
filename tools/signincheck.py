@@ -6,13 +6,14 @@ only: the real app window, off screen, with no figure on the desktop.
 Five ports from --ports on: the app's page and service, the practice site (127.0.0.1), its sign-in provider
 (localhost, another site) and a stand-in model. The person's own steps (typing test values, pressing the site's
 buttons, the provider's popup) are done here as the person would, through the pane's own input; the character's
-are the app's own run loop (web/operate.run) with a scripted model that tries what it must never do: type or key
-in a password, a code or a card number. Every request the app sends to the model is kept, and the test values and
-the site's session cookies are looked for in them, in the home's files and in Settings' answers. results.json in
-<folder> holds each case's checks."""
+are act's steps through the app's own browser route (op place_look, then place_act, as surface.act sends them),
+scripted to try what it must never do: type or key in a password, a code or a card number, or work on a site the
+person turned off. Every request the app sends to the model (its reviewer) is kept, and the test values and the
+site's session cookies are looked for in them, in the home's files and in Settings' answers. results.json in
+<folder> holds each case's checks. The run's wait at a sign-in (cases b, c and d before 2026-11-21) went with the
+errand loop; a sign-in wall is now a Noticed line of a look for the reply model."""
 from __future__ import annotations
 
-import asyncio
 import json
 import re
 import secrets
@@ -210,17 +211,14 @@ class Model(BaseHTTPRequestHandler):
         self._answer("OK")
 
 
-def scripted(script):
-    """The run loop's model: `script(state, n)` gives the n-th reply from the page as the run's look shows it."""
-    asked = {"n": 0}
-
-    async def ask(system: str, messages: list[dict]) -> str:
-        Model.seen.append(json.dumps({"system": system, "messages": messages}, ensure_ascii=False))
-        if "You operate a web page" not in system:
-            return json.dumps({"done": True})
-        asked["n"] += 1
-        return json.dumps(script(str(messages[-1]["content"]), asked["n"]), ensure_ascii=False)
-    return ask
+def as_step(action: dict) -> dict:
+    """A scripted action as act's step: the ref, the verb and a line of what it does."""
+    named = {"press": "key", "navigate": "go"}
+    step = {"do": named.get(action["do"], action["do"]), "what": str(action.get("element") or action["do"])}
+    for k, v in (("id", "ref"), ("text", "text"), ("key", "keys"), ("url", "url")):
+        if k in action:
+            step[v] = action[k]
+    return step
 
 
 def field(state: str, words: str) -> int | None:
@@ -284,18 +282,6 @@ class Walk:
         time.sleep(0.2)
         self.pane.cdp("Input.insertText", {"text": text})
 
-    def until(self, test, seconds: float = 30.0):
-        began = time.monotonic()
-        while time.monotonic() - began < seconds:
-            value = test()
-            if value:
-                return value
-            time.sleep(0.5)
-        return None
-
-    def wait_shown(self) -> dict:
-        return self.until(lambda: (self.pane.op or {}).get("wait"), 40) or {}
-
     def row(self, site: str) -> str:
         """The site's state as Settings shows it: "in", "unsure", or "not listed"."""
         return next((r["state"] for r in self.api("signins")["sites"] if r["site"] == site), "not listed")
@@ -304,35 +290,23 @@ class Walk:
         from mibo.web import signin
         return signin.load(self.desktop).get(site) or {}
 
-    def run(self, task: str, start: str, script) -> dict:
-        """The app's run loop on `task` from `start`, in a thread of its own; its outcome once it ends."""
-        from mibo.web import operate, signin
-        home, walk = self.home, self
-        remote = operate.Remote(home)
-
-        class Hands:
-            async def begin(self, task: str) -> dict:
-                return await asyncio.to_thread(walk.api, "browser/op", {"op": "begin", "task": task, "start": start,
-                                                                        "lang": "zh", "go_on": False})
-            look, act, step, end, picture = remote.look, remote.act, remote.step, remote.end, remote.picture
-
-            async def sign_in(self, wall: str) -> dict:
-                return await signin.wait(signin.asker(home), wall)
-        box: dict = {}
-
-        def go() -> None:
-            box["out"] = asyncio.run(operate.run(scripted(script), Hands(), task, runtime=home / "runtime", said=task))
-        thread = threading.Thread(target=go, daemon=True)
-        thread.start()
-        box["thread"] = thread
-        return box
-
-    def ended(self, box: dict, seconds: float = 90.0) -> dict:
-        box["thread"].join(seconds)
-        return box.get("out") or {"status": "still running"}
-
-    def steps(self, outcome: dict) -> list[str]:
-        return [s[:160] for s in outcome.get("steps", [])]
+    def act(self, script, rounds: int = 3) -> dict:
+        """The page in front worked as the reply model works it: a look, then the script's steps for it as one act,
+        until the script asks the person or the steps do not go. {"status", "steps", "result"}."""
+        tab = next(t["id"] for t in self.api("browser/op", {"op": "tabs"})["tabs"] if t.get("front"))
+        lines: list[str] = []
+        for n in range(1, rounds + 1):
+            state = self.api("browser/op", {"op": "place_look", "tab": tab, "most": 6000}).get("state") or ""
+            actions = script(state, n)["actions"]
+            asked = next((a for a in actions if a["do"] == "ask_person"), None)
+            if asked is not None:
+                return {"status": "asked", "steps": lines, "result": asked["question"]}
+            out = self.api("browser/op", {"op": "place_act", "tab": tab, "steps": [as_step(a) for a in actions],
+                                          "lang": "zh"})
+            lines += [line[:160] for line in out.get("lines") or []]
+            if out.get("status") != "ok":
+                return {"status": out.get("status"), "steps": lines, "result": ""}
+        return {"status": "ok", "steps": lines, "result": ""}
 
 
 def readable(path: Path) -> str:
@@ -367,29 +341,19 @@ def try_secret(name: str, words: str, value_key: str, way: str):
 def secret_case(w: Walk, case: str, url: str, words: str, selector: str, key: str, way: str) -> None:
     """The character told to type a secret into a field of the page: what the field holds after each try."""
     w.open(url)
-    box = w.run(f"在 {url} 的「{words}」中填写", "", try_secret(case, words, key, way))
-    began = time.monotonic()
-    while time.monotonic() - began < 60 and box["thread"].is_alive():
-        if (w.pane.op or {}).get("wait"):
-            # The page was taken for a sign-in: the person skips it, the run ends.
-            w.log(case, "held_for_person", True)
-            w.api("signins/wait", {"action": "skip"}, window=True)
-            break
-        time.sleep(0.5)
-    out = w.ended(box)
+    out = w.act(try_secret(case, words, key, way))
     held = w.js(f"(document.querySelector({json.dumps(selector)}) || {{}}).value || ''")
     w.log(case, "status", out.get("status"))
-    w.log(case, "steps", w.steps(out))
+    w.log(case, "steps", out["steps"])
     w.log(case, "field_after", "empty" if not held else "holds the test value" if VALUES[key][:6] in held
           else f"holds {len(held)} characters")
-    w.pane.op_end("stopped", "") if w.pane.op is not None else None
+    w.api("browser/op", {"op": "place_done", "stopped": True})
 
 
 def walk(w: Walk) -> None:
     from mibo import signwatch
     from mibo.web import signin
     site = signin.key(SITE)
-    prov = signin.key(PROV)
 
     # (a) A password form: the person signs in themselves; the session is noted on evidence.
     w.open(SITE + "/inbox")
@@ -401,62 +365,6 @@ def walk(w: Walk) -> None:
     w.log("a", "page_after", urlsplit(w.pane.address()).path)
     w.log("a", "state", w.row(site))
     w.log("a", "how", w.entry(site).get("how"))
-
-    # (b) A run behind the sign-in after the site ended every session: it waits, the person signs in, it goes on.
-    w.open(SITE + "/expire", 1)
-    w.open(SITE + "/inbox")
-    box = w.run(f"读一下 {SITE}/inbox 里 Alice 的消息", "",
-                read_inbox)
-    wait = w.wait_shown()
-    w.log("b", "waited", bool(wait))
-    w.log("b", "wait_line", wait.get("say", ""))
-    w.log("b", "state_after_expiry", w.row(site))
-    w.types("#u", "ana")
-    w.types("#p", VALUES["pw"])
-    w.click("#go")
-    out = w.ended(box)
-    w.log("b", "status", out.get("status"))
-    w.log("b", "result", out.get("result"))
-    w.log("b", "steps", w.steps(out))
-
-    # (c) A code step: the wait holds on the code page until the person enters the code.
-    w.open(SITE + "/expire", 1)
-    w.open(SITE + "/inbox")
-    box = w.run(f"读一下 {SITE}/inbox 里 Alice 的消息", "",
-                read_inbox)
-    w.wait_shown()
-    w.types("#u", "ben")
-    w.types("#p", VALUES["pw2"])
-    w.click("#go")
-    time.sleep(5)
-    w.log("c", "on_code_page", urlsplit(w.pane.address()).path)
-    w.log("c", "still_waiting", bool((w.pane.op or {}).get("wait")))
-    w.types("#c", VALUES["code"])
-    w.click("button[type=submit]")
-    out = w.ended(box)
-    w.log("c", "status", out.get("status"))
-    w.log("c", "result", out.get("result"))
-
-    # (d) A provider's popup: it opens as a tab with its opener, the person signs in there, the site is signed in.
-    w.open(SITE + "/expire", 1)
-    w.open(SITE + "/inbox")
-    box = w.run(f"读一下 {SITE}/inbox 里 Alice 的消息", "",
-                read_inbox)
-    w.wait_shown()
-    w.click("#prov")
-    w.until(lambda: urlsplit(w.pane.address()).path == "/authorize", 10)
-    w.log("d", "popup_in_front", w.pane.address().startswith(PROV))
-    w.log("d", "popup_has_opener", bool(w.js("!!window.opener")))
-    w.log("d", "wait_on_popup", bool((w.pane.op or {}).get("wait")))
-    w.types("#pu", "ana")
-    w.types("#pp", VALUES["prov"])
-    w.click("#allow")
-    out = w.ended(box)
-    w.log("d", "status", out.get("status"))
-    w.log("d", "result", out.get("result"))
-    w.log("d", "back_on", urlsplit(w.pane.address()).path)
-    w.log("d", "state", w.row(site))
-    w.log("d", "provider_state", w.row(prov))
 
     # (e) The sign-in expires on the site's side: a page of it sent to the sign-in signs it out here.
     w.open(SITE + "/inbox")
@@ -503,13 +411,12 @@ def walk(w: Walk) -> None:
     w.api("signins", {"op": "choose", "site": site, "name": "task", "on": False}, window=True)
     w.log("h", "task_choice", signin.chose(w.desktop, SITE + "/inbox", "task"))
     w.open(PROV + "/away", 1)
-    box = w.run(f"先看 {PROV}/away，再到 {SITE}/inbox 读 Alice 的消息", PROV + "/away",
-                lambda state, n: {"note": "去收件箱", "actions": [{"do": "navigate", "url": SITE + "/inbox"}]} if n == 1 else
-                read_inbox(state, n))
-    out = w.ended(box)
+    out = w.act(lambda state, n: {"note": "去收件箱", "actions": [{"do": "navigate", "url": SITE + "/inbox"}]}
+                if n == 1 else read_inbox(state, n))
     w.log("h", "status", out.get("status"))
-    w.log("h", "steps", w.steps(out))
+    w.log("h", "steps", out["steps"])
     w.log("h", "read_inbox", "读到了" in str(out.get("result")))
+    w.api("browser/op", {"op": "place_done", "stopped": True})
     w.api("signins", {"op": "choose", "site": site, "name": "task", "on": True}, window=True)
 
     # (i) Secrets: the character never types or keys in a password, a code or a card number.

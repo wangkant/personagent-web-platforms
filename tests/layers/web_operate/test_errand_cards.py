@@ -1,7 +1,8 @@
-"""What an errand in the app's browser puts to the person, and when (web/operate.py, panels/browser.py,
-review.py): the act is judged, never the page's own traffic; one act is asked about once and its answer kept for
-the errand; a card nobody answered in time leaves the errand waiting with the card still answerable; a press on
-the chat laid over the page is no press on the page; and the reviewer's answer is read as a weak model gives it.
+"""What acting in the app's browser puts to the person, and when (web/operate.py, panels/browser.py, review.py):
+the act is judged, never the page's own traffic; one act is asked about once and its answer kept for the turn; a
+card nobody answered in time leaves the act waiting with the card still answerable, its later answer kept for the
+next turn; a press on the chat laid over the page is no press on the page; and the reviewer's answer is read as a
+weak model gives it.
 
 The site is a stand-in on 127.0.0.1 in the headless browser: a signed-in creator page whose 我的 tab draws the
 numbers, and which posts device data to another host (localhost) on load and on every click, as short-video sites
@@ -121,11 +122,16 @@ def creator_page(tmp_path):
     server.server_close()
 
 
+def ref(hands, role: str, name: str) -> int:
+    """The ref of the control with this role and name in the latest look."""
+    return next(i for i, (r, n) in hands.page.last.items() if (r, n) == (role, name))
+
+
 async def reply(hands) -> dict:
-    """The reply typed under the fan's message, and its button pressed."""
+    """The reply typed under the fan's message, and its button pressed, by the refs of a look."""
     await hands.look()
-    await hands.act({"do": "type", "role": "textbox", "name": "回复阿杰", "text": REPLY})
-    return await hands.act({"do": "click", "role": "button", "name": "回复"})
+    await hands.act({"do": "type", "id": ref(hands, "textbox", "回复阿杰"), "text": REPLY})  # copy: voice
+    return await hands.act({"do": "click", "id": ref(hands, "button", "回复")})  # copy: voice
 
 
 @pytest.mark.browser
@@ -185,7 +191,7 @@ def test_an_unanswered_card_leaves_the_errand_waiting_and_its_later_answer_is_ke
 
     async def going_on():
         await again.hands.look()
-        pressed = await again.hands.act({"do": "click", "role": "button", "name": "回复"})
+        pressed = await again.hands.act({"do": "click", "id": ref(again.hands, "button", "回复")})  # copy: voice
         await asyncio.sleep(0.3)
         await again.hands.close()
         return pressed
@@ -214,7 +220,13 @@ class Pane:
     """The pane's column as Operating tells it: the card shown, the answer told, the card left answered."""
 
     def __init__(self):
-        self.op, self.shown, self.told, self.kept = {"held": ""}, [], [], []
+        self.op, self.shown, self.told, self.kept = None, [], [], []
+
+    def front(self, tab):
+        pass
+
+    def operate(self, task, go_on=False):
+        self.op = {"held": ""}
 
     def op_card(self, card, text):
         self.shown.append(card)
@@ -229,10 +241,10 @@ class Pane:
 def test_a_card_whose_time_runs_out_stays_answerable_and_its_answer_is_kept(monkeypatch, tmp_path):
     monkeypatch.setattr(operate, "CARD_S", 0.5)
     pane = Pane()
-    run = Operating(SimpleNamespace(pane=pane, attended=lambda: True), tmp_path, None)
+    run = Operating(SimpleNamespace(pane=pane, attended=lambda: True, show=lambda: None), tmp_path, None)
     card = {"id": "c1", "kind": "comment", "site": "127.0.0.1", "to": "阿杰", "text": REPLY, "button": "回复",
             "skippable": True, "act": ("card", "comment", "127.0.0.1", "回复", REPLY, "阿杰")}
-    assert asyncio.run(run.ask(card)) == {"waiting": act_of(card, "zh")}
+    assert asyncio.run(run.ask(card, 1)) == {"waiting": act_of(card, "zh")}
     assert len(pane.shown) == 1 and pane.told == []
     assert run.answer_card("c1", True, False, [])
     assert run.kept == {card["act"]: {"yes": True}} and pane.kept == [True]

@@ -70,7 +70,7 @@ CONTEXT_LOSS = re.compile(r"Execution context was destroyed|Cannot find context|
 CDP_TIMEOUT_MS = 15_000
 SURROGATE = re.compile("[\ud800-\udfff]")
 # What a state the model sees may hold, characters: for the least able model, and the most for one whose context
-# window has room (web/operate.budget), as browser-use gives tens of thousands.
+# window has room, as browser-use gives tens of thousands.
 STATE_MAX = 6000
 STATE_MOST = 20_000
 # A line with an id on it, and how many lines a look's find returns (read_page's find: up to 20).
@@ -106,6 +106,12 @@ TEXT_MOST = 400_000
 WAIT_S = 15.0
 # Mouse moves a drag takes from one control to the other, so a list that follows the mouse sees it go by.
 DRAG_STEPS = 8
+# Playwright's actionability (NOTICE): a control not yet visible, stable, enabled or free to take the click is tried
+# again after these waits (its retry ladder, the last repeating) until ACTION_S have gone, as its default action
+# timeout in Playwright MCP.
+ACTION_S = 5.0
+ACTION_WAITS = (0.0, 0.02, 0.1, 0.1, 0.5)
+NOT_YET = re.compile(r"Target (hidden|disabled|covered|outside viewport|not stable)")
 # Keys a press may name; a chord holds them with modifiers, by Playwright's names and the usual short ones, as
 # CDP's mask (Alt 1, Control 2, Meta 4, Shift 8); one letter, digit or sign is a key too.
 KEYS = {"Enter": 13, "Escape": 27, "Tab": 9, "Backspace": 8, "Delete": 46, "ArrowDown": 40, "ArrowUp": 38,
@@ -437,7 +443,8 @@ POINT_JS = r"""function(editableCover) {
   const forms = """ + json.dumps(SET_BY_VALUE) + r""";
   const e = this.nodeType === Node.ELEMENT_NODE ? this : this.parentElement;
   if (!e || !e.isConnected) throw Error('Target detached');
-  if (e.matches(':disabled') || e.closest('[inert]')) throw Error('Target disabled');
+  // Playwright's enabled: a native control's own disabled, a fieldset's, and aria-disabled on it or what holds it.
+  if (e.matches(':disabled') || e.closest('[inert]') || e.closest('[aria-disabled=true]')) throw Error('Target disabled');
   if (e.tagName === 'INPUT' && forms[e.type]) throw Error(`a ${e.type} field opens a picker that cannot be seen; type ` +
     `the value into its id as ${e.type === 'range' ? `a number from ${e.min || 0} to ${e.max || 100}` : forms[e.type]}`);
   if (!e.checkVisibility({checkOpacity:true, checkVisibilityCSS:true})) throw Error('Target hidden');
@@ -462,6 +469,24 @@ POINT_JS = r"""function(editableCover) {
     py += fr.y + f.clientTop + parseFloat(cs.paddingTop);
   }
   return {x: px, y: py, covered, multi};
+}"""
+
+# Playwright's stable: the same box over two animation frames running (an element sliding in is waited for). A tab
+# out of sight may get no frames, so a frame is also 50 ms at most.
+STABLE_JS = r"""function() {
+  const e = this.nodeType === Node.ELEMENT_NODE ? this : this.parentElement;
+  const box = () => { const r = e.getBoundingClientRect(); return [r.x, r.y, r.width, r.height].join(); };
+  const frame = () => new Promise((done) => { requestAnimationFrame(done); setTimeout(done, 50); });
+  return (async () => {
+    let last = box();
+    for (let n = 0; n < 2; n++) {
+      await frame();
+      const now = box();
+      if (now !== last) throw Error('Target not stable');
+      last = now;
+    }
+    return true;
+  })();
 }"""
 
 # Where a frame's own document starts inside its frame element, in the coordinates of the process's top page.
@@ -1788,12 +1813,6 @@ class Page:
         except Exception:
             self._world = None
 
-    def find(self, role: str, name: str) -> int | None:
-        """The id in the last look with this role and name (the name compared without case or spaces), or None."""
-        want = fold(name).strip()
-        hits = [i for i, (r, n) in self.last.items() if r == role and fold(n).strip() == want]
-        return hits[0] if len(hits) == 1 else None
-
     async def screenshot(self) -> str:
         """The viewport as a small JPEG, base64, for the card."""
         metrics = await self.cdp("Page.getLayoutMetrics")
@@ -1806,6 +1825,20 @@ class Page:
     # --- actions
 
     async def _point(self, ident: int, editable_cover: bool = False) -> dict:
+        """Playwright's actionability checks before a pointer action (NOTICE): attached, visible, stable over two
+        frames, enabled and receiving the events at its point, tried again on its retry ladder (ACTION_WAITS)
+        until ACTION_S when one is not yet so. The point, unobstructed, in the top page; else raises why not."""
+        began, tries = time.monotonic(), 0
+        while True:
+            try:
+                return await self._point_once(ident, editable_cover)
+            except RuntimeError as error:
+                if not NOT_YET.search(str(error)) or time.monotonic() - began > ACTION_S:
+                    raise
+            await asyncio.sleep(ACTION_WAITS[min(tries, len(ACTION_WAITS) - 1)])
+            tries += 1
+
+    async def _point_once(self, ident: int, editable_cover: bool = False) -> dict:
         """Scroll into view and return an unobstructed centre point in the top page, or raise why not."""
         session, local = self._node(ident)
         frame = session
@@ -1821,6 +1854,7 @@ class Page:
         except Exception:
             pass
         try:
+            await self.on_node(ident, STABLE_JS)
             p = await self.on_node(ident, POINT_JS, editable_cover)
         except RuntimeError as error:
             if "outside viewport" not in str(error):
@@ -1885,8 +1919,11 @@ class Page:
                 after = None
         if not before or not after:
             return "page changed"
-        if after["doc"] != before["doc"] or after["url"] != before["url"]:
+        if after["doc"] != before["doc"]:
             return f"navigated to {after['url']}"
+        if after["url"] != before["url"]:
+            # The same document at another address (a fragment, the page's own routing): its refs still hold.
+            return f"page changed; the address is now {after['url']}"
         return "page changed" if after["n"] != before["n"] else "no change"
 
     async def click(self, ident: int, how: str = "") -> str:

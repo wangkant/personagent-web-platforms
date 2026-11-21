@@ -1,4 +1,4 @@
-"""A card an errand left waiting may be answered by the person's own words in the chat beside the page
+"""A card a turn left waiting may be answered by the person's own words in the chat beside the page
 (panels/browser.py, loop.py), except paying, deleting, the account and access: those are answered on the card
 alone, and words leave the card waiting and nothing kept."""
 from __future__ import annotations
@@ -15,7 +15,13 @@ from mibo.web import operate
 
 class Pane:
     def __init__(self):
-        self.op, self.kept = {"held": ""}, []
+        self.op, self.kept = None, []
+
+    def front(self, tab):
+        pass
+
+    def operate(self, task, go_on=False):
+        self.op = {"held": ""}
 
     def op_card(self, card, text):
         pass
@@ -29,10 +35,10 @@ class Pane:
 
 def left_waiting(kind: str, monkeypatch, tmp_path) -> tuple[Operating, dict]:
     monkeypatch.setattr(operate, "CARD_S", 0.3)
-    run = Operating(SimpleNamespace(pane=Pane(), attended=lambda: True), tmp_path, None)
+    run = Operating(SimpleNamespace(pane=Pane(), attended=lambda: True, show=lambda: None), tmp_path, None)
     card = {"id": f"c-{kind}", "kind": kind, "site": "creator.example.com", "to": "作品《周末》", "text": "",
             "button": "好的", "skippable": False, "act": ("card", kind, "creator.example.com", "好的", "", "")}
-    assert "waiting" in asyncio.run(run.ask(card))
+    assert "waiting" in asyncio.run(run.ask(card, 1))
     return run, card
 
 

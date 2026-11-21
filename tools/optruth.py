@@ -1,23 +1,23 @@
-"""What web/operate.py says of a run against what happened, with no model and no window: a scripted helper works
-pages of tools/opsite in headless Edge the way a model errs (it names one control and gives another's id, presses
-a button already pressed, sends the same words again, says done with nothing sent), and each check reads what the
-loop wrote, what the site got and how the run ended.
+"""What web/operate.py says of an act against what happened, with no model and no window: a scripted helper works
+pages of tools/opsite in headless Edge through act's Hands.steps the way a model errs (it names one control and
+gives another's id, sends the same words again, types and never sends), and each check reads the step lines and
+the Noticed lines, what the site got and how the steps ended.
 
     python tools/optruth.py [--out <folder>] [--port 59630] [--only name,repeat]
 
 One line a check, then the loop's own lines; <out>/truth.json keeps them. The exit code is the number of checks
 that failed. The checks:
 
-    plain    an ordinary send goes through: one card, one message, no step refused, no judge call
+    plain    an ordinary send goes through: one card, one message, no step refused
     name     an id whose control is not the one named is refused, nothing clicked
     line     a click's line names an icon with no words and says what changed on it
     hover    a hover's line lists what came up under the pointer
-    repeat   pressing again what was confirmed and pressed ends the run as done
     resend   the same words to the same person are not sent twice
-    unsent   done with what was typed never sent is not taken as done
-    expect   done with words the page does not show is not taken; with words it shows, taken with no judge call
-    go_on    after a handover, done with nothing saved is not taken, and the save still gets its card
+    unsent   what was typed and never sent is said in the Noticed lines, and nothing is sent
     why      a press that cannot land is not put on a card, and fails with the reason in the person's words
+
+repeat, expect and go_on measured operate.run's own ending (its repeat stop, the done proof and its judge, the
+handover's go on) and went with it.
 """
 from __future__ import annotations
 
@@ -37,10 +37,11 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE / "opsite"))
 
+from opbounds import drive  # noqa: E402
+
 from mibo.web import gate, operate  # noqa: E402
 from mibo.web.tabs import PlaywrightTab  # noqa: E402
 
-STOP = {"do": "done", "success": False, "result": "(the script ended)"}
 
 
 def ident(page: str, pattern: str) -> int:
@@ -49,12 +50,11 @@ def ident(page: str, pattern: str) -> int:
 
 
 class Play:
-    """One page of the site and a script for it: `run` is operate.run with the script's replies as the model's."""
+    """One page of the site and a script for it: `run` works the script's steps on it as act does."""
 
     def __init__(self, browser, site: str, allow: Path):
         self.browser, self.site, self.allow = browser, site, allow
         self.cards: list[dict] = []
-        self.judged = 0
         self.page = None
 
     async def open(self, path: str) -> None:
@@ -70,28 +70,12 @@ class Play:
             return {"yes": True, "never": False}
         return operate.Hands(self.tab, ask=ask, allowed=gate.Allowed(self.allow), attended=lambda: False, lang="zh")
 
-    async def run(self, task: str, plan: list, *, judge: dict | None = None, before: list[str] | None = None) -> dict:
-        """`plan`: one entry a model call, each a function of the page's lines and the whole prompt that gives
-        the reply's actions. `judge`: what the judge of a done with no proof answers."""
-        plan = list(plan)
-
-        async def model(system: str, messages: list[dict]) -> str:
-            prompt = messages[-1]["content"]
-            if not system.startswith("You operate a web page"):
-                self.judged += 1
-                return json.dumps(judge or {"done": True}, ensure_ascii=False)
-            page = prompt.split("The page now:", 1)[-1]
-            try:
-                actions = plan.pop(0)(page, prompt) if plan else STOP
-            except AttributeError:
-                # What the script looks for is not on the page.
-                actions = STOP
-            return json.dumps({"note": "按脚本操作", "keep": "",
-                               "actions": actions if isinstance(actions, list) else [actions]}, ensure_ascii=False)
-
+    async def run(self, task: str, plan: list) -> dict:
+        """`plan`: one entry an act, each a function of the page's lines that gives the act's steps."""
         hands = self.hands()
+        hands.said = lambda: task
         try:
-            return await asyncio.wait_for(operate.run(model, hands, task, before=before, said=task), 120)
+            return await asyncio.wait_for(drive(hands, plan), 120)
         finally:
             await hands.close()
 
@@ -122,7 +106,7 @@ async def plain(play: Play) -> tuple[bool, dict]:
     await play.open("/messages.html")
     out = await play.run("给 Alice 发消息：明天见", [*ALICE, done("已向 Alice 发送“明天见”。")])
     sent = play.got("/api/send")
-    return (out["status"] == "done" and len(sent) == 1 and len(play.cards) == 1 and play.judged == 0
+    return (out["status"] == "done" and len(sent) == 1 and len(play.cards) == 1
             and not any(line.startswith("[failed]") for line in out["steps"])), out
 
 
@@ -147,13 +131,6 @@ async def hover(play: Play) -> tuple[bool, dict]:
     return "帮助中心" in over, out
 
 
-async def repeat(play: Play) -> tuple[bool, dict]:
-    await play.open("/t/t10-notes.html")
-    out = await play.run("把“购物清单”这条笔记收藏一下", [click(STAR, "收藏")] * 7)
-    stars = play.got("/api/star")
-    return out["status"] == "done" and len(stars) == 1 and stars[0].get("on") is True, out
-
-
 async def resend(play: Play) -> tuple[bool, dict]:
     await play.open("/messages.html")
     out = await play.run("给 Alice 发消息：明天见", [*ALICE, ALICE[1], done("已向 Alice 发送“明天见”。")])
@@ -162,40 +139,8 @@ async def resend(play: Play) -> tuple[bool, dict]:
 
 async def unsent(play: Play) -> tuple[bool, dict]:
     await play.open("/messages.html")
-    out = await play.run("给 Alice 发消息：明天见",
-                         [ALICE[0], typed(r'\[(\d+)\] textbox', "明天见", "输入框"), *[done("已向 Alice 发送“明天见”。")] * 4],
-                         judge={"done": False, "missing": "消息还没有发送给 Alice。"})
-    return out["status"] != "done" and not play.got("/api/send") and play.judged == 1, out
-
-
-async def expect(play: Play) -> tuple[bool, dict]:
-    await play.open("/t/t14-orders.html")
-
-    def read(page: str, prompt: str) -> dict:
-        row = re.search(r"A-1143 [^\n]*?([\d.]+)\n", prompt.split("Found on the page:", 1)[-1]).group(0).strip()
-        return done(f"订单 A-1143：{row}", row.split()[-1])(page, prompt)
-
-    find = lambda page, prompt: {"do": "find", "text": "A-1143"}  # noqa: E731
-    out = await play.run("查一下订单 A-1143 的金额是多少", [find, done("订单 A-1143 的金额是 0.01 元。", "A-1143 的金额 0.01"),
-                                                 find, read])
-    amount = 268.5 + 7 * (json.loads(urllib.request.urlopen(play.site + "/api/state", timeout=10).read()).get("round", 0) % 9)
-    return out["status"] == "done" and f"{amount:.2f}" in out["result"] and play.judged == 0, out
-
-
-async def go_on(play: Play) -> tuple[bool, dict]:
-    await play.open("/profile.html")
-    task = "把我的昵称改成 Mibo"
-    save = click(r'\[(\d+)\] button "保存"', "保存")
-    first = await play.run(task, [lambda page, prompt: [typed(r'\[(\d+)\] textbox "昵称"', "Mibo", "昵称")(page, prompt),
-                                                         save(page, prompt)]])
-    # The person types their own password where the focus was left (a test value), and says go on.
-    await play.page.fill("#current", "bench-Pw-4471")
-    said = done("昵称已改为 Mibo。", "Mibo")
-    out = await play.run(task, [said, said, save, done("昵称已改为 Mibo，页面显示“已保存。”", "已保存")],
-                         judge={"done": False, "missing": "还没有点击保存。"}, before=first["steps"])
-    saved = play.got("/api/profile")
-    return (first["status"] == "handover" and out["status"] == "done" and len(saved) == 1
-            and saved[0].get("nickname") == "Mibo" and len(play.cards) == 1), {**out, "steps": first["steps"] + out["steps"]}
+    out = await play.run("给 Alice 发消息：明天见", [ALICE[0], typed(r'\[(\d+)\] textbox', "明天见", "输入框")])
+    return not play.got("/api/send") and any("not sent" in line for line in out["noticed"]), out
 
 
 async def why(play: Play) -> tuple[bool, dict]:
@@ -210,8 +155,8 @@ async def why(play: Play) -> tuple[bool, dict]:
         "status": result.get("status"), "result": str(result.get("why") or ""), "steps": [result.get("line", "")]}
 
 
-CHECKS = {"plain": plain, "name": name, "line": line, "hover": hover, "repeat": repeat, "resend": resend,
-          "unsent": unsent, "expect": expect, "go_on": go_on, "why": why}
+CHECKS = {"plain": plain, "name": name, "line": line, "hover": hover, "resend": resend, "unsent": unsent,
+          "why": why}
 
 
 async def main(argv: list[str]) -> int:
@@ -245,9 +190,9 @@ async def main(argv: list[str]) -> int:
                 except Exception as error:
                     ok, seen = False, {"status": "error", "result": f"{type(error).__name__}: {error}"[:300], "steps": []}
                 rows.append({"check": label, "ok": bool(ok), "status": seen.get("status"), "result": seen.get("result", ""),
-                             "judged": play.judged, "cards": play.cards, "steps": seen.get("steps", [])})
+                             "cards": play.cards, "steps": seen.get("steps", []), "noticed": seen.get("noticed", [])})
                 print(f"{'PASS' if ok else 'FAIL'}  {label}: ended {seen.get('status')} {seen.get('result', '')[:80]!r}, "
-                      f"{len(play.cards)} cards, {play.judged} judge calls")
+                      f"{len(play.cards)} cards")
                 for step in seen.get("steps", []):
                     print("      " + step.replace("\n", "\n      ")[:400])
                 await play.page.context.close()

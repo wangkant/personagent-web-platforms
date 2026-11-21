@@ -14,7 +14,6 @@ from harness.model import call, say
 from mibo import acting
 from mibo.shell import files, read as reading
 from mibo.shell.grants import Grants
-from mibo.web import operate
 
 ASKED = "Write a short note called plan.txt there"  # copy: voice
 
@@ -94,16 +93,6 @@ def test_no_file_tool_reaches_the_home_a_key_file_or_an_ungranted_folder(tmp_pat
     job["folder"] = os.path.dirname(job.get("path", ""))
     verdict = reading.judge(reading.Reading(files.call(job), str(folder), files.acts(job, str(folder)), []), grants)
     assert verdict.action == want, [a.why for a in verdict.reasons]
-
-
-def test_a_run_that_starts_on_a_site_nobody_named_asks_first():
-    here = "https://news.example.org/a"
-    started = {"another site, unnamed": operate.plan("https://collect.evil.test/?d=x", here, "看看这篇新闻"),  # copy: voice
-               "another site, named": operate.plan("https://www.bilibili.com/", here, "打开 bilibili 搜猫"),  # copy: voice
-               "the same site": operate.plan("https://news.example.org/b", here, "看看下一篇"),  # copy: voice
-               "no start": operate.plan("", here, "看看这篇新闻")}  # copy: voice
-    assert {name: plan["card"] for name, plan in started.items()} == {
-        "another site, unnamed": True, "another site, named": False, "the same site": False, "no start": False}
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="the app operates other programs on Windows only")

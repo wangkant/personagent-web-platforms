@@ -13,16 +13,30 @@ OpenAI's BrowserToolset read_page, read_page_scoped and find): a text accessibil
 each control, one grammar for a page and a window; ref reads one part (read_page's ref_id, read_page_scoped's
 root), filter interactive keeps the controls, find returns up to twenty lines with refs for words, and an Omitted
 line says what was left out and why (BrowserReadV1's omitted: report_limit, private). A Noticed line gives what
-the app spotted (a sign-in box, a check for people, a password field, a drawn canvas): hints, never a verdict. No
-errand starts and nothing on the page or in the window is pressed.
+the app spotted (a sign-in box, a check for people, a password field, a drawn canvas): hints, never a verdict.
+Nothing on the page or in the window is pressed.
+
+act does steps in a page place, out of sight or in the middle, with the verbs the page tools converged on
+(Playwright MCP's browser_click, browser_type, browser_select_option, browser_press_key, browser_hover,
+browser_drag, browser_wait_for, browser_file_upload, browser_navigate): each step through web/operate.Hands in the
+app, so the gate, the reviewer, the watch of what a press sends and the cards hold as before. The result is the
+step lines, what changed, and a Noticed line (what a press sent: method, host, status; the address and title
+after; the page's own dialogs), then the page as the steps left it, as Playwright MCP answers each action with
+its snapshot. The reply model decides when the task is done; no loop inside the call. A read
+step reads the page for a question (web/pagetext.py) with the reply model.
 """
 from __future__ import annotations
 
 import asyncio
 import os
+import time
 from urllib.parse import urlsplit
 
 from . import places, resolve, today
+from .llm import purpose
+
+# What a read step's reader may answer in, in tokens.
+READ_ANSWER = 2000
 
 OPEN = {"type": "function", "function": {
     "name": "open",
@@ -56,7 +70,44 @@ LOOK = {"type": "function", "function": {
         "from": {"type": "integer", "description": "the line to go on from, as the Omitted line says"},
         "picture": {"type": "boolean", "description": "true to see a picture too, when your model takes pictures"}},
         "required": []}}}
-TOOLS = [OPEN, LOOK]
+_STEP = {"type": "object", "properties": {
+    "do": {"type": "string", "enum": ["click", "type", "select_option", "key", "hover", "drag", "scroll_to",
+                                      "wait_for", "upload_file", "go", "back", "read"]},
+    "what": {"type": "string", "description": "what this step does, in a few words of their language: the card "
+                                              "they may be asked on shows it"},
+    "ref": {"type": "integer", "description": "the control's ref from the latest look"},
+    "text": {"type": "string", "description": "type: the text; click without a ref: the words it shows; "
+                                              "scroll_to: scroll until these words show; wait_for: until they show"},
+    "submit": {"type": "boolean", "description": "type: press Enter after"},
+    "add": {"type": "boolean", "description": "type: add to what the field holds instead of replacing it"},
+    "values": {"type": "array", "items": {"type": "string"}, "description": "select_option: the option or options"},
+    "keys": {"type": "string", "description": "key: such as Enter, Escape, Control+A"},
+    "double": {"type": "boolean"}, "right": {"type": "boolean"},
+    "x": {"type": "number"}, "y": {"type": "number"},
+    "to": {"type": "integer", "description": "drag: the ref it is dropped on"},
+    "up": {"type": "boolean", "description": "scroll_to: up instead of down"},
+    "gone": {"type": "string", "description": "wait_for: until these words are gone"},
+    "file": {"type": "string", "description": "upload_file: the full path of a file they named or a tool found"},
+    "url": {"type": "string", "description": "go: the address"},
+    "question": {"type": "string", "description": "read: what to find out from the page's whole text"},
+    "look_for": {"type": "string"}, "section": {"type": "integer"}},
+    "required": ["do", "what"]}
+ACT = {"type": "function", "function": {
+    "name": "act",
+    "description": (
+        "Do steps in a page place, by the refs of your latest look of it: click, type (submit presses Enter), "
+        "select_option, key, hover, drag, scroll_to, wait_for, upload_file (a full path they named or a tool "
+        "found), go (an address), back, read (the page's whole text for a question). Each step answers in one "
+        "line with what changed; after the steps you get what the app noticed (what a press sent, the address and "
+        "title now, the page's own dialogs) and the page now, whose refs the next act takes. You decide whether "
+        "the task is done. Sending, posting, submitting, uploading, ordering and deleting are checked by the app first and "
+        "may wait for their press; a step it declined is not tried another way. Out of sight unless the place is "
+        "in front of them. Coordinates only from a picture a look returned."),
+    "parameters": {"type": "object", "properties": {
+        "place": {"type": "string", "description": "the place id; left out for the page in front"},
+        "steps": {"type": "array", "items": _STEP, "minItems": 1, "maxItems": 8}},
+        "required": ["steps"]}}}
+TOOLS = [OPEN, LOOK, ACT]
 
 
 def _lang() -> str:
@@ -80,6 +131,8 @@ async def _desk(home, op: str, timeout: float = 90, **fields) -> dict:
 async def run(agent, called: dict, args: dict, lookups) -> str:
     if called["name"] == "open":
         return await open_place(agent, args, lookups)
+    if called["name"] == "act":
+        return await act(agent, args, lookups)
     return await look(agent, args, lookups)
 
 
@@ -214,30 +267,36 @@ def _closing(out: dict, args: dict, picture: bool) -> str:
     return "\n".join(lines)
 
 
-async def look(agent, args: dict, lookups) -> str:
-    home = today.runtime_of(agent).parent
-    conversation = lookups.conversation
-    ident = str(args.get("place") or "").strip()
+async def _place_of(home, conversation: str, ident: str):
+    """The place a call names, else the page in front, else the place last shown to them: the Place, or the line
+    the call answers with when there is none."""
     if ident:
         place = places.get(conversation, ident)
         if place is None:
             listed = "; ".join(p.line() for p in places.all_of(conversation)) or "none"
             return f"Error: there is no place {ident[:20]}. The open places: {listed}"
-    else:
-        tabs = (await _browser(home, "tabs", 15)).get("tabs") or []
-        front = next((t for t in tabs if t.get("front")), None)
-        if front is not None:
-            if front.get("private"):
-                return ("Error: the page in front is in a private tab: it is not read. Tell them; they can open it in "
-                        "an ordinary tab.")
-            place = places.add(conversation, "page", front["id"], front.get("title") or "",
-                               urlsplit(front.get("url") or "").hostname or "", shown=True)
-        else:
-            place = next((p for p in places.all_of(conversation) if p.shown), None)
-        if place is None:
-            listed = "\n".join(p.line() for p in places.all_of(conversation))
-            return ("No page is open in the app's browser and nothing was shown to them in this chat. "
-                    + (f"The open places:\n{listed}" if listed else "open what they mean first, or ask them which."))
+        return place
+    tabs = (await _browser(home, "tabs", 15)).get("tabs") or []
+    front = next((t for t in tabs if t.get("front")), None)
+    if front is not None:
+        if front.get("private"):
+            return ("Error: the page in front is in a private tab: it is not read. Tell them; they can open it in "
+                    "an ordinary tab.")
+        return places.add(conversation, "page", front["id"], front.get("title") or "",
+                          urlsplit(front.get("url") or "").hostname or "", shown=True)
+    place = next((p for p in places.all_of(conversation) if p.shown), None)
+    if place is None:
+        listed = "\n".join(p.line() for p in places.all_of(conversation))
+        return ("No page is open in the app's browser and nothing was shown to them in this chat. "
+                + (f"The open places:\n{listed}" if listed else "open what they mean first, or ask them which."))
+    return place
+
+
+async def look(agent, args: dict, lookups) -> str:
+    home = today.runtime_of(agent).parent
+    place = await _place_of(home, lookups.conversation, str(args.get("place") or "").strip())
+    if isinstance(place, str):
+        return place
     if place.kind == "page":
         return await _look_page(agent, home, place, args, lookups)
     if place.kind == "window":
@@ -293,3 +352,119 @@ async def _look_window(agent, home, place: places.Place, args: dict, lookups) ->
     head = (f"Place {place.id} · window · {place.where} · {'in front' if place.shown else 'where it was'} · "
             f"snapshot {out.get('snapshot', 1)}")
     return f"{head}\n{operate.fence(out.get('state') or '')}\n{_closing(out, args, picture)}".rstrip()
+
+
+# ---------------------------------------------------------------- act
+
+def _named(path: str, lookups) -> bool:
+    """A file the person named in their message, or that a tool's result gave this turn (find_files, a download):
+    the only files an upload may give a page."""
+    want = os.path.normcase(os.path.normpath(path))
+    texts = [lookups.said, *lookups.results]
+    return any(want in os.path.normcase(text.replace("/", os.sep)) for text in texts)
+
+
+def file_floor(steps: list[dict], lookups) -> str:
+    """Why the steps may not run when one gives a page a file (an upload_file, or any step carrying `file`) that is
+    not a full path to an existing file the person named or a tool found this turn; "" when they may."""
+    for step in steps:
+        if step.get("do") == "upload_file" or step.get("file"):
+            path = str(step.get("file") or "")
+            if not (os.path.isabs(path) and os.path.isfile(path)):
+                return f"Error: invalid arguments: upload_file needs the full path of a file that exists, not {path!r}"
+            if not _named(path, lookups):
+                return (f"Error: {path} was neither named by them nor found by a tool this turn; nothing was done. "
+                        f"Find the file first (find_files), or ask them which file.")
+    return ""
+
+
+class _Reading:
+    """A read step's Hands, for operate.read_page: each read (and each load of more) is one step in the app."""
+
+    def __init__(self, home, tab, lang: str) -> None:
+        self.home, self.tab, self.lang = home, tab, lang
+
+    async def act(self, action: dict) -> dict:
+        step = {"do": "read", "what": str(action.get("what") or ""), **(
+            {"more": action["more"]} if action.get("more") in ("step", "all") else {})}
+        out = await _browser(self.home, "place_act", 120, tab=self.tab, steps=[step], lang=self.lang)
+        text = (out.get("texts") or [{}])[0]
+        return {"status": out.get("status") or "failed", "line": "\n".join(out.get("lines") or []),
+                "text": text.get("text", ""), "goes_on": bool(text.get("goes_on"))}
+
+
+async def act(agent, args: dict, lookups) -> str:
+    from .web import operate
+    home = today.runtime_of(agent).parent
+    place = await _place_of(home, lookups.conversation, str(args.get("place") or "").strip())
+    if isinstance(place, str):
+        return place
+    if place.kind != "page":
+        return f"Error: act works in pages; place {place.id} is a {place.kind}."
+    steps = list(args.get("steps") or [])
+    refused = file_floor(steps, lookups)
+    if refused:
+        return refused
+    lang = _lang()
+
+    async def ask_model(system: str, messages: list[dict]) -> str:
+        # The reader of a read step (web/pagetext.py): one JSON answer a call.
+        with purpose("operate"):
+            return await agent._call_llm(system, messages, agent.llm_dm_model, max_tokens=READ_ANSWER,
+                                         disable_thinking=True, temperature=0.2, json_object=True)
+    what = next((str(s.get("what") or "") for s in steps if s.get("what")), "")[:80] or place.title[:80]
+    lookups.doing("operate", what)
+    lines: list[str] = []
+    noticed: list[str] = []
+    status, url = "ok", ""
+    lookups.away_since = time.monotonic()
+    try:
+        # A read step goes alone, read by the reply model; the steps between reads go to the app together.
+        groups: list[list[dict]] = []
+        for step in steps:
+            if step.get("do") == "read" or not groups or groups[-1][-1].get("do") == "read":
+                groups.append([step])
+            else:
+                groups[-1].append(step)
+        for group in groups:
+            if group[0].get("do") == "read":
+                reading = await operate.read_page(ask_model, _Reading(home, place.handle, lang),
+                                                  group[0],
+                                                  str(group[0].get("question") or ""), agent._page_room())
+                status = str(reading.get("status") or "failed")
+                line = str(reading.get("line") or "")
+                if status == "ok":
+                    line += f"\n{reading.get('found') or 'answer'}: {reading.get('answer') or ''} ({reading.get('read')})"
+                lines.append(line)
+            else:
+                out = await _browser(home, "place_act", 600, tab=place.handle, steps=group, lang=lang, what=what)
+                status = str(out.get("status") or "")
+                if status in ("gone", "private", "no_app", ""):
+                    if status == "gone":
+                        places.drop(lookups.conversation, place.id)
+                    return {"gone": f"Error: place {place.id} is closed: its tab is no longer open.",
+                            "private": "Error: that tab is private: nothing is done in it."}.get(
+                        status, "Error: the app's browser is not open, so nothing was done.")
+                lines += out.get("lines") or []
+                if out.get("noticed"):
+                    noticed.append(out["noticed"])
+                url = str(out.get("url") or url)
+                place.title = out.get("title") or place.title
+            if status != "ok":
+                break
+    finally:
+        lookups.away_s, lookups.away_since = lookups.away(), None
+    if status in ("stopped", "paused", "declined"):
+        # How the person ended it: no new act until they ask.
+        lookups.errand_held = status
+    lookups.trace.append({"tool": "operate", "what": what, "out": "\n".join(lines), "status": status})
+    head = f"Place {place.id} · page · {url or place.where} · {'in the middle' if place.shown else 'out of sight'}"
+    body = "\n".join([head, *lines] + ([f"Noticed: {'; '.join(noticed)}. You judge what it means."] if noticed else []))
+    if status in ("ok", "failed") and steps[-1].get("do") != "read":
+        # The page as the steps left it, as Playwright MCP answers each action with its snapshot: the next act
+        # takes its refs from here with no look between.
+        from .roam import fence_pages
+        now = await _browser(home, "place_look", 120, tab=place.handle, most=_most(agent))
+        if now.get("status") == "ok":
+            body += f"\nThe page now · snapshot {now.get('snapshot', 1)}\n{fence_pages(now.get('state') or '')}"
+    return body if status in ("ok", "waiting", "paused") else f"Error: not done ({status}).\n{body}"

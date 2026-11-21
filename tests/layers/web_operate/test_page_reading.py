@@ -1,4 +1,4 @@
-"""Reading a page for a question (web/pagetext.py, the errand's `read` and the chat's page tools): what the model is
+"""Reading a page for a question (web/pagetext.py, act's read step and the chat's page tools): what the model is
 given, in how many calls, what is loaded and when, and what the reading says it read. The model is a scripted
 stand-in that answers each reading call from a list and records what it was sent; the pages are fixed texts, and
 the document's own reading (pageops) runs on fixed pages in the headless browser."""
@@ -139,11 +139,6 @@ def test_the_room_follows_the_window_the_app_measured() -> None:
     small, large = pagetext.room(context.budget(32_000)), pagetext.room(context.budget(128_000))
     assert small < large <= pagetext.PAGE_MOST
     assert pagetext.room(context.budget(2_000_000)) == pagetext.PAGE_MOST
-    # An errand's reading takes its room from the same budget: the host's window, the person's setting over it, and
-    # the assumed window when nothing states one.
-    assert operate.budget({"context": 128_000})["read"] == large
-    assert operate.budget({"context": 1_000_000}, setting=32_000)["read"] == small
-    assert operate.budget(None)["read"] == pagetext.room(context.budget(context.ASSUMED))
 
 
 def test_repeated_chrome_goes_and_numbers_and_rows_stay() -> None:
@@ -164,73 +159,27 @@ def test_a_tool_gets_the_page_whole_when_it_fits_else_its_outline_and_how_to_rea
 
 
 class Hands:
-    """The pane as run sees it: one page, a read that gives its document, and a check of done's words."""
+    """A page place as a read step reaches it: a read gives its document, and says whether the page goes on."""
 
     def __init__(self, text: str):
         self.text, self.acts = text, []
 
-    async def look(self, most: int) -> dict:
-        return {"status": "ok", "url": "https://www.example.com/me", "state": "## 小乐的日常\n关注 129", "controls": 9}
-
     async def act(self, action: dict) -> dict:
         self.acts.append(action)
-        if action["do"] == "read":
-            return {"status": "ok", "text": self.text, "goes_on": True, "line": "[ok] read the page"}
-        return {"status": "ok", "line": "[ok]"}
+        return {"status": "ok", "text": self.text, "goes_on": True, "line": "[ok] read the page"}
 
 
-async def test_the_errands_read_answers_a_profile_in_one_call_and_says_what_it_read() -> None:
-    read, prompts = [], []
-    steps = [{"actions": [{"do": "read", "question": "账号数据"}]},
-             {"actions": [{"do": "done", "success": True, "result": "粉丝 4649", "expect": "粉丝 4649"}]}]
+async def test_a_read_step_answers_a_profile_in_one_call_and_says_what_it_read() -> None:
+    read = []
 
     async def ask_model(system: str, messages: list[dict]) -> str:
-        if system == pagetext.READ:
-            read.append(messages[-1]["content"])
-            return json.dumps({"answer": "关注 129，粉丝 4649，获赞 87411", "found": "yes"}, ensure_ascii=False)
-        prompts.append(messages[-1]["content"])
-        return json.dumps(steps.pop(0), ensure_ascii=False)
+        read.append(messages[-1]["content"])
+        return json.dumps({"answer": "关注 129，粉丝 4649，获赞 87411", "found": "yes"}, ensure_ascii=False)
     hands = Hands(PROFILE)
-    outcome = await operate.run(ask_model, hands, "看看我的账号数据", able={"tools": "yes", "context": 128_000})
-    assert outcome["status"] == "done" and outcome["calls"] == 3
+    got = await operate.read_page(ask_model, hands, {"do": "read"}, "账号数据", 50_000)
     # One reading call, one read of the page and no more loaded, though the page goes on.
-    assert len(read) == 1 and [a for a in hands.acts if a["do"] == "read"] == [{"do": "read", "question": "账号数据"}]
-    # The next step sees the answer and what was read.
-    assert "粉丝 4649" in prompts[1] and "whole page" in prompts[1]
-
-
-class Changing(Hands):
-    """A page whose document gains a line before the read given in `changes_at` (1-based)."""
-
-    def __init__(self, text: str, changes_at: int):
-        super().__init__(text)
-        self.changes_at = changes_at
-
-    async def act(self, action: dict) -> dict:
-        if action["do"] == "read" and len([a for a in self.acts if a["do"] == "read"]) + 1 == self.changes_at:
-            self.text += "\n新的一条：粉丝 5000"
-        return await super().act(action)
-
-
-@pytest.mark.parametrize("changes_at, readings", [(0, 1), (2, 2)])
-async def test_the_same_read_on_a_page_unchanged_since_gives_its_answer_again_with_no_model_call(
-        changes_at: int, readings: int) -> None:
-    read, prompts = [], []
-    steps = [{"actions": [{"do": "read", "question": "账号数据"}]},
-             {"actions": [{"do": "read", "question": "账号数据"}]},
-             {"actions": [{"do": "done", "success": True, "result": "粉丝 4649", "expect": "粉丝 4649"}]}]
-
-    async def ask_model(system: str, messages: list[dict]) -> str:
-        if system == pagetext.READ:
-            read.append(messages[-1]["content"])
-            return json.dumps({"answer": "关注 129，粉丝 4649，获赞 87411", "found": "yes"}, ensure_ascii=False)
-        prompts.append(messages[-1]["content"])
-        return json.dumps(steps.pop(0), ensure_ascii=False)
-    outcome = await operate.run(ask_model, Changing(PROFILE, changes_at), "看看我的账号数据",
-                                able={"tools": "yes", "context": 128_000})
-    assert outcome["status"] == "done" and outcome["calls"] == 3 + readings
-    # Read again only when the page's words changed; either way the answer comes back to the next step.
-    assert len(read) == readings and "粉丝 4649" in prompts[2]
+    assert got["status"] == "ok" and got["calls"] == 1 and len(read) == 1 and len(hands.acts) == 1
+    assert "粉丝 4649" in got["answer"] and "whole page" in got["read"]
 
 
 # The document read in the browser: off-screen words, a table under its header, no site navigation, nothing scrolled.

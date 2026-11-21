@@ -418,6 +418,8 @@
       .filter(Boolean).join(" · ");
     const icon = card.skippable ? (card.kind === "like" ? "like" : "out") : "ask";
     node.append(cardHead(icon, words.titles[card.kind] || words.titles.submit, where));
+    // The step's own line of what it does (surface.py's act), as the character wrote it.
+    if (card.what) node.append(el("p", "op-card-why", card.what));
     if (card.text) node.append(el("blockquote", "browse-card-quote", card.text));
     if (card.button && card.ringed) node.append(el("p", "browse-card-ring", words.ring.replace("{button}", card.button)));
     else if (card.button) node.append(el("p", "browse-card-ring", card.button));
@@ -441,7 +443,7 @@
         const response = await post("browser/confirm", { id: card.id, yes, never, pick });
         const ok = response && (await response.json().catch(() => ({}))).ok;
         if (!ok && shownCard === card.id) node.append(el("p", "op-card-told", words.gone));
-        // The card a run ended waiting on: the answer is kept for its act, and a yes goes on with the errand.
+        // The card an act ended waiting on: the answer is kept for its act, for the next turn to find.
         if (ok && op?.end === "waiting" && op.card?.id === card.id) {
           op = { ...op, card: null, end: yes ? op.end : "declined" };
           drawRun();

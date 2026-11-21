@@ -416,7 +416,7 @@ OWNER_TOOL_GUIDE = (
     "their own feed or orders on a site.\n"
     "5. Places (a page, a program, a shortcut, a file, a folder): open what they name, with show true when they want "
     "to see it (\"打开B站\", \"打开桌面的…\"); look reads the page in front of them or a place by its id. Doing "
-    "something in a page (click, type, post, buy): use_browser." + _PROGRAM_WAY + "\n"
+    "something in a page (click, type, post, buy): act on it with the refs of your latest look." + _PROGRAM_WAY + "\n"
     "A tool switched off is still yours: calling it asks them to turn it on. Call the tool in this same reply; "
     "saying you will do it, that it is done or that you cannot, with no call behind it, is false. Say only what the "
     "results show. Recommend only through bring_find, which lists your finds to pick from. " + LOOK + " Paste a "

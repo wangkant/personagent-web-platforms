@@ -63,7 +63,7 @@ SAID = {
 
 def _lang(app) -> str:
     run = getattr(app.state, "operating", None)
-    lang = run.lang if run is not None and run.hands is not None else os.environ.get("AGENT_LANG", "zh")
+    lang = run.lang if run is not None and run.places else os.environ.get("AGENT_LANG", "zh")
     return "zh" if str(lang).startswith("zh") else "en"
 
 
@@ -344,8 +344,8 @@ def mount(app, workspace, body) -> None:
                 return {"status": "stopped"}
             # The page is the person's while they sign in: nothing of the run holds its requests.
             run = getattr(app.state, "operating", None)
-            if run is not None and run.hands is not None:
-                await run.hands.let_go()
+            for hands in run.places.values() if run is not None else ():
+                await hands.let_go()
             await asyncio.to_thread(waiting.begin, pane, str(payload.get("wall") or "sign_in"), _lang(app),
                                     say=str(payload.get("say") or "")[:160])
             return await asyncio.to_thread(waiting.poll, pane, 2.0)

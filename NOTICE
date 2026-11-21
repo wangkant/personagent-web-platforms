@@ -34,7 +34,12 @@ Code taken from other projects, under the licences they were released with:
   2-Clause, Copyright (c) Felix Boehm); every one of these notices is in
   `mibo/static/welcome/markdown-it.LICENSE.txt`.
 - `mibo/web/pageops.py` is ported from browser-use's
-  `browser_use/ax.py`: MIT License, Copyright (c) 2024 Gregor Zunic.
+  `browser_use/ax.py`: MIT License, Copyright (c) 2024 Gregor Zunic. Its
+  checks before a pointer action (attached, visible, stable over two
+  animation frames, enabled, receiving the events at its point, tried again
+  on a retry ladder until a timeout) follow Playwright's actionability rules
+  (microsoft/playwright, `injectedScript.ts` and `dom.ts`): Apache License,
+  Version 2.0 (see LICENSE), Copyright (c) Microsoft Corporation.
 - Some guidance sentences in `mibo/web/operate.py` are copied from
   DeepSeek's dsh: MIT License, Copyright (c) 2026 DeepSeek.
 - `mibo/desk/uia.py` follows the drop rule for nameless groups and

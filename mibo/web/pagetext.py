@@ -1,4 +1,4 @@
-"""One reader for a page's words: the errand's `read` (web/operate.py), the chat's read_page and
+"""One reader for a page's words: act's read step (web/operate.read_page), the chat's read_page and
 read_with_their_session (search.py).
 
 It reads as the leaders do. What the document already holds is taken at once with no scrolling, as lines that

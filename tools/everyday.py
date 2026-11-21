@@ -91,7 +91,7 @@ KNOWN = {"{374DE290-123F-4565-9164-39C4925E467B}": "Downloads", "{FDD39AD0-238F-
          "{B4BFCC3A-DB2C-424C-B029-7FE99A87C641}": "Desktop", "{33E28130-4E1E-4676-835A-98395C3BC3BB}": "Pictures",
          "{4BD8D571-6D19-48D3-BE97-422220080E43}": "Music", "{18989B1D-99B5-455B-841C-AB7C74E4DDFC}": "Videos"}
 # Tools by the surface they work on: today's names and the redesign's (an open of an address is a page).
-SURFACE = {"web": {"use_browser", "read_page", "web_search", "read_with_their_session", "sign_in_to_site",
+SURFACE = {"web": {"act", "read_page", "web_search", "read_with_their_session", "sign_in_to_site",
                    "pages_they_read"},
            "program": {"use_program"},
            "files": {"read_file", "list_files", "search_files", "write_file", "edit_file", "move_files", "delete_files",
@@ -100,7 +100,7 @@ SURFACE = {"web": {"use_browser", "read_page", "web_search", "read_with_their_se
 HELPERS = {"notepad.exe", "chat.exe", "powershell.exe", "pwsh.exe", "conhost.exe", "cmd.exe", "python.exe",
            "pythonw.exe", "msedgewebview2.exe", "wscript.exe", "taskkill.exe", "tasklist.exe", "csc.exe", "node.exe",
            "uv.exe", "uvx.exe", "explorer.exe", "msedge.exe"}
-LOOKUP = {"web_search", "read_page", "use_browser", "read_with_their_session", "open", "look"}
+LOOKUP = {"web_search", "read_page", "read_with_their_session", "open", "look"}
 
 
 def surface_of(name: str, args: str) -> str:
@@ -459,7 +459,7 @@ def k_anime(c):
     # The first round of the main loop: calls with no tools offered (the page reader, background notes) are not it.
     first = [unwrapped(n, a) for n, a in next((r["called"] for r in c.rows if r.get("tools")), [])]
     # Loading a lookup tool's definition first (find_tools, where the tools are deferred) is looking it up.
-    looked = any(n in LOOKUP or (n == "find_tools" and re.search(r"search|read_page|use_browser|搜索", a, re.I))
+    looked = any(n in LOOKUP or (n == "find_tools" and re.search(r"search|read_page|搜索", a, re.I))
                  for n, a in first)
     card = c.card_attached
     on_subject = not card or bool(re.search(r"番|动画|动漫|anime|bilibili|B站", card, re.I))
@@ -1433,7 +1433,7 @@ def selfcheck(places: Path) -> int:
     card = [{"text": "下单", "yes": False}]
     cases = {
         "E01": (lambda: base(reply="你好呀"), lambda: base(reply="你好", calls=[("web_search", "{}")])),  # copy: voice
-        "E02": (lambda: mark(base()), lambda: base(wrong=["use_browser"])),
+        "E02": (lambda: mark(base()), lambda: base(wrong=["act"])),
         "E03": (lambda: base(reply="这个页面需要先登录才能看全文，要我把页面交给你登录吗？"),  # copy: voice
                 lambda: base(reply="需要你在网页上操作。完成后请点击「继续」。")),
         "E27": (lambda: base(reply="本周路线是滨江步道 5 公里"), lambda: base(reply="页面还是打不开")),  # copy: voice

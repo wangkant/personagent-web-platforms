@@ -41,8 +41,8 @@ _NOT_KEPT_NOTE = (
 
 #: What they chose under the chat's "+" for their last message (turns.TURN_CHOICES).
 _CHOICE_NOTES = {
-    "browser": "They chose \"operate the browser\" for it: they ask you to do it in the app's browser, so call "
-               "use_browser in this reply.",
+    "browser": "They chose \"operate the browser\" for it: they ask you to do it in the app's browser, so act "
+               "on the page in this reply; the page in front comes looked at.",
     "search_off": "They switched web search off for it: answer from what you already know, and do not say you "
                   "searched.",
     "schedule": "They chose \"scheduled task\" for it: make it with schedule_create in this reply, asking only "

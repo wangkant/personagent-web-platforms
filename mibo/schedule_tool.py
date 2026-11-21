@@ -23,7 +23,7 @@ PROPOSE = "propose_action"
 # What a run may always use: reading only; what it would do beyond that goes to propose_action, not into words.
 UNATTENDED = ("web_search", "read_page", "read_with_their_session", "read_file", "list_files", "search_files")
 # The tools each allowed act kind adds to a run.
-ACT_TOOLS = {"browser": ("use_browser",)}
+ACT_TOOLS = {"browser": ("open", "look", "act")}
 
 _RULE = {"type": "object", "description": (
     "only when the app could not read `when`: repeat once (at \"YYYY-MM-DD HH:MM\"), daily, weekdays, weekly "

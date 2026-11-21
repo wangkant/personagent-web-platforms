@@ -8,26 +8,23 @@ here too, and what the character's tools ask of the browser (a page read with
 the person's session, the pages read lately): from this computer alone, and
 nothing while the switch is off.
 
-And the character operating the pane for the person (web/operate.py): the
-service's loop sends its steps to /api/browser/op, where `Operating` keeps the
-run's Hands, every action through the gate; a card for an action with an effect
-outside waits at /api/browser/confirm, which only the app window's own page
-can answer (its window key), never the service; one card at a time, and a card
-whose time ran out stays answerable after the run ends waiting on it (`left`),
-its answer kept for the errand the person goes on with (`kept`). The kinds the person let
-through per site are listed and revoked at /api/browser/allowed, and the
-person's mode for the pane (acting.py) is read and set at /api/browser/acting;
-a run begins with its plan, on a card only when the start address is the
-model's own pick of a site the person did not name. What the
-person types in the chat beside the page is a chat message like any other,
-marked for the page by its turn choice (turns.TURN_CHOICES), which the
-character does there itself."""
+And the character acting in the pane's tabs for the person (surface.py's act,
+web/operate.py): the service's loop sends each act call to /api/browser/op,
+where `Operating` keeps a Hands for each tab acted in this turn, every step
+through the gate; a card for an action with an effect outside waits at
+/api/browser/confirm, which only the app window's own page can answer (its
+window key), never the service; one card at a time, and a card whose time ran
+out stays answerable after the turn ends waiting on it (`left`), its answer
+kept for the next turn (`kept`). The kinds the person let through per site are
+listed and revoked at /api/browser/allowed, and the person's mode for the pane
+(acting.py) is read and set at /api/browser/acting. What the person types in
+the chat beside the page is a chat message like any other, marked for the page
+by its turn choice (turns.TURN_CHOICES)."""
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import re
-import secrets
 import sys
 import time
 from urllib.parse import quote_plus, urlsplit
@@ -36,7 +33,6 @@ from fastapi import Request
 
 ERRORS: frozenset[str] = frozenset({"invalid_links", "browse_invalid", "browse_window", "browse_none", "browse_busy"})
 CHOICES = ("app", "system")
-TASK_MAX = 500
 # How long a look waits for a page just opened to load.
 LOAD_S = 20.0
 # Words typed in the pane's bar open a search on Bing, in the chat's language (the one web search answers in);
@@ -52,26 +48,23 @@ SITES_LATELY = 8
 # plain (nobody named) and with whom or what it goes to.
 SAID = {
     "zh": {"wait": "等待确认：{act}", "yes": "已确认：{act}", "no": "已拒绝：{act}", "none": "确认超时：{act}",
-           "failed": "未成功", "unfinished": "已在此步停止", "plan": "计划：在 {sites} 上完成“{task}”",
+           "failed": "未成功", "unfinished": "已在此步停止",
            "acts": {"send": ("发送消息", "发送给 {to}"), "comment": ("发表评论", "发表评论：{to}"),
                     "like": ("按「{button}」", "按「{button}」"), "post": ("公开发布", "公开发布：{to}"),
                     "order": ("下单", "下单：{to}"), "delete": ("删除", "删除：{to}"),
                     "account": ("更改账号设置", "更改账号设置：{to}"), "grant": ("授权访问", "授权给 {to}"),
                     "submit": ("提交表单", "提交「{to}」"), "upload": ("上传文件", "上传「{to}」"),
                     "download": ("下载文件", "下载「{to}」"), "dialog": ("确认网页的询问", "确认网页的询问"),
-                    "leave": ("前往其他网站", "前往 {to}"), "press": ("按「{button}」", "按「{button}」"),
-                    "plan": ("开始操作", "在 {to} 上开始操作")}},
+                    "leave": ("前往其他网站", "前往 {to}"), "press": ("按「{button}」", "按「{button}」")}},
     "en": {"wait": "Waiting for you: {act}", "yes": "You confirmed: {act}", "no": "You said no: {act}",
            "none": "No answer came: {act}", "failed": "It did not work", "unfinished": "Stopped at this step",
-           "plan": "Plan: “{task}” on {sites}",
            "acts": {"send": ("Send the message", "Send to {to}"), "comment": ("Post a comment", "Comment on {to}"),
                     "like": ("Press “{button}”", "Press “{button}”"), "post": ("Post publicly", "Post to {to}"),
                     "order": ("Place the order", "Order {to}"), "delete": ("Delete", "Delete {to}"),
                     "account": ("Change account settings", "Change {to}"), "grant": ("Grant access", "Grant {to} access"),
                     "submit": ("Submit the form", "Submit “{to}”"), "upload": ("Give the page a file", "Upload “{to}”"),
                     "download": ("Download a file", "Download “{to}”"), "dialog": ("Answer the page", "Answer the page"),
-                    "leave": ("Go to another site", "Go to {to}"), "press": ("Press “{button}”", "Press “{button}”"),
-                    "plan": ("Start", "Start on {to}")}},
+                    "leave": ("Go to another site", "Go to {to}"), "press": ("Press “{button}”", "Press “{button}”")}},
 }
 
 
@@ -95,7 +88,10 @@ def act_of(card: dict, lang: str) -> str:
 
 
 class Operating:
-    """One run at a time in the pane: its Hands, and the card waiting for the person, if any."""
+    """The character's acts in the pane's tabs (surface.py's act): one Hands a tab, kept for the turn so its refs,
+    its request watch and what it typed hold from one act call to the next, and closed when the turn ends; the
+    card waiting for the person, if any. A tab worked on out of sight stays out of sight; the column beside the
+    page shows a card, so the tab a card is about comes to the middle for it, and the work goes on there in view."""
 
     def __init__(self, window, desktop, workspace):
         from ..acting import Modes
@@ -104,31 +100,42 @@ class Operating:
         self.workspace = workspace
         self.allowed = gate.Allowed(desktop)
         self.modes = Modes(desktop)
-        self.hands = None
         self.card: dict | None = None
         self.answer: asyncio.Future | None = None
         self.lang = "zh"
-        # The card answered last in this run, for the chat's one line about it: {"id", "yes", "said"}.
+        # The card answered last in this turn, for the chat's one line about it: {"id", "yes", "said"}.
         self.answered: dict | None = None
-        # The answers to this errand's acts (operate.Hands.kept), kept while the person goes on with it; the card
-        # a run ended waiting on, still answerable; one card at a time.
+        # The answers to this turn's acts (operate.Hands.kept); the card a turn ended waiting on, still answerable,
+        # its answer kept for the next turn; one card at a time.
         self.kept: dict = {}
         self.left: dict | None = None
         self.one = asyncio.Lock()
-        # The pages looked at with no errand (surface.py's look), one per tab, so its refs hold between looks.
+        # The pages looked at and acted in, one per tab, so refs hold between looks and acts; the page words the
+        # model was shown from each (no address to another site carries them, operate._carried); the turn's Hands.
         self.pages: dict = {}
+        self.seen: dict[int, list[str]] = {}
+        self.places: dict = {}
+        self.busy = asyncio.Lock()
+        # The column beside the page shows this turn's steps (a tab acted in while in front, or brought there for a
+        # card); the person stopped the turn.
+        self.showing = False
+        self.stopping = False
 
-    async def look_at(self, tab: dict, payload: dict) -> dict:
-        """A look at tab `tab` ({"id", "private", ...} as Pane.tabs gives it) with no errand: once its page has
-        loaded, its print or the part `payload` asks for (ref, filter, find, from), and a picture when asked."""
-        from .. import browsed
-        from ..web.operate import look_at
+    def _page(self, ident: int):
         from ..web.pageops import Page
         from ..web.tabs import PaneTab
-        pane = self.window.pane
-        page = self.pages.get(tab["id"])
+        page = self.pages.get(ident)
         if page is None:
-            page = self.pages[tab["id"]] = Page(PaneTab(pane, tab["id"]))
+            page = self.pages[ident] = Page(PaneTab(self.window.pane, ident))
+        return page
+
+    async def look_at(self, tab: dict, payload: dict) -> dict:
+        """A look at tab `tab` ({"id", "private", ...} as Pane.tabs gives it): once its page has loaded, its print
+        or the part `payload` asks for (ref, filter, find, from), and a picture when asked."""
+        from .. import browsed
+        from ..web.operate import look_at
+        pane = self.window.pane
+        page = self._page(tab["id"])
         began = time.monotonic()
         while time.monotonic() - began < LOAD_S:
             if browsed.web(await asyncio.to_thread(pane.address, page.tab.tab)):
@@ -143,67 +150,77 @@ class Operating:
         found = await look_at(page, most, ref=ref, interactive=payload.get("filter") == "interactive",
                               find=str(payload.get("find") or "")[:200], start=start,
                               picture=payload.get("picture") is True)
+        self.seen.setdefault(tab["id"], []).append(str(found.get("state") or ""))
         return {**found, "snapshot": page.looks}
 
     def held(self) -> str:
-        pane = self.window.pane
-        op = pane.op if pane is not None else None
+        """"stopped" once the person stopped the turn; with the column showing, how the person holds it there
+        (paused when they took the page over or went to another tab)."""
+        if self.stopping:
+            return "stopped"
+        if not self.showing:
+            return ""
+        op = self.window.pane.op if self.window.pane is not None else None
         return "stopped" if op is None else op.get("held") or ""
 
-    async def begin(self, task: str, start: str, lang: str = "zh", go_on: bool = False) -> dict:
-        from .. import acting, browsed
-        from ..web.operate import Hands, plan
-        from ..web.tabs import PaneTab
+    async def place_act(self, tab: dict, steps: list, lang: str, what: str) -> dict:
+        """One act call on tab `tab`: its steps (the act tool's verbs, operate.action_of) through the tab's Hands,
+        every one through the gate; what Hands.steps gives."""
+        from .. import acting
+        from ..web.operate import Hands, action_of
         pane = self.window.pane
-        if pane is None:
-            return {"status": "no_app", "line": "[failed] the app's browser is not there"}
-        mode = self.modes.mode()
-        if mode == "off":
-            return {"status": "acting_off", "line": "[off] the person turned acting in the app's browser off"}
-        if self.hands is not None:
-            await self.end("stopped", "")
-        if not self.window.attended():
-            await asyncio.to_thread(self.window.show)
-        self.lang = "zh" if lang.startswith("zh") else "en"
-        self.answered = None
-        if not go_on:
-            # A new errand: nothing answered before counts, and a card left waiting goes with the errand it was of.
-            self.kept, self.left = {}, None
-        else:
-            # Going on is the person's new word: an act they said no to is asked again (never done unasked).
-            self.kept = {act: answer for act, answer in self.kept.items() if answer.get("yes")}
-        here = await asyncio.to_thread(pane.address)
-        await asyncio.to_thread(pane.operate, task, go_on)
-        if not go_on:
-            # The plan before the first step: the site the run works on, on a card only when the start address is
-            # the model's own pick of a site the person did not name.
-            words = " ".join(m["text"] for m in await asyncio.to_thread(acting.asked, self.workspace))
-            laid = plan(start, here if browsed.web(here) else "", words)
-            sites = "、".join(laid["sites"])
-            if laid["card"]:
-                answer = await self.ask({"id": secrets.token_urlsafe(8), "kind": "plan", "site": sites, "to": sites,
-                                         "text": task, "button": "", "skippable": False})
-                if not (answer and answer.get("yes")):
-                    await asyncio.to_thread(pane.op_end, "declined", "", SAID[self.lang]["unfinished"])
-                    return {"status": "declined", "kind": "plan",
-                            "line": f"[declined] the plan to work on {sites or 'this page'}: the person "
-                                    f"{'said no' if answer else 'did not answer'}, so nothing was done"}
-            elif sites:
-                await asyncio.to_thread(pane.op_said, SAID[self.lang]["plan"].format(sites=sites, task=task[:60]))
-                await asyncio.to_thread(pane.op_result, "done")
-        if not await asyncio.to_thread(pane.ready, start):
-            await asyncio.to_thread(pane.op_end, "failed", "", SAID[self.lang]["unfinished"])
-            return {"status": "no_page", "line": "[failed] no page is open in the browser; give a start address"}
-        loop = asyncio.get_running_loop()
+        if self.modes.mode() == "off":
+            return {"status": "acting_off", "lines": ["[off] the person turned acting in the app's browser off"]}
+        try:
+            actions = [action_of(step) for step in steps]
+        except ValueError as unknown:
+            return {"status": "invalid", "lines": [f"[failed] no step {str(unknown)[:20]!r}"]}
+        words = " ".join(m["text"] for m in await asyncio.to_thread(acting.asked, self.workspace))
+        async with self.busy:
+            self.lang = "zh" if lang.startswith("zh") else "en"
+            self.answered = None
+            hands = self.places.get(tab["id"])
+            if hands is None:
+                loop = asyncio.get_running_loop()
 
-        def tell(line: str) -> None:
-            # The step about to happen, in the column beside the page (never waited for here).
-            loop.run_in_executor(None, pane.op_said, line)
-        self.hands = Hands(PaneTab(pane), ask=self.ask, allowed=self.allowed, attended=self.window.attended,
-                           held=self.held, tell=tell, lang=lang,
-                           downloads=lambda: (pane.op or {}).pop("downloads", []),
-                           mode=self.modes.mode, review=self.review, kept=self.kept)
-        return {"status": "ok", "url": await asyncio.to_thread(pane.address)}
+                def tell(line: str) -> None:
+                    # The step about to happen, in the column beside the page when it shows (never waited for).
+                    if self.showing:
+                        loop.run_in_executor(None, pane.op_said, line)
+                page = self._page(tab["id"])
+                hands = Hands(page.tab, ask=lambda card: self.ask(card, tab["id"]), allowed=self.allowed,
+                              attended=self.window.attended, held=self.held, tell=tell, lang=lang,
+                              downloads=lambda: (pane.op or {}).pop("downloads", []) if self.showing else [],
+                              mode=self.modes.mode, review=self.review, kept=self.kept, page=page)
+                hands.read = self.seen.setdefault(tab["id"], [])
+                self.places[tab["id"]] = hands
+            hands.said = lambda: words
+            if tab.get("front") and not self.showing:
+                # In view: the column shows the steps, and the person's own moves in the pane pause them.
+                await asyncio.to_thread(pane.operate, what or words[:200])
+                self.showing = True
+            return await hands.steps(actions)
+
+    async def place_done(self, stopped: bool) -> None:
+        """The turn ended (or the person stopped it): each tab's Hands closes, a stopped turn putting back what it
+        typed and never let out, and the column says how it ended."""
+        self.stopping = stopped
+        if self.answer is not None and not self.answer.done():
+            self.answer.set_result(None)
+        async with self.busy:
+            for hands in self.places.values():
+                await hands.close(restore=stopped)
+            self.places = {}
+            self.seen = {}
+            self.kept = {}
+            pane = self.window.pane
+            if self.showing and pane is not None:
+                # A download the page began after the last step was never put to the person: it is not saved.
+                for left in (pane.op or {}).pop("downloads", []):
+                    await asyncio.to_thread(left["answer"], False)
+                await asyncio.to_thread(pane.op_end, "waiting" if self.left else "stopped" if stopped else "done", "",
+                                        SAID[self.lang]["unfinished"])
+            self.showing = self.stopping = False
 
     async def review(self, action: dict):
         """The reviewer on one action: the person's own messages of the turn under way, never the page."""
@@ -212,21 +229,29 @@ class Operating:
         return await review.decide("browser", request, action, ask=acting.reviewer(self.workspace),
                                    attended=self.window.attended(), lang=self.lang)
 
-    async def ask(self, card: dict) -> dict | None:
-        """The card shows beside the page, its control ringed on the page, until the person presses, the run
-        stops or time is up; one at a time, so a second never takes the place of one the person is reading. The
-        page stays in view. Time up with the card still up: {"waiting": the act}, and the card stays (`left`)."""
+    async def ask(self, card: dict, tab: int) -> dict | None:
+        """The card shows beside the page, its control ringed on the page, until the person presses, the turn
+        stops or time is up; one at a time, so a second never takes the place of one the person is reading. A tab
+        worked on out of sight comes to the middle for it (the column beside the page shows cards). Time up with
+        the card still up: {"waiting": the act}, and the card stays (`left`)."""
         from ..web.operate import CARD_S
+        pane = self.window.pane
         async with self.one:
+            if not self.showing:
+                await asyncio.to_thread(self.window.show)
+                await asyncio.to_thread(pane.front, tab)
+                await asyncio.to_thread(pane.operate, card.get("what") or act_of(card, self.lang))
+                self.showing = True
             # A new card stands for the act now asked: one left from before goes.
             self.left = None
             said, act = SAID[self.lang], act_of(card, self.lang)
-            shown = {k: card.get(k) for k in ("id", "kind", "site", "to", "text", "button", "skippable")}
+            shown = {k: card.get(k) for k in ("id", "kind", "site", "to", "text", "button", "skippable", "what")}
             self.card, self.answer = card, asyncio.get_running_loop().create_future()
-            await asyncio.to_thread(self.window.pane.op_card, {**shown, "ringed": card.get("node") is not None},
+            await asyncio.to_thread(pane.op_card, {**shown, "ringed": card.get("node") is not None},
                                     said["wait"].format(act=act))
+            page = self._page(tab)
             if card.get("node") is not None:
-                await self.hands.page.hold_ring(card["node"])
+                await page.hold_ring(card["node"])
             answer = None
             try:
                 began = asyncio.get_running_loop().time()
@@ -242,8 +267,9 @@ class Operating:
             finally:
                 self.card = self.answer = None
                 yes = bool(answer and answer.get("yes"))
-                if card.get("node") is not None and not yes and self.hands is not None:
-                    await self.hands.page.hold_ring(None)
+                if card.get("node") is not None and not yes:
+                    with contextlib.suppress(Exception):
+                        await page.hold_ring(None)
                 if answer is None or not answer.get("waiting"):
                     told = said["yes" if yes else "no" if answer else "none"].format(act=act)
                     self.answered = {"id": card["id"], "yes": yes, "said": told}
@@ -252,7 +278,7 @@ class Operating:
 
     def answer_card(self, ident: str, yes: bool, never: bool, files: list[str]) -> bool:
         if self.left is not None and self.left["id"] == ident and self.card is None:
-            # The card a run ended waiting on: the answer is kept for the act, and the errand goes on with it.
+            # The card a turn ended waiting on: the answer is kept for the act, and the next turn goes on with it.
             return self.keep(yes)
         if self.card is None or self.card["id"] != ident or self.answer is None or self.answer.done():
             return False
@@ -260,7 +286,7 @@ class Operating:
         return True
 
     def keep(self, yes: bool, said: bool = False) -> bool:
-        """The person's answer to the card a run ended waiting on, from the card or (`said`) their own words in the
+        """The person's answer to the card a turn ended waiting on, from the card or (`said`) their own words in the
         chat beside the page, kept for its act. Paying, deleting, the account and access are answered on the card
         alone: words leave such a card waiting."""
         from ..acting import HARD
@@ -272,20 +298,6 @@ class Operating:
         if self.window.pane is not None:
             self.window.pane.op_kept(yes)
         return True
-
-    async def end(self, status: str, note: str) -> None:
-        if self.answer is not None and not self.answer.done():
-            self.answer.set_result(None)
-        if self.hands is not None:
-            # A run the person said no to, stopped or that did not finish puts back what it typed and never let out
-            # (one at its ceiling waits for them to say 继续, as a handover does).
-            await self.hands.close(restore=status in ("declined", "stopped", "failed"))
-        self.hands = None
-        if self.window.pane is not None:
-            # A download the page began after the last step was never put to the person: it is not saved.
-            for left in (self.window.pane.op or {}).pop("downloads", []):
-                await asyncio.to_thread(left["answer"], False)
-            await asyncio.to_thread(self.window.pane.op_end, status, note, SAID[self.lang]["unfinished"])
 
 
 def mount(app, workspace, body) -> None:
@@ -458,22 +470,18 @@ def mount(app, workspace, body) -> None:
         """One step of the character's run in the pane, from the service's loop."""
         payload = await body(request)
         op, run = payload.get("op"), operating()
-        if op == "begin":
-            task, start = payload.get("task"), payload.get("start") or ""
-            if (not isinstance(task, str) or not task.strip() or len(task) > TASK_MAX or not isinstance(start, str)
-                    or (start and (not browsed.web(start) or len(start) > 2000))):
-                raise ValueError("browse_invalid")
-            return await run.begin(task, start, str(payload.get("lang") or "zh")[:8], payload.get("go_on") is True)
         if op == "keep":
-            # The person's own words in the chat answered the card a run ended waiting on (loop._beside_page).
+            # The person's own words in the chat answered the card a turn ended waiting on (loop._beside_page).
             yes, left = payload.get("yes"), run.left
             if not isinstance(yes, bool):
                 raise ValueError("browse_invalid")
             return {"status": "ok", "said": left["said"]} if left and run.keep(yes, said=True) else {"status": "none"}
-        if op == "steps":
-            # The steps as the column showed them, for the steps under the chat's reply.
-            pane = window_or_none().pane
-            return {"status": "ok", "steps": pane.op_steps() if pane is not None else []}
+        if op == "left":
+            # The act the card a turn ended waiting on is about, if one waits.
+            return {"status": "ok", "said": run.left["said"] if run.left else ""}
+        if op == "place_done":
+            await run.place_done(payload.get("stopped") is True)
+            return {"status": "ok"}
         if op == "show":
             # A page the character opens for the person to see (a shell open of a web address, shell/panel.py): in the pane, in
             # a new tab when the one in front has a page, with the window brought out.
@@ -493,9 +501,9 @@ def mount(app, workspace, body) -> None:
             url = await asyncio.to_thread(pane.bar_address) if pane is not None else ""
             shown = browsed.web(url) and not pane.private and browsed.shared(desktop)
             return {"status": "ok", "url": url if shown else ""}
-        if op in ("tabs", "place", "front", "place_look"):
+        if op in ("tabs", "place", "front", "place_look", "place_act"):
             # The character's places in the pane (surface.py): its tabs, a page opened in front or out of sight,
-            # a tab brought to the front, a look at one with no errand.
+            # a tab brought to the front, a look at one, an act in one.
             window = window_or_none()
             pane = window.pane
             if pane is None:
@@ -519,34 +527,14 @@ def mount(app, workspace, body) -> None:
                 return {"status": "ok", "tabs": await asyncio.to_thread(pane.tabs)}
             if tab["private"]:
                 return {"status": "private"}
-            return await run.look_at(tab, payload)
-        if run.hands is None:
-            return {"status": "stopped", "line": "[stopped] no run in the pane"}
-        if op == "look":
-            most = payload.get("most")
-            if not isinstance(most, int) or isinstance(most, bool):
+            if op == "place_look":
+                return await run.look_at(tab, payload)
+            from ..web.operate import STEPS_MAX
+            steps = payload.get("steps")
+            if not (isinstance(steps, list) and 0 < len(steps) <= STEPS_MAX and all(isinstance(x, dict) for x in steps)):
                 raise ValueError("browse_invalid")
-            return await run.hands.look(most)
-        if op == "picture":
-            return await run.hands.picture()
-        if op == "act":
-            action = payload.get("action")
-            if not isinstance(action, dict):
-                raise ValueError("browse_invalid")
-            result = await run.hands.act(action)
-            status = result.get("status")
-            if status in ("ok", "failed", "declined"):
-                # The step under way in the column: done, or failed and why (a declined card says so itself).
-                await asyncio.to_thread(window_or_none().pane.op_result, "failed" if status == "failed" else "done",
-                                        (result.get("why") or SAID[run.lang]["failed"]) if status == "failed" else "")
-            return result
-        if op == "step":
-            await asyncio.to_thread(window_or_none().pane.op_step, int(payload.get("n") or 0),
-                                    str(payload.get("note") or ""))
-            return {"status": "ok"}
-        if op == "end":
-            await run.end(str(payload.get("status") or "")[:20], str(payload.get("note") or ""))
-            return {"status": "ok"}
+            return {**await run.place_act(tab, steps, str(payload.get("lang") or "zh")[:8],
+                                          str(payload.get("what") or "")[:200]), "tab": tab}
         raise ValueError("browse_invalid")
 
     @app.get("/api/browser/confirm")
@@ -606,8 +594,8 @@ def mount(app, workspace, body) -> None:
         return {"sites": await asyncio.to_thread(allowed.set, site, kind, False)}
 
     def site_rows() -> list[dict]:
-        """Per site, what Settings shows: the kinds let through, its feed read in the background, the ways kept
-        from confirmed tasks; the sites read lately come first, so a feed can be turned on for one of them."""
+        """Per site, what Settings shows: the kinds let through, its feed read in the background; the sites read
+        lately come first, so a feed can be turned on for one of them."""
         from ..web import gate, sites
         runtime = desktop.parent
         cards = sites.load(runtime)
@@ -617,7 +605,7 @@ def mount(app, workspace, body) -> None:
         keys = list(dict.fromkeys(
             [sites.key_of(row["url"]) for row in browsed.recent(desktop, 200)][:SITES_LATELY]
             + [key for key, card in cards.items() if isinstance(card, dict)
-               and (card.get("feed") or card.get("procedures") or (card.get("search") or {}).get("how") == "operate")]
+               and card.get("feed")]
             + list(allowed)))
         rows = []
         for key in keys:
@@ -625,12 +613,11 @@ def mount(app, workspace, body) -> None:
             feed = card.get("feed") or {}
             rows.append({"site": key, "allowed": allowed.get(key, []),
                          "feed": {"on": bool(feed.get("on")), "stopped": feed.get("stopped", "")},
-                         "procedures": len(card.get("procedures") or []),
-                         "learned": bool(card.get("procedures") or card.get("search"))})
+                         "learned": bool(card.get("search"))})
         return rows
 
     def change_site(key: str, payload: dict) -> list[dict]:
-        from ..web import gate, operate, sites
+        from ..web import gate, sites
         runtime = desktop.parent
         if "feed" in payload:
             on = payload["feed"]
@@ -644,8 +631,6 @@ def mount(app, workspace, body) -> None:
                 feed.update(on=on, url=feed.get("url") or home)
                 feed.pop("stopped", None)
             sites._change(runtime, key, switch)
-        elif payload.get("forget") == "procedures":
-            operate.forget_procedures(runtime, f"https://{key}/")
         elif payload.get("forget") == "all":
             sites.forget(runtime, f"https://{key}/")
             allowed = gate.Allowed(desktop)
@@ -661,13 +646,12 @@ def mount(app, workspace, body) -> None:
 
     @app.post("/api/browser/sites")
     async def browser_site_change(request: Request):
-        """Settings: a site's feed read in the background on or off, its kept ways or everything learned of it
-        forgotten. Turning a feed on is the person's own switch, with the site's terms said beside it."""
+        """Settings: a site's feed read in the background on or off, or everything learned of it forgotten. Turning a feed on is the person's own switch, with the site's terms said beside it."""
         payload = await body(request)
         key = payload.get("site")
         if (not isinstance(key, str) or not key or len(key) > 300
                 or not ("feed" in payload and isinstance(payload["feed"], bool)
-                        or payload.get("forget") in ("procedures", "all"))):
+                        or payload.get("forget") == "all")):
             raise ValueError("browse_invalid")
         return {"sites": await asyncio.to_thread(change_site, key, payload)}
 

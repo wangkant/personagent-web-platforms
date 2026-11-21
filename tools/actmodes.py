@@ -1,5 +1,5 @@
-"""Measure the acting modes (mibo/acting.py) and the holes they close, with no model and no window: scripted runs of
-web/operate.py in headless Edge on tools/opsite. The decision table, the plan, the floor in review.precheck and the
+"""Measure the acting modes (mibo/acting.py) and the holes they close, with no model and no window: scripted steps
+through act's Hands.steps (web/operate.py) in headless Edge on tools/opsite. The decision table, the plan, the floor in review.precheck and the
 program gate are tests now (tests/floors/asked, tests/floors/grants).
 
     python tools/actmodes.py [--out <folder>] [--port 59703] [--other 59704] [--tree <folder holding mibo>]
@@ -69,23 +69,11 @@ class Run:
         await self.tab.goto(self.site + path)
 
     async def run(self, task: str, plan: list, mode: str = "auto", verdict: str = "ask", through: bool = False) -> dict:
-        """operate.run with `plan` as the model's steps. The reviewer is a stand-in answering `verdict`; with
+        """`plan` worked as act works it (opbounds.drive). The reviewer is a stand-in answering `verdict`; with
         `through` it is asked through review.decide, so code's floor (review.precheck) comes first, and with
         --reviewer-env the real reviewer answers instead of the stand-in."""
-        from opbounds import STOP
+        from opbounds import drive
         from mibo.web import gate, operate
-        plan = list(plan)
-
-        async def model(system: str, messages: list[dict]) -> str:
-            if not system.startswith("You operate a web page"):
-                return json.dumps({"done": True})
-            page = messages[-1]["content"].split("The page now:", 1)[-1]
-            try:
-                actions = plan.pop(0)(page, "") if plan else STOP
-            except AttributeError:
-                actions = STOP
-            return json.dumps({"note": "按脚本操作", "keep": "", "actions": actions if isinstance(actions, list)
-                               else [actions]}, ensure_ascii=False)
 
         async def ask(card: dict) -> dict:
             self.cards.append({k: card.get(k, "") for k in ("kind", "site", "button", "to", "text")})
@@ -113,9 +101,9 @@ class Run:
         if mode != "auto" and not more:
             raise RuntimeError("this copy has no modes")
         hands = operate.Hands(self.tab, ask=ask, allowed=gate.Allowed(self.allow), attended=lambda: True, lang="zh",
-                              **more)
+                              said=lambda: task, **more)
         try:
-            return await asyncio.wait_for(operate.run(model, hands, task, said=task), 120)
+            return await asyncio.wait_for(drive(hands, plan), 120)
         finally:
             await hands.close()
 

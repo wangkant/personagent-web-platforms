@@ -1,5 +1,11 @@
 # MiniWoB++ bench for the browser hands
 
+> **Runner retired on 2026-11-21.** `run.py` and `report.py` measured `web/operate.run`, the browser errand loop, which
+> went with it: the chat now works pages itself with `act` (mibo/surface.py). The task data here stays. A new
+> runner sends each task through the chat as `tools/oploop.py` does (the app in process, a stand-in pane over
+> headless Chromium, every model call counted). The rest of this file describes the retired runner and its
+> numbers as they were.
+
 Forty small web tasks from MiniWoB++, each worked the way Mibo works a page: pageops' numbered lines from the
 accessibility tree, `web/operate.run`'s prompt, reply form and budget (`operate.budget`: 12 model calls for the
 least able model, 40 with `--tools yes`; three calls in which nothing moved hand the page back), every action

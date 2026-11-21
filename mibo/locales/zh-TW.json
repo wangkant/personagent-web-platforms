@@ -1394,8 +1394,6 @@
     "feedStopped": "上次讀取時遇到驗證或登入，已停止。確認無誤後可重新開啟。",
     "feedAsk": "在背景讀取此網站？",
     "feedYes": "開啟",
-    "ways_other": "已記錄 {count} 個操作方法",
-    "waysOff": "刪除操作方法",
     "forget": "忘記此網站",
     "forgetAsk": "忘記 {site}？",
     "forgetText": "已記錄的操作方法、搜尋方式、背景讀取和「不再詢問」設定都將清除。",

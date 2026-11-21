@@ -62,7 +62,7 @@ async def use(home: Path, args: dict, lang: str) -> str:
     if status in ("away", "no_app"):
         return "(the app window is not open in front of them: the sign-in needs them at the app; tell them so)"
     if status == "busy":
-        return "(the app's browser is busy with another errand; tell them to try again once it is done)"
+        return "(the app's browser is busy with another task; tell them to try again once it is done)"
     if status != "waiting":
         return f"(the sign-in page of {found['name']} could not be opened: {status})"
     began = time.monotonic()

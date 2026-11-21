@@ -1,5 +1,5 @@
-"""The page actions beyond a plain click and type, worked by web/operate.run on tools/opsite/t/t33-desk.html in
-headless Edge with no model and no window: key chords, typing that adds to a field, double and right clicks,
+"""The page actions beyond a plain click and type, worked as act works them (opbounds.drive through Hands.steps) on
+tools/opsite/t/t33-desk.html in headless Edge with no model and no window: key chords, typing that adds to a field, double and right clicks,
 dragging between two ids (the browser's own drag and drop, and a list moved with the mouse), and waiting until
 words show or go. Each check reads what the site received and which cards came; the `_no` checks answer the card
 no and need the site to have received nothing, so no new action finds a way round a card.
