@@ -39,7 +39,8 @@ def test_at_most_three_links_a_message_are_read_counting_every_part(turn, web) -
     for n in range(5):
         web.site.put(f"/p{n}", page(f"Story number {n}"))
     words = told(turn(" ".join(f"{base}/p{n}" for n in range(5)), say("Three.")))
-    assert web.site.log == ["GET /p0", "GET /p1", "GET /p2"]
+    # The three are read side by side: which reaches the site first is not the app's to say.
+    assert sorted(web.site.log) == ["GET /p0", "GET /p1", "GET /p2"]
     assert all(f"Story number {n}" in words for n in range(3)) and "Story number 3" not in words
 
     # A page attached from the app's browser is part of the same message: its link waits behind the cap too.

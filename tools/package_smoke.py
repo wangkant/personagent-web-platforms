@@ -45,9 +45,8 @@ class FakeModel(BaseHTTPRequestHandler):
         if self.path.endswith("/embeddings"):
             self._send({"data": [{"embedding": [0.1] * 8, "index": 0}]})
             return
-        content = json.dumps({"reasoning": "", "intent": "chat", "reply": REPLY, "mem": ""})
         self._send({"choices": [{"index": 0, "finish_reason": "stop",
-                                 "message": {"role": "assistant", "content": content}}],
+                                 "message": {"role": "assistant", "content": REPLY}}],
                     "usage": {"prompt_tokens": 1, "completion_tokens": 1}})
 
 
