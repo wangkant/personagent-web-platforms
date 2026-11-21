@@ -109,11 +109,11 @@ class Offer:
 
 
 def definitions() -> list:
-    """Every app module's definitions in order, use_skill naming the installed skills that are on (skills/tool.py)
-    and a scheduled run keeping to what it may use (schedule_tool.py). A switch that is off, a choice under "+" or
-    the words of a message change none of it."""
+    """Every app module's definitions in order, a scheduled run keeping to what it may use (schedule_tool.py). A
+    switch that is off, a skill installed or switched (their list is in the turn's context, skills/tool.py), a
+    choice under "+" or the words of a message change none of it."""
     tools = [t for module in MODULES[:-1] for t in module.definitions()]
-    return schedule_tool.offered(skill_tool.offered(tools))
+    return schedule_tool.offered(tools)
 
 
 def offered(budget: context.Budget) -> Offer:

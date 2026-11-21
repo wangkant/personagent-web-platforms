@@ -1,7 +1,8 @@
 """Where skills live, how each is read and checked, and how one is added or removed.
 
 A skill is a folder holding SKILL.md: YAML front matter (name, description, and optional license,
-compatibility, metadata, allowed-tools) between two `---` lines, then the instructions. Built-in skills ship in
+compatibility, metadata, allowed-tools, and Claude Code's disable-model-invocation and user-invocable) between two
+`---` lines, then the instructions. Built-in skills ship in
 builtin/; the person's own are the folders of <home>/skills, one level deep, as other agents keep them. Mibo's
 own records (which are off, where each came from, Chinese titles) are in runtime/skills.json, never in a skill's
 folder, so the folder stays as its author wrote it. A skill that does not read is listed with what is wrong and
@@ -72,6 +73,16 @@ class Skill:
     @property
     def usable(self) -> bool:
         return self.on and not self.problems
+
+    @property
+    def model_invocable(self) -> bool:
+        # disable-model-invocation: true (Claude Code's field): started only when the person types /name.
+        return self.meta.get("disable-model-invocation") != "true"
+
+    @property
+    def user_invocable(self) -> bool:
+        # user-invocable: false: loaded by the model alone, never by /name.
+        return self.meta.get("user-invocable") != "false"
 
     @property
     def file(self) -> Path:
@@ -186,6 +197,9 @@ def _read_file(path: Path, size: int) -> tuple:
     for key in ("license", "compatibility", "allowed-tools"):
         if isinstance(data.get(key), str):
             meta[key] = data[key][:500]
+    for key in ("disable-model-invocation", "user-invocable"):
+        if isinstance(data.get(key), bool):
+            meta[key] = str(data[key]).lower()
     return name, description, meta, body, problems, warnings, digest
 
 
