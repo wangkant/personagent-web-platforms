@@ -878,8 +878,15 @@ class Bench:
         pane = self.pane()
         if pane is None:
             return None
-        answer = pane.cdp("Runtime.evaluate", {"expression": expression, "returnByValue": True})
-        return (answer.get("result") or {}).get("value")
+        # A tab opened a moment ago may not have its page yet (E19 once, after the pane was closed and opened).
+        for wait in range(20):
+            try:
+                answer = pane.cdp("Runtime.evaluate", {"expression": expression, "returnByValue": True})
+                return (answer.get("result") or {}).get("value")
+            except RuntimeError as error:
+                if "closed" not in str(error) or wait == 19:
+                    raise
+                time.sleep(0.5)
 
     def open_page(self, path: str) -> None:
         self.d.app.open_link(self.site + path)
