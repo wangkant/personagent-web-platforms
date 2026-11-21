@@ -414,7 +414,8 @@ class DirectMessages:
         try:
             async with self.locks[pkey]:
                 self._rehydrate_page(user_id, pkey)
-                history = list(self.dm_history.get(user_id, []))
+                held = self.dm_history.get(user_id)
+                history = list(held or [])
                 # Everything taken in since the last committed reply is one
                 # user turn, so two user turns never sit in a row.
                 said = list(self._dm_unanswered.get(user_id) or [text])
@@ -496,6 +497,10 @@ class DirectMessages:
             asked = "\n".join(said)
             unsaid = bool(person.unsaid(asked))
             async with self.locks[pkey]:
+                if self.dm_history.get(user_id) is not held:
+                    # A forget, a clear or a compaction changed the chat while the model answered: the turns as
+                    # that left them, then this turn's own. The copy taken before the call is not written back.
+                    history = [*self.dm_history.get(user_id, []), history[-1]]
                 history.append({"role": "assistant", "content": reply,
                                 "t": time.time(), "seq": self._next_seq(pkey),
                                 # What it did on the way, short: the next turns read it (prompt._recent_steps).

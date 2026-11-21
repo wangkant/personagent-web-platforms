@@ -261,6 +261,35 @@ def test_a_forget_from_settings_while_compact_now_waits_is_not_undone(app, turn)
     assert "芒果" not in json.dumps(agent.dm_history.get(user_id), ensure_ascii=False)
 
 
+def test_a_forget_from_settings_while_a_reply_is_written_is_not_undone(app, turn):
+    _setup(app, 65536)
+    chat = app.post("/api/chats", {}).json()["id"]
+    item = app.post("/api/person/add", {"text": "我对芒果过敏"}).json()["facts"][0]["id"]
+    turn("我对芒果过敏，吃了会起疹子。", say("记住了。"), conversation=chat)
+    agent = _agent(app)
+    user_id = chat_key(app.workspace._chats[chat].conversation)[0]
+    gate = threading.Event()
+    answers: dict = {}
+    asked = threading.Thread(target=lambda: answers.update(
+        turn=turn("周末去哪儿玩？", held(gate, say("去公园吧。")), conversation=chat).status), daemon=True)
+    asked.start()
+    _until(lambda: len(app.model.asked("reply")) >= 2, "the second turn asked for no reply")
+    # The reply waits for its answer; meanwhile the person has the fact forgotten in Settings.
+    forgot = threading.Thread(target=lambda: answers.update(
+        forget=app.post("/api/person/forget_chats", {"id": item}).status_code), daemon=True)
+    forgot.start()
+    _until(lambda: agent.person_store.get(item) is None, "the forget did not run")
+    forgot.join(30)
+    assert "芒果" not in json.dumps(agent.dm_history.get(user_id), ensure_ascii=False)
+    gate.set()
+    asked.join(30)
+    assert answers == {"turn": 200, "forget": 200}
+    kept = json.dumps(agent.dm_history.get(user_id), ensure_ascii=False)
+    assert "芒果" not in kept and "周末去哪儿玩" in kept and "去公园吧" in kept
+    after = turn("还记得吗？", say("记得。"), conversation=chat).asked()[0]
+    assert "芒果" not in json.dumps(after["messages"], ensure_ascii=False)
+
+
 def test_a_cut_message_that_gets_no_words_waits_to_be_sent_again(app, turn):
     _setup(app)
     done = turn("开头" + ZH * 150 + "结尾", say("PASS"))
