@@ -398,6 +398,18 @@ def mount(app, workspace, body) -> None:
             # The steps as the column showed them, for the steps under the chat's reply.
             pane = window_or_none().pane
             return {"status": "ok", "steps": pane.op_steps() if pane is not None else []}
+        if op == "show":
+            # A page the character opens for the person to see (open_file with a web address): in the pane, in
+            # a new tab when the one in front has a page, with the window brought out.
+            url = payload.get("url")
+            window = window_or_none()
+            if not isinstance(url, str) or not browsed.web(url) or len(url) > 2000:
+                raise ValueError("browse_invalid")
+            if window.pane is None:
+                return {"status": "no_app"}
+            await asyncio.to_thread(window.show)
+            await asyncio.to_thread(window.pane.open, url)
+            return {"status": "ok"}
         if op == "where":
             # The address in the pane's bar, which a message may name: "" for none, in private or with
             # sharing off.

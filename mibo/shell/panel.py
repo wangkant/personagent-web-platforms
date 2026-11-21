@@ -51,6 +51,11 @@ READ_KEPT_S = 5.0
 PRESSED = ("once", "chat", "always")
 # The reasons a command asks that the reviewer may pass in automatic review.
 REVIEWED = ("program", "outside", "move_out")
+
+
+def _reviewed(act) -> bool:
+    """A program run, a step outside the granted folders, or a web address opened for the person to see."""
+    return act.kind in REVIEWED or (act.kind, act.what) == ("network", "browse")
 # The step log's line for a step the read-only mode held.
 READ_MODE = {"zh": "当前为只读模式，未进行任何更改", "en": "Read only: nothing was changed"}
 
@@ -295,9 +300,10 @@ class Shell:
         scope = self._scope(read_, verdict, cwd) if verdict.action == "ask" else None
         context["how"] = self._passed(scope, mode, conversation)
         if verdict.action == "ask" and not context["how"] and mode == "auto" and all(
-                a.kind in REVIEWED for a in verdict.reasons):
-            # A program run, or a step outside the granted folders: the reviewer first, on the person's own words of
-            # this turn. A delete, the network, an install and what cannot be told ask each time.
+                _reviewed(a) for a in verdict.reasons):
+            # A program run, a step outside the granted folders, or a page opened for them: the reviewer first, on
+            # the person's own words of this turn. A delete, the network, an install and what cannot be told ask
+            # each time.
             from .. import acting, review
             passed = await review.decide("commands", await asyncio.to_thread(acting.asked, self.workspace), {
                 "kind": "command", "where": cwd, "text": command, "effects": [a.why for a in verdict.reasons][:6]},
@@ -560,6 +566,14 @@ class Shell:
             if os.environ.get("SHELL_OPEN_DRY"):
                 # The measuring script (tools/computer_tasks.py) checks what would open without a window.
                 return f"Opened {job['path']} (not shown: SHELL_OPEN_DRY is set)."
+            if re.match(r"^https?://", job["path"], re.IGNORECASE):
+                # A page for them to see: in the app's own browser; their default browser only when the app
+                # window is not open.
+                from ..web.operate import Remote
+                if Remote(self.home)._post("show", 20, url=job["path"]).get("status") == "ok":
+                    return f"Opened {job['path']} in the app's browser, in front of them."
+                os.startfile(job["path"])
+                return f"Opened {job['path']} in their default browser: the app's own browser is not open."
             os.startfile(job["path"])
             return f"Opened {job['path']} with its default program."
         if op == "write":

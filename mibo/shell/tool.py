@@ -83,9 +83,9 @@ FILE_TOOLS = [
                        "difference on a card.",
           {"path": _PATH, "old_string": {"type": "string"}, "new_string": {"type": "string"},
            "replace_all": {"type": "boolean"}}, ["path", "old_string", "new_string"]),
-    _tool("open_file", "Open a file, a folder or a web address for them with its default program. Documents, "
-                       "pictures and folders open at once; a web address, a program or a script waits for their "
-                       "press; some kinds are never opened."
+    _tool("open_file", "Open a file, a folder or a web address for them to see: a web address opens in the app's "
+                       "own browser, a file or folder with its default program. Documents, pictures and folders "
+                       "open at once; a program or a script waits for their press; some kinds are never opened."
                        # Another program's window, and a shortcut to one, are the desk tool's (Windows only).
                        + (" A program or a shortcut on their desktop: use_program." if sys.platform == "win32" else ""),
           {"path": {"type": "string", "description": "a file or folder relative to `folder`, a full path, or an "
