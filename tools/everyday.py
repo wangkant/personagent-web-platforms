@@ -613,6 +613,22 @@ class Meter:
                 self.end_headers()
                 self.wfile.write(data)
 
+            def do_GET(self):
+                # The host's model list passed on uncounted: the app reads the model's window from it.
+                path = self.path[3:] if meter.upstream.endswith("/v1") and self.path.startswith("/v1") else self.path
+                headers = {k: v for k, v in self.headers.items() if k.lower() == "authorization"}
+                try:
+                    with urllib.request.urlopen(urllib.request.Request(meter.upstream + path, headers=headers),
+                                                timeout=60) as answer:
+                        status, data = answer.status, answer.read()
+                except urllib.error.HTTPError as error:
+                    status, data = error.code, error.read()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
         server = ThreadingHTTPServer(("127.0.0.1", port), Pass)
         threading.Thread(target=server.serve_forever, daemon=True).start()
 
