@@ -99,7 +99,6 @@ class Settings(BaseModel):
     MEMORY_TIDY_EVERY: Optional[int] = Field(None, description=(
         "Notes since the last consolidation that start one; 0 turns memory calls off. Blank = 8"))
     MEMORY_CALLS_PER_DAY: Optional[int] = Field(None, description="Consolidation calls a day; 0 turns them off. Blank = 40")
-    MEMORY_PROMPT_CHARS: Optional[int] = Field(None, description="Characters of remembered material in a reply. Blank = 2400")
     MEMORY_EPISODES_MAX: Optional[int] = Field(None, description="Events kept per chat. Blank = 120")
     MEMORY_KEEP_RECENT: Optional[bool] = Field(None, description="Keep each chat's recent messages for 72 hours. Blank = true")
     MEMORY_LOG_DAYS: Optional[int] = Field(None, description=(
