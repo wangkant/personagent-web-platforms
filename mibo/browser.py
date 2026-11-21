@@ -413,6 +413,7 @@ class Pane:
         self._op_last: dict | None = None
         self._op_timer = None
         self._op_seen = 0
+        self._op_looked = 0
         self._op_tick = lambda sender, args: self._input_tick()
         self._listeners: list = []
         # Zoom: the app page's px per CSS px, the person's own zoom per site (kept in KEPT; in private mode for this
@@ -1664,6 +1665,7 @@ class Pane:
         timer = Timer()
         timer.Interval = WATCH_MS
         self._op_seen = _last_input_tick()
+        self._op_looked = ctypes.windll.kernel32.GetTickCount()
         # A key pressed before the run (the Enter that sent the request) is cleared from "pressed since the last read".
         _keys_down()
         timer.Tick += self._op_tick
@@ -1682,13 +1684,16 @@ class Pane:
         from System.Windows.Forms import Cursor
         seen = _last_input_tick()
         moved, self._op_seen = seen != self._op_seen, seen
+        looked, self._op_looked = self._op_looked, ctypes.windll.kernel32.GetTickCount()
         if not moved or self.op is None or self._view is None or self.op.get("held") or not self._view.Visible:
             return
         # The keys and buttons down or pressed since the last tick, read once.
         down = _keys_down()
         point = self._view.PointToClient(Cursor.Position)
-        # The cuts that stood when the input came (GetLastInputInfo's tick), which a press on a card changes.
-        cuts = cuts_at(seen, self._cuts_before, self._cuts)
+        # The cuts that stood when the input came, which a press on a card changes: for a press, the ones at the
+        # watch's last look (the page may be re-laid and the pointer moved on since the press); for keys, the ones
+        # at the newest input (GetLastInputInfo's tick).
+        cuts = cuts_at(looked if down & POINTER_BUTTONS else seen, self._cuts_before, self._cuts)
         at_page = on_page(point.X, point.Y, self._view.Width, self._view.Height, [] if self._full else cuts,
                           self._scale)
         if not went_to_page(bool(down & POINTER_BUTTONS), at_page, bool(down - POINTER_BUTTONS),

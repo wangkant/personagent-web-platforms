@@ -111,6 +111,11 @@ def inside(path: str, folder: str) -> bool:
     return path.startswith(folder.rstrip("\\/") + os.sep)
 
 
+def on_desktop(path: str, folders: dict) -> bool:
+    """Whether `path` lies on the person's Desktop (`folders` maps the profile folders' keys to paths)."""
+    return "desktop" in folders and inside(path, folders["desktop"])
+
+
 def _in_folder(name: str, folder: str) -> list[str]:
     """The entries of `folder` the name means: its exact name, else its name without the extension, else the ones
     it names well."""
@@ -161,8 +166,9 @@ def pick(name: str, near: str = "", as_: str = "", *, tabs: list[dict] = (),
     if found:
         path = found[0]
         stem, ext = os.path.splitext(os.path.basename(path))
-        if ext.lower() in (".lnk", ".url") and as_ != "file" and any(inside(path, f) for f in folders.values()):
-            # A shortcut in one of the person's own folders opens itself (desk/names.find takes it by its path).
+        if ext.lower() in (".lnk", ".url") and as_ != "file" and on_desktop(path, folders):
+            # A shortcut on the person's Desktop opens itself (desk/names.find takes it by its path), as the ones
+            # the Desktop lists by name do. One kept anywhere else (Downloads, Documents) never does.
             return Resolved("program", path, stem)
         if ext.lower() in (".lnk", ".url", ".exe") and as_ != "file":
             # A shortcut or a program elsewhere: only what Start and the Desktop list opens, by its name.

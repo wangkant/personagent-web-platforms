@@ -66,3 +66,12 @@ def test_the_launcher_takes_the_shortcut_resolve_found_by_its_path(desktop, tmp_
     assert found.app is not None and found.app.file == str(desktop / "grok bot.lnk") and found.app.name == "grok bot"
     (tmp_path / "other.lnk").write_bytes(b"")
     assert names.own_link(str(tmp_path / "other.lnk")) is None
+
+
+def test_a_shortcut_kept_in_downloads_never_opens_itself(desktop, tmp_path):
+    downloads = tmp_path / "Downloads"
+    downloads.mkdir()
+    (downloads / "invoice.lnk").write_bytes(b"")
+    folders = {"desktop": str(desktop), "downloads": str(downloads)}
+    assert resolve.pick(str(downloads / "invoice.lnk"), folders=folders, program=unlisted).kind == "none"
+    assert resolve.pick("invoice", "downloads", folders=folders, program=unlisted).kind == "none"

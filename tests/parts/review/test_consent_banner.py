@@ -1,6 +1,7 @@
 """Dismissing a cookie banner with its most private choice is part of any errand (mibo/review.py, mibo/web/gate.py):
 the press on "仅必要 Cookie" or "Reject all cookies" goes ahead with no card and no model call, whatever the person
-asked for; accepting all, a bare "拒绝", or such a press that carries typed words goes to the reviewer as before.
+asked for; accepting all, a bare "拒绝", such a press that carries typed words, or one that sends to an address
+that is no consent address goes to the reviewer as before.
 (2026-11-21, T09: the banner covered the like the person asked for, and the reviewer turned 仅必要 Cookie down as
 not what they asked, so the errand ended.)"""
 from __future__ import annotations
@@ -13,7 +14,9 @@ import pytest
 from mibo import review
 
 ASKED = [{"text": "给这篇文章点个赞", "at": time.time()}]  # copy: voice
-PRESS = {"kind": "press", "where": "news.example.com", "text": "", "request": "POST /api/consent choice=necessary"}
+PRESS = {"kind": "press", "where": "news.example.com", "text": "",
+         "request": {"method": "POST", "address": "news.example.com/api/consent", "values": ["necessary"],
+                     "body_chars": 16}}
 
 
 def decided(**action) -> tuple[review.Verdict, int]:
@@ -42,8 +45,19 @@ def test_any_other_choice_goes_to_the_reviewer(button):
 
 
 def test_a_private_choice_that_carries_typed_words_goes_to_the_reviewer():
-    verdict, calls = decided(page_says="仅必要 Cookie", text="我的邮箱 li@example.com")
-    assert verdict.decision != "go"
+    verdict, calls = decided(page_says="仅必要 Cookie", text="好的谢谢")  # copy: voice
+    assert (verdict.decision, calls) == ("refuse", 1)
+
+
+def test_a_control_named_as_the_private_choice_that_sends_elsewhere_goes_to_the_reviewer():
+    verdict, calls = decided(page_says="Reject all cookies", request={
+        "method": "POST", "address": "shop.example.com/checkout/submit", "values": ["2", "express"], "body_chars": 40})
+    assert (verdict.decision, calls) == ("refuse", 1)
+
+
+def test_a_private_choice_that_sends_nothing_goes_ahead():
+    verdict, calls = decided(page_says="仅必要 Cookie", request=None)
+    assert (verdict.decision, calls) == ("go", 0)
 
 
 def test_away_from_the_app_even_the_private_choice_waits_for_the_person():

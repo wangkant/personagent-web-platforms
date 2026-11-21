@@ -503,13 +503,20 @@ def precheck(request, action: dict, lang: str = "zh", now: float | None = None) 
     return None
 
 
+# The address a consent choice is saved at, by the names sites and consent platforms give it.
+CONSENT_ADDRESS = re.compile(r"consent|cookie|gdpr|ccpa|onetrust|didomi|trustarc|usercentrics|\bcmp\b", re.I)
+
+
 def consenting(action: dict) -> bool:
-    """A press on a consent banner's most private choice (web/gate.private_consent) that carries nothing typed and
-    names no one: part of any errand, passed by code with no model call."""
+    """A press on a consent banner's most private choice (web/gate.private_consent) that carries nothing typed,
+    names no one, and sends nothing or sends to a consent address: part of any errand, passed by code with no
+    model call. A control named so that sends anywhere else is the reviewer's to read."""
     from .web.gate import private_consent
+    request = action.get("request")
     return (action.get("area") == "browser" and judged("browser", str(action.get("kind") or "")) == "outward"
             and not str(action.get("text") or "").strip() and not _targets(action)
-            and private_consent(str(action.get("page_says") or "")))
+            and private_consent(str(action.get("page_says") or ""))
+            and (not request or bool(CONSENT_ADDRESS.search(request["address"]))))
 
 
 def hints(request, action: dict, now: float | None = None) -> list[str]:

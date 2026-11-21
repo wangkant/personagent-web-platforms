@@ -178,13 +178,13 @@ def open_windows() -> list[Window]:
 
 
 def own_link(asked: str) -> App | None:
-    """A shortcut (.lnk, .url) given by its full path in one of the person's own folders (the known folders the
-    file tools use): that shortcut, as the Desktop's own are listed. None for any other path or name."""
-    from ..resolve import inside, profile_folders
+    """A shortcut (.lnk, .url) given by its full path on the person's Desktop (the known folder the file tools
+    use): that shortcut, as the Desktop's own are listed. None for any other path or name."""
+    from ..resolve import on_desktop, profile_folders
     path = os.path.normpath(asked.strip().strip('"'))
     if not (os.path.isabs(path) and path.lower().endswith((".lnk", ".url")) and os.path.isfile(path)):
         return None
-    if not any(inside(path, folder) for folder in profile_folders().values()):
+    if not on_desktop(path, profile_folders()):
         return None
     return App(Path(path).stem, "", win32.link_reader()(path), path)
 
