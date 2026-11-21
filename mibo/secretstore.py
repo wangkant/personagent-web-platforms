@@ -44,9 +44,15 @@ def kept_in(home) -> str:
     return "store"
 
 
+#: The stores the interface has a name for (locales: setup_device.stores).
+NAMED = ("Windows", "macOS", "SecretService", "libsecret", "kwallet")
+
+
 def store_name() -> str:
-    """Which credential store keyring uses: Windows, macOS, SecretService, kwallet, ..."""
-    return type(keyring.get_keyring()).__module__.rsplit(".", 1)[-1]
+    """Which credential store keyring uses, as the interface names it: one of NAMED, else "other" (a chain of
+    several, or one a plugin adds)."""
+    name = type(keyring.get_keyring()).__module__.rsplit(".", 1)[-1]
+    return name if name in NAMED else "other"
 
 
 def get(home, name: str) -> str:

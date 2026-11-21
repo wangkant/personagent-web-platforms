@@ -366,3 +366,14 @@ def test_every_error_the_panel_gives_is_one_the_page_can_say(lang):
     assert all(code.startswith("desk_") for code in desk.ERRORS)
     said = i18n.catalog(lang)["setup_device"]["errors"]
     assert [code for code in (*desk.ERRORS, "desk_restore_undone", "desk_restore_failed") if code not in said] == []
+
+
+@pytest.mark.parametrize("lang", sorted(path.stem for path in i18n.LOCALES.glob("*.json")))
+def test_every_name_the_credential_store_can_have_is_one_the_page_can_say(lang, monkeypatch):
+    said = i18n.catalog(lang)["setup_device"]["stores"]
+    assert [name for name in (*secretstore.NAMED, "other") if name not in said] == []
+    # A store with no name of its own (keyring's stand-in on a system without one, a chain, a plugin's) is "other".
+    import keyring
+    from keyring.backends import fail
+    monkeypatch.setattr(keyring, "get_keyring", fail.Keyring)
+    assert secretstore.store_name() == "other"

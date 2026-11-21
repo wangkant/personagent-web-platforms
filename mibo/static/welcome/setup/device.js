@@ -330,7 +330,7 @@
       const s = d.settings;
       if (s) {
         const lines = [paI18n.t("setup_device.keptFile", { path: s.file }),
-          s.keys === "store" ? paI18n.t("setup_device.keptStore", { store: t.stores[s.store] || t.stores.other })
+          s.keys === "store" ? paI18n.t("setup_device.keptStore", { store: t.stores[s.store] })
             : paI18n.t("setup_device.keptPlain", { path: s.store })];
         if (s.unknown.length) lines.push(paI18n.t("setup_device.keptUnknown", { names: s.unknown.join(", ") }));
         if (s.invalid.length) lines.push(paI18n.t("setup_device.keptInvalid", { names: s.invalid.join(", ") }));
