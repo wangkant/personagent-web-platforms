@@ -54,8 +54,10 @@ def draws(snaps: list[tuple[dict, dict]], rounds: int) -> None:
     import random
     import tempfile
     import time
+    from dataclasses import fields
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from mibo import situation
+    from mibo.library import Item, Library
     from mibo.panels import feed
     from mibo.sources import base, catalog, weights
     items, labels = {}, {}
@@ -79,11 +81,10 @@ def draws(snaps: list[tuple[dict, dict]], rounds: int) -> None:
             chance = {}
             for stage in ("fresh", "after"):
                 if stage == "after":
-                    lib = runtime / "library"
-                    lib.mkdir(exist_ok=True)
+                    library, known = Library(runtime), {f.name for f in fields(Item)}
                     now = int(time.time()) - 3600
-                    (lib / "items.jsonl").write_text("".join(json.dumps(dict(it, seen_at=now), ensure_ascii=False) + "\n"
-                                                             for it in items.values()), encoding="utf-8")
+                    for it in items.values():
+                        library.add(Item(**{**{k: v for k, v in it.items() if k in known}, "seen_at": now}))
                 for prior in ("old", "new"):
                     catalog.pulls = (lambda *a: None) if prior == "old" else pulls
                     rng = random.Random(1)

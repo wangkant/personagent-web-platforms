@@ -1,10 +1,9 @@
 """A home's finds and a person's reactions to them, recorded the way the pet's card, the chat and the app's
-browser record them: things in the library, and events in feed.json through the feed's own `remember`. The
+browser record them: things in the library, and the feed's events through the feed's own `remember`. The
 taste model is fitted only when a test says (`learn`), at the harness clock's now: nothing refits in the
 background, so what a test reads is what its reactions taught."""
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from mibo import situation, taste
@@ -43,11 +42,8 @@ class Shelf:
         return feed.remember(self.runtime, item, action, self.clock.now, surface=surface, **told)
 
     def events(self) -> list:
-        """feed.json's events, as the file holds them."""
-        try:
-            return json.loads((self.runtime / feed.TASTE_FILE).read_text(encoding="utf-8"))["events"]
-        except FileNotFoundError:
-            return []
+        """The feed's events, as they are kept."""
+        return feed.events(self.runtime)
 
     def learn(self) -> dict:
         """Fit the taste model on every reaction so far, as the worker thread would; the model written."""

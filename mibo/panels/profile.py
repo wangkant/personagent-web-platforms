@@ -59,7 +59,7 @@ class Profile:
         # rows at once for the leans below.
         taught = {side: [row for row in rows if row["key"] not in known["leans"]]
                   for side, rows in taste.taught(runtime, lang).items()}
-        keys = {t: "topic:" + t.casefold() for t in feed.load_topics(runtime / feed.TASTE_FILE)}
+        keys = {t: "topic:" + t.casefold() for t in feed.load_topics(runtime)}
         # Every other lean, wherever it was set (a card's chip or its no, a taught row), with a row to clear it.
         said = {x["topic"].casefold(): x["topic"] for x in known["likes"]}
         leans = [{"key": key, "name": self._lean_name(key, names, said, lang), "lean": to}

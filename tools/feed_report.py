@@ -66,10 +66,10 @@ def _print(weeks: dict) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="python tools/feed_report.py", description=__doc__.split("\n\n")[0])
-    parser.add_argument("--home", type=Path, required=True, help="the home whose runtime/feed.json is read")
+    parser.add_argument("--home", type=Path, required=True, help="the home whose runtime/mibo.db is read")
     parser.add_argument("--json", action="store_true", help="print the weeks as JSON")
     args = parser.parse_args(argv)
-    events = sorted(feed._load(args.home / "runtime" / feed.TASTE_FILE), key=lambda e: e[0])
+    events = sorted(feed.events(args.home / "runtime"), key=lambda e: e[0])
     weeks = report(events)
     if args.json:
         print(json.dumps(weeks, ensure_ascii=False, indent=1))

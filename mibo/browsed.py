@@ -1,7 +1,7 @@
 """What the person read in the app's own browser (browser.py), kept on this computer.
 
-Every page they view there leaves a row in BROWSED_FILE under the home's desktop
-folder: its address, title, host, when, and the seconds it was really in front.
+Every page they view there leaves a row in the runtime database's `browsed` table
+(db.py): its address, title, host, when, and the seconds it was really in front.
 A page read longer than ITEM_S also becomes a library Item marked as theirs
 (via=BROWSED), so the taste model and the character's day hear of it as of any
 other reading. Never kept: anything while the pane's private switch is on,
@@ -15,7 +15,8 @@ The setting SHARE_KEY in the app's settings ("角色可以参考你在应用内�
 tools; off, they stay in the file alone and the tools get nothing. The person's
 own address bar suggests from them either way (suggest), and Settings › 隐私
 lists them as history (history): an entry or a time range deleted there takes
-the library item its reading made with it (delete, clear).
+the library item its reading made with it (delete, clear), and leaves no byte of
+them in the database.
 """
 from __future__ import annotations
 
@@ -26,12 +27,13 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from . import db
 from .library import BROWSED, Item, Library, item_id
-from .storage import append_jsonl, atomic_write_text
+from .storage import atomic_write_text
 
-BROWSED_FILE = "browsed.jsonl"
 WALLS_FILE = "browser-walls.json"
 SHARE_KEY = "browsing_shared"
+# Visits kept; the oldest go past it.
 ROWS_MAX = 2000
 ROW_TITLE_MAX = 300
 # A list the person loaded (a feed of theirs): how many of its rows are noted with its row.
@@ -61,9 +63,6 @@ _SECRET_LABELS = frozenset({"login", "signin", "sign-in", "auth", "sso", "passpo
                             "checkout", "pay", "payment", "payments", "billing", "wallet", "secure"})
 _SECRET_PATH = re.compile(r"/(log-?in|sign-?in|sign-?up|register|oauth\d?|authorize|auth|sso|session|password|"
                           r"account|checkout|payment|pay|billing|wallet|cart/checkout)(/|$|\?)", re.I)
-
-_lock = threading.Lock()
-
 
 def web(address: str) -> bool:
     return urlsplit(str(address)).scheme in ("http", "https")
@@ -115,35 +114,28 @@ def record(desktop: Path, row: dict) -> bool:
               for r in ((row.get("facts") or {}).get("rows") or [])[:ROWS_NOTED] if isinstance(r, dict)]
     if listed:
         kept["rows"] = listed
-    path = Path(desktop) / BROWSED_FILE
-    with _lock:
-        append_jsonl(path, kept)
-        lines = path.read_text(encoding="utf-8").splitlines()
-        if len(lines) > ROWS_MAX + ROWS_MAX // 10:
-            atomic_write_text(path, "\n".join(lines[-ROWS_MAX:]) + "\n")
+    with _db(desktop).write() as conn:
+        conn.execute("INSERT INTO browsed (at, url, row) VALUES (?,?,?)",
+                     (kept["at"], kept["url"], json.dumps(kept, ensure_ascii=False)))
+        conn.execute("DELETE FROM browsed WHERE n <= (SELECT n FROM browsed ORDER BY n DESC LIMIT 1 OFFSET ?)",
+                     (ROWS_MAX,))
     return True
+
+
+def _db(desktop: Path) -> db.Db:
+    return db.at(Path(desktop).parent)
 
 
 def _rows(desktop: Path) -> list[dict]:
     """Every row kept, oldest first."""
-    try:
-        lines = (Path(desktop) / BROWSED_FILE).read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return []
-    rows = []
-    for line in lines:
-        try:
-            row = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(row, dict) and web(row.get("url", "")):
-            rows.append(row)
-    return rows
+    return [json.loads(row) for row, in _db(desktop).read("SELECT row FROM browsed ORDER BY n")]
 
 
 def recent(desktop: Path, n: int = 20) -> list[dict]:
     """The last `n` rows, newest first; none while sharing is off."""
-    return _rows(desktop)[::-1][:n] if shared(desktop) else []
+    if not shared(desktop):
+        return []
+    return [json.loads(row) for row, in _db(desktop).read("SELECT row FROM browsed ORDER BY n DESC LIMIT ?", (n,))]
 
 
 def suggest(desktop: Path, text: str, n: int = SUGGEST_MAX) -> list[dict]:
@@ -223,15 +215,17 @@ def clear(desktop: Path, since: float = 0.0) -> None:
 
 
 def _drop(desktop: Path, gone) -> None:
-    """The rows `gone(row)` is true of go, and with a page's last visit the library item its reading made and what
-    the recommender heard of it (feed.forget_items)."""
-    with _lock:
-        rows = _rows(desktop)
-        kept = [row for row in rows if not gone(row)]
-        if len(kept) == len(rows):
-            return
-        atomic_write_text(Path(desktop) / BROWSED_FILE, "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in kept))
-    ids = {item_id(url) for url in {row["url"] for row in rows} - {row["url"] for row in kept}}
+    """The rows `gone(row)` is true of go, with no byte of them left, and with a page's last visit the library item
+    its reading made and what the recommender heard of it (feed.forget_items)."""
+    store = _db(desktop)
+    with store.write() as conn:
+        rows = [(n, json.loads(row)) for n, row in conn.execute("SELECT n, row FROM browsed ORDER BY n")]
+        kept = [row for n, row in rows if not gone(row)]
+        conn.executemany("DELETE FROM browsed WHERE n = ?", [(n,) for n, row in rows if gone(row)])
+    if len(kept) == len(rows):
+        return
+    store.scrubbed()
+    ids = {item_id(url) for url in {row["url"] for _, row in rows} - {row["url"] for row in kept}}
     runtime = Path(desktop).parent
     dropped = Library(runtime).drop(lambda item: item.id in ids and item.via == BROWSED)
     if dropped:

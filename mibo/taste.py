@@ -11,7 +11,7 @@ is, how much on its subjects they were brought lately, what the character
 thought of it, the topics the person picked and those they said they like or
 do not want in the chat (profile.py), whose priors are set by what they said.
 
-Every event in feed.json keeps a snapshot of these as they were at that moment
+Every feed event keeps a snapshot of these as they were at that moment
 (see `Reader.snapshot`), so the model and the replay learn from what the feed
 knew then, and survive the library dropping old things. The fit runs in a
 worker thread at most once a minute and writes `<runtime>/taste_model.json`;
@@ -36,15 +36,15 @@ from pathlib import Path
 from typing import Callable, Optional
 from urllib.parse import urlsplit
 
-from . import life, situation, subjects
+from . import db, life, situation, subjects
 from .library import Item, Library
 from .sources import weights
-from .storage import append_jsonl, atomic_write_text
+from .storage import atomic_write_text
 
 logger = logging.getLogger("agent.taste")
 
 MODEL_FILE = "taste_model.json"
-SHOWN_FILE = "shown.jsonl"
+# The showings kept (the `shown` table, db.py); the oldest go past it.
 SHOWN_MAX = 20_000
 DAY = 86400
 # Thompson draws at this share of the posterior's spread: below 1 does better over short runs.
@@ -182,19 +182,22 @@ class Reader:
     """What a snapshot needs from the runtime, read once: the picked topics, the topics the owner said no
     to and those they said they like, and the sources' languages and what each says it brings."""
 
-    def __init__(self, runtime: Path, topics: Optional[list[str]] = None, events: Optional[list] = None):
+    def __init__(self, runtime: Path, topics: Optional[list[str]] = None, events: Optional[list] = None,
+                 now: Optional[float] = None):
         from . import profile
         from .sources import catalog
         feed = _feed()
         self.runtime = Path(runtime)
-        topics = feed.load_topics(self.runtime / feed.TASTE_FILE) if topics is None else topics
+        topics = feed.load_topics(self.runtime) if topics is None else topics
         self.topics, self.avoid, self.likes = ([t.casefold() for t in words] for words in (
             topics, profile.avoided(self.runtime), profile.liked(self.runtime)))
         # Every source this home knows, by key: the 推荐记录 list names a find's source by it (recommend.Why).
         self.sources = sources = catalog.all_sources(catalog.load_choice(self.runtime)["own"])
         self.langs = {k: s.lang for k, s in sources.items()}
         self.brings = {k: subjects.of("", " ".join((*s.name, *s.about))) for k, s in sources.items()}
-        self.brought = self.lately(feed._load(self.runtime / feed.TASTE_FILE) if events is None else events)
+        # Without the events, those a snapshot at `now` reads: the week before it.
+        self.brought = self.lately(feed.events(self.runtime, since=(life.clock() if now is None else now) - 7 * DAY)
+                                   if events is None else events)
 
     @staticmethod
     def lately(events: list) -> list[tuple[float, str, set]]:
@@ -535,7 +538,7 @@ def train(runtime: Path, now: Optional[float] = None) -> dict:
     now = life.clock() if now is None else now
     from . import profile
     feed = _feed()
-    events = feed._load(runtime / feed.TASTE_FILE)
+    events = feed.events(runtime)
     # Reactions from before the person started their taste over teach nothing.
     since = profile.load(runtime, False)["reset_at"]
     data, lost = rows([e for e in events if e[0] >= since], now, readable(runtime),
@@ -645,7 +648,7 @@ def _topic_name(topic: str, lang: str) -> str:
     return names[1] if _base(lang) == "zh" else names[0]
 
 
-# What the ranking last served of each thing, for the events and shown.jsonl to say where it stood.
+# What the ranking last served of each thing, for the events and the shown table to say where it stood.
 served: dict[str, dict] = {}
 _serving = threading.Lock()
 
@@ -726,19 +729,29 @@ class Ranker:
 
 def shown(runtime: Path, item: Item, surface: str, rank: Optional[int], now: float, host: str,
           slot: str = "") -> None:
-    """One line in shown.jsonl for a thing the person was shown; the file keeps the last SHOWN_MAX."""
-    path = Path(runtime) / SHOWN_FILE
+    """One row in the `shown` table for a thing the person was shown, whether its host was down then (`gated`);
+    the last SHOWN_MAX are kept."""
     there = served.get(item.id, {})
-    append_jsonl(path, {"at": now, "id": item.id, "surface": surface, "rank": there.get("r") if rank is None else rank,
-                        # Where it stood among the candidates the model chose from (0: the ranking's first).
-                        "six": there.get("six"),
-                        "s": there.get("s"), "lift": there.get("lift"), "top": there.get("top", []),
-                        "slot": slot or there.get("p", ""), "host": host,
-                        "gated": bool(host) and not situation.gate(runtime, host=host)})
-    # About 300 bytes a line: trimmed back once it is well past the cap.
-    if path.stat().st_size > SHOWN_MAX * 450:
-        lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
-        atomic_write_text(path, "".join(lines[-SHOWN_MAX:]), fsync=False)
+    gated = bool(host) and not situation.gate(runtime, host=host)
+    row = {"surface": surface, "rank": there.get("r") if rank is None else rank,
+           # Where it stood among the candidates the model chose from (0: the ranking's first).
+           "six": there.get("six"), "s": there.get("s"), "lift": there.get("lift"), "top": there.get("top", []),
+           "slot": slot or there.get("p", ""), "host": host}
+    with db.at(runtime).write() as conn:
+        conn.execute("INSERT INTO shown (at, id, gated, row) VALUES (?,?,?,?)",
+                     (now, item.id, gated, json.dumps(row, ensure_ascii=False)))
+        conn.execute("DELETE FROM shown WHERE n <= (SELECT n FROM shown ORDER BY n DESC LIMIT 1 OFFSET ?)", (SHOWN_MAX,))
+
+
+def first_shown(runtime: Path, ids: list[str]) -> dict[str, dict]:
+    """The first showing still kept of each of `ids`, as `shown` wrote its row."""
+    found: dict[str, dict] = {}
+    if not ids:
+        return found
+    marks = ",".join("?" * len(ids))
+    for ident, row in db.at(runtime).read(f"SELECT id, row FROM shown WHERE id IN ({marks}) ORDER BY n DESC", ids):
+        found[ident] = json.loads(row)
+    return found
 
 
 # ------------------------------------------------------------------- learned --
@@ -796,7 +809,7 @@ def numbers(runtime: Path, now: Optional[float] = None, days: int = 7) -> dict:
     now = life.clock() if now is None else now
     feed = _feed()
     since = now - days * DAY
-    events = feed._load(runtime / feed.TASTE_FILE)
+    events = feed.events(runtime)
     recent = [e for e in events if e[0] >= since]
     surfaces: dict[str, dict] = {}
     for h in history(recent).values():
@@ -816,15 +829,8 @@ def numbers(runtime: Path, now: Optional[float] = None, days: int = 7) -> dict:
             picks[slot][0] += 1
             picks[slot][1] += h["like"]
     model = load(runtime)
-    try:
-        shown_lines = (runtime / SHOWN_FILE).read_text(encoding="utf-8").splitlines()
-    except OSError:
-        shown_lines = []
-    gated_hosts = 0
-    for line in shown_lines[-SHOWN_MAX:]:
-        row = json.loads(line)
-        # Whether its host was down when it was shown, not now.
-        gated_hosts += row["at"] >= since and bool(row.get("gated"))
+    # Whether its host was down when it was shown, not now.
+    gated_hosts = db.at(runtime).read("SELECT count(*) FROM shown WHERE at >= ? AND gated", (since,))[0][0]
     return {"days": days, "surfaces": surfaces, "play_s": round(played),
             "picks": {slot: {"shown": n, "liked": pos, "like_rate": round(pos / n, 3) if n else None}
                       for slot, (n, pos) in picks.items()},
@@ -884,7 +890,7 @@ def replay(runtime: Path, resamples: int = 1000, seed: int = 0, families: tuple 
     day-block bootstrap 95% CI."""
     runtime = Path(runtime)
     feed = _feed()
-    events = sorted(feed._load(runtime / feed.TASTE_FILE), key=lambda e: e[0])
+    events = sorted(feed.events(runtime), key=lambda e: e[0])
     reader = Reader(runtime)
     rebuild = _Rebuild(runtime, reader)
     read = readable(runtime)

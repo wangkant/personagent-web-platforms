@@ -101,7 +101,7 @@ def _load_app():
         return _app
     sys.path.insert(0, str(ROOT))
     from mibo import life, recommend, situation, taste
-    from mibo.library import Library
+    from mibo.library import Item, Library
     from mibo.panels import feed
     clock = [T0]
     life.clock = lambda: clock[0]
@@ -109,15 +109,15 @@ def _load_app():
     taste.fit = lambda runtime, soon=False: None
     # The library never changes during a replay: read it once per runtime.
     cache = {}
-    original = Library._rows
+    original = Library.items
 
-    def rows(self):
-        key = str(self.items_path)
+    def items(self, newest_first=True, since=0):
+        key = (str(self.root), newest_first, since)
         if key not in cache:
-            cache[key] = original(self)
-        return dict(cache[key])
+            cache[key] = original(self, newest_first, since)
+        return list(cache[key])
 
-    Library._rows = rows
+    Library.items = items
     # Two pure functions the ranking calls for every item on every card, kept: the same answers, sooner.
     cards_seen = {}
     clean = life.clean_card
@@ -144,7 +144,7 @@ def _load_app():
         # What the reader takes from the runtime's files is kept; what was brought lately moves with every card.
         fresh = copy.copy(kept(lambda: reader(runtime, topics, []),
                                ("reader", str(runtime), None if topics is None else tuple(topics))))
-        fresh.brought = reader.lately(feed._load(Path(runtime) / feed.TASTE_FILE) if events is None else events)
+        fresh.brought = reader.lately(feed.events(runtime) if events is None else events)
         return fresh
 
     taste.Reader = read
@@ -153,7 +153,7 @@ def _load_app():
         ("priors", str(runtime), None if hidden is None else frozenset(hidden), rules))
     feed.load_topics = lambda path: list(kept(lambda: topics_of(path), ("topics", str(path))))
     _app.update(topics_of=topics_of)
-    _app.update(life=life, recommend=recommend, situation=situation, taste=taste, Library=Library, feed=feed,
+    _app.update(life=life, recommend=recommend, situation=situation, taste=taste, Library=Library, Item=Item, feed=feed,
                 clock=clock, cache=cache, vector=taste.vector, alpha=taste.ALPHA)
     return _app
 
@@ -173,23 +173,19 @@ def run_app(arm: str, person: dict, reactions: dict, videos: dict, library: list
     home = work / f"{arm}-{uid}"
     shutil.rmtree(home, ignore_errors=True)
     rt = home / "runtime"
-    (rt / "library").mkdir(parents=True)
     seen_at = int(T0)
     pool = [vid for vid in library if vid in reactions]
     love = {}
     if arm == "app_pop":
         ordered = sorted(library, key=lambda v: popularity.get(v, {"mean_wr": 0})["mean_wr"])
         love = {vid: k * 4 // len(ordered) for k, vid in enumerate(ordered)}
-    (rt / "library" / "items.jsonl").write_text(
-        "".join(json.dumps(item_row(vid, videos[vid], arm, seen_at, love.get(vid, -1)), ensure_ascii=False) + "\n"
-                for vid in pool),
-        encoding="utf-8")
+    lib = a["Library"](rt)
+    for vid in pool:
+        lib.add(a["Item"](**item_row(vid, videos[vid], arm, seen_at, love.get(vid, -1))))
     a["situation"].set_value(rt, "readable", ["zh"])
     topics = list(person["topics"]) if arm == "app_topics" else []
     if topics:
         feed.keep_topics(rt, topics)
-    lib = a["Library"](rt)
-    path = rt / feed.TASTE_FILE
     # The model's draws are seeded by the clock: each person starts at their own moment of the first
     # day, else every person with the same history would get the same draws.
     now = T0 + 3600 + int(uid) * 7919 % 86400
@@ -197,7 +193,7 @@ def run_app(arm: str, person: dict, reactions: dict, videos: dict, library: list
     try:
         for step in range(cards):
             a["clock"][0] = now
-            rows = recommend.candidates(lib, feed._load(path), now, topics, set())
+            rows = recommend.candidates(lib, feed.events(rt), now, topics, set())
             if not rows:
                 break
             shaped, item = rows[0]

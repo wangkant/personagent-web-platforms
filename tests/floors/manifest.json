@@ -54,7 +54,9 @@
     ],
     "private": [
       "tests/floors/private/test_forget_leaves_no_bytes.py::test_a_forget_leaves_the_words_in_no_byte_of_the_database",
-      "tests/floors/private/test_forget_leaves_no_bytes.py::test_a_private_chat_leaves_no_byte_once_it_is_closed"
+      "tests/floors/private/test_forget_leaves_no_bytes.py::test_a_private_chat_leaves_no_byte_once_it_is_closed",
+      "tests/floors/private/test_finds_forget_leaves_no_bytes.py::test_a_page_deleted_from_the_history_leaves_no_byte_of_it",
+      "tests/floors/private/test_finds_forget_leaves_no_bytes.py::test_the_words_of_a_no_leave_no_byte_once_what_they_named_is_forgotten"
     ],
     "boundary": [
       "tests/floors/boundary/test_local_routes.py::test_the_page_loads_without_the_token_and_every_api_route_refuses_without_it",

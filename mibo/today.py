@@ -63,14 +63,10 @@ def runtime_of(agent) -> Path:
 
 
 def _items(library: Library) -> list[Item]:
-    """The library's things, newest first; read again only when the file changed."""
-    try:
-        stat = library.items_path.stat()
-    except OSError:
-        return []
-    key = (stat.st_mtime_ns, stat.st_size)
+    """The library's things, newest first; read again only when the database changed."""
+    key = library.version()
     with _cache_lock:
-        hit = _cache.get(library.items_path)
+        hit = _cache.get(library.root)
         if hit and hit[0] == key:
             items = hit[1]
         else:
@@ -78,7 +74,7 @@ def _items(library: Library) -> list[Item]:
     if items is None:
         items = library.items()
         with _cache_lock:
-            _cache[library.items_path] = (key, items)
+            _cache[library.root] = (key, items)
     # The person's own browsing, only while they let the character refer to it (browsed.py).
     if not browsed.shared(library.root.parent / "desktop"):
         items = [item for item in items if item.via != BROWSED]
@@ -266,16 +262,9 @@ def excerpt(item: Item, focus_text: str, lang: str, limit: int = EXCERPT_MAX) ->
 
 def _reactions(runtime: Path) -> dict[str, dict]:
     """What the person did with each thing, from the feed's events: where it was shown, what they did, when."""
-    try:
-        events = json.loads((Path(runtime) / "feed.json").read_text(encoding="utf-8")).get("events")
-    except (OSError, ValueError, AttributeError):
-        return {}
+    from .panels import feed
     found: dict[str, dict] = {}
-    for event in events if isinstance(events, list) else []:
-        if not isinstance(event, list) or len(event) < 5:
-            continue
-        at, ident, action = event[0], str(event[1]), event[2]
-        extra = event[5] if len(event) > 5 and isinstance(event[5], dict) else {}
+    for at, ident, action, _site, _kind, extra in feed.events(runtime):
         row = found.setdefault(ident, {"shown": [], "did": [], "at": 0.0})
         row["at"] = max(row["at"], float(at or 0))
         if action == "seen":

@@ -99,7 +99,7 @@ def _save(runtime: Path, state: dict) -> None:
 def _seed(runtime: Path, state: dict) -> str:
     """The owner text before any rewrite: the picked topics and the free-text answer."""
     from .panels import feed
-    topics = feed.load_topics(Path(runtime) / feed.TASTE_FILE)
+    topics = feed.load_topics(runtime)
     lines = (["Picked topics: " + ", ".join(topics)] if topics else []) + (
         [str(state["free_text"])] if state.get("free_text") else [])
     return "\n".join(lines)
@@ -499,7 +499,7 @@ def readable_sources(runtime: Path) -> dict:
 
 def _reactions(runtime: Path) -> list:
     from .panels import feed
-    return [e for e in feed._load(Path(runtime) / feed.TASTE_FILE) if e[2] != "seen"]
+    return [e for e in feed.events(runtime) if e[2] != "seen"]
 
 
 def _history(runtime: Path) -> tuple[list[str], list[str], list[str]]:
@@ -508,7 +508,7 @@ def _history(runtime: Path) -> tuple[list[str], list[str], list[str]]:
     from .panels import feed
     # Nothing from before the person started their taste over.
     since = load(runtime, False)["reset_at"]
-    events = [e for e in feed._load(Path(runtime) / feed.TASTE_FILE) if e[0] >= since]
+    events = feed.events(runtime, since)
     marks = feed._marks(events)[0]
     items = {item.id: item for item in Library(runtime).items()}
     liked, disliked, seen = [], [], {}

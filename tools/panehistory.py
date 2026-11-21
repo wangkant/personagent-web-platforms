@@ -42,27 +42,24 @@ class Site(BaseHTTPRequestHandler):
 
 
 def seed(home: Path, now: float) -> str:
-    """Five entries in browsed.jsonl, the library item Gamma made and a read the recommender heard of; its id."""
-    from mibo.library import BROWSED, Item, Library, item_id
+    """Five history entries, the library item Gamma made and a read the recommender heard of; its id."""
+    from mibo import browsed
+    from mibo.library import BROWSED, Item, Library
+    from mibo.panels import feed
     desktop, runtime = home / "runtime" / "desktop", home / "runtime"
     rows = [("alpha", now - 600), ("beta", now - 1800), ("gamma", now - 3 * 3600), ("delta", now - 26 * 3600),
             ("alpha", now - 27 * 3600)]
-    lines = [json.dumps({"url": f"{SITE}/{name}.html", "title": name.title(), "host": "127.0.0.1", "at": round(at, 1),
-                         "s": 45.0}) for name, at in sorted(rows, key=lambda r: r[1])]
-    (desktop / "browsed.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    gamma = f"{SITE}/gamma.html"
-    Library(runtime).add(Item(url=gamma, site="127.0.0.1", kind="page", title="Gamma", text="Gamma text",
-                              seen_at=int(now - 3 * 3600), via=BROWSED))
-    ident = item_id(gamma)
-    (runtime / "feed.json").write_text(json.dumps({"events": [[now - 3 * 3600, ident, "read", "127.0.0.1", "page",
-                                                               {"read_s": 45.0}]], "topics": []}), encoding="utf-8")
-    return ident
+    for name, at in sorted(rows, key=lambda r: r[1]):
+        browsed.record(desktop, {"url": f"{SITE}/{name}.html", "title": name.title(), "at": round(at, 1), "s": 45.0})
+    item = Library(runtime).add(Item(url=f"{SITE}/gamma.html", site="127.0.0.1", kind="page", title="Gamma",
+                                     text="Gamma text", seen_at=int(now - 3 * 3600), via=BROWSED))
+    feed.remember(runtime, item, "read", now - 3 * 3600, play_s=45.0)
+    return item.id
 
 
 def file_rows(home: Path) -> list[dict]:
-    path = home / "runtime" / "desktop" / "browsed.jsonl"
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()] \
-        if path.exists() else []
+    from mibo import browsed
+    return browsed._rows(home / "runtime" / "desktop")
 
 
 def page_text(d) -> str:
@@ -149,7 +146,8 @@ def walk(d, results: dict, home: Path, ident: str) -> None:
         time.sleep(2)
         deleted = True
     from mibo.library import Library
-    events = json.loads((home / "runtime" / "feed.json").read_text(encoding="utf-8")).get("events") or []
+    from mibo.panels import feed
+    events = feed.events(home / "runtime")
     results["delete_one"] = {"pressed": deleted, "listed_after": count(d),
                              "gamma_rows_left": sum(1 for r in file_rows(home) if r["url"].endswith("/gamma.html")),
                              "library_item_left": Library(home / "runtime").get(ident) is not None,

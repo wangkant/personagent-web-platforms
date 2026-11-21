@@ -13,7 +13,7 @@ import pytest
 from harness.app import App, quiet_start
 from harness.clock import Clock
 from harness.finds import Shelf
-from mibo import recommend, subjects
+from mibo import db, recommend, subjects
 from mibo.panels import feed
 
 NOW = 1_800_000_000
@@ -60,11 +60,11 @@ def test_rows_shown_before_reasons_were_kept_each_say_what_and_where_when_nothin
     for item in items:
         shelf.react(item, "seen")
     # As a home from before: its showings keep no reason.
-    path = shelf.runtime / feed.TASTE_FILE
-    data = json.loads(path.read_text(encoding="utf-8"))
-    for event in data["events"]:
-        event[5].pop("why")
-    path.write_text(json.dumps(data), encoding="utf-8")
+    with db.at(shelf.runtime).write() as conn:
+        for n, extra in conn.execute("SELECT n, extra FROM feed_events").fetchall():
+            extra = json.loads(extra)
+            extra.pop("why")
+            conn.execute("UPDATE feed_events SET extra = ? WHERE n = ?", (json.dumps(extra), n))
     listed = {card["id"]: card["reason"] for card in served.get("/api/feed").json()["items"]}
     assert set(listed) == {item.id for item in items} and len(set(listed.values())) == len(items), listed
     words = recommend.REASONS["en"]

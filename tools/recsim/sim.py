@@ -24,6 +24,7 @@ import asyncio
 import json
 import random
 import sys
+from dataclasses import fields
 from datetime import datetime
 from pathlib import Path
 
@@ -32,7 +33,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from mibo import life, pacing, person as person_rows, profile, recommend, situation, taste  # noqa: E402
-from mibo.library import Library  # noqa: E402
+from mibo.library import Item, Library  # noqa: E402
 from mibo.panels import feed  # noqa: E402
 from llm import env_values  # noqa: E402
 from people import DAY, PEOPLE, OFFERED, WORK, Person, activity, top  # noqa: E402
@@ -102,7 +103,7 @@ def features(name: str, labels: dict) -> None:
 
         def reader(self, runtime, topics=None, events=None):
             READER(self, runtime, topics, events)
-            marks = feed._marks(feed._load(self.runtime / feed.TASTE_FILE) if events is None else events)[0]
+            marks = feed._marks(feed.events(self.runtime) if events is None else events)[0]
             self.did = {}
             for _, ident, _ in self.brought:
                 mark = marks.get(ident) or {}
@@ -198,14 +199,12 @@ class Arm:
             (home / ".env").write_text("AGENT_LANG=zh\nPERSONA_NAME=Mibo\nPERSONA_TZ_OFFSET_HOURS=-8\n",
                                        encoding="utf-8")
             self.runtime.mkdir(parents=True, exist_ok=True)
-            rows = []
-            for ident, it in items.items():
-                row = dict(it, seen_at=int(at[ident]), state="", told=False)
-                rows.append(json.dumps(row, ensure_ascii=False) + "\n")
-            (self.runtime / "library").mkdir(exist_ok=True)
-            (self.runtime / "library" / "items.jsonl").write_text("".join(rows), encoding="utf-8")
-            situation.set_value(self.runtime, "readable", os_langs(who.t))
             self.library = Library(self.runtime)
+            known = {f.name for f in fields(Item)}
+            for ident, it in items.items():
+                self.library.add(Item(**{**{k: v for k, v in it.items() if k in known},
+                                         "seen_at": int(at[ident]), "state": "", "told": False}))
+            situation.set_value(self.runtime, "readable", os_langs(who.t))
             self.name_, self.persona, _ = profile.character(home, profile.values_of(home))
 
     def available(self, now: float) -> list[dict]:
@@ -230,9 +229,8 @@ class Arm:
     def first(self, now: float) -> list[dict]:
         pool = self.available(now)
         if self.name in APP:
-            path = self.runtime / feed.TASTE_FILE
             feed.keep_topics(self.runtime, self.topics())
-            shaped = feed.first_round(self.library, feed._load(path), now, feed.load_topics(path))
+            shaped = feed.first_round(self.library, feed.events(self.runtime), now, feed.load_topics(self.runtime))
             got = [self.items[s["id"]] for s in shaped]
         elif self.name in ("random", "random_read"):
             got = self.rng.sample(pool, min(10, len(pool)))
@@ -253,14 +251,13 @@ class Arm:
         if self.name == "oracle":
             day = (now - T0) / DAY
             return (max(pool, key=lambda it: self.who.worth(it, now, day)) if pool else None), "", []
-        path = self.runtime / feed.TASTE_FILE
-        topics = feed.load_topics(path)
+        topics = feed.load_topics(self.runtime)
         if self.name == "rank1_mixed":
-            for shaped, item in feed.ranked(self.library, feed._load(path), now, topics, seed=int(now * 1000)):
+            for shaped, item in feed.ranked(self.library, feed.events(self.runtime), now, topics, seed=int(now * 1000)):
                 if not shaped["seen"] and item.seen_at >= now - TELL_S:
                     return self.items[item.id], "", [item.id]
             return None, "", []
-        rows = recommend.candidates(self.library, feed._load(path), now, topics, set())
+        rows = recommend.candidates(self.library, feed.events(self.runtime), now, topics, set())
         if not rows:
             return None, "", []
         shaped, item, line = rows[0][0], rows[0][1], ""
@@ -419,7 +416,7 @@ async def run(arm: Arm, days: int, minutes_seed: int) -> dict:
                                              for h in range(int(8.6 * 4) if d == 0 else 0, 96))]
     extra = {}
     if arm.name in APP:
-        extra = {"told": profile.told(arm.runtime), "topics": feed.load_topics(arm.runtime / feed.TASTE_FILE),
+        extra = {"told": profile.told(arm.runtime), "topics": feed.load_topics(arm.runtime),
                  "calls": profile.calls(arm.runtime), "model": {k: v for k, v in taste.load(arm.runtime)["m"].items()
                                                                 if abs(v) > 0.3}}
     return {"arm": arm.name, "person": who.t.name, "first": first, "cards": cards, "present": present,

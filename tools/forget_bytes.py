@@ -1,13 +1,17 @@
 """The audit's check for the runtime database (mibo/db.py), on this Python and the SQLite it brings: after a forget,
-and after a chat is deleted, are the words absent from every raw byte of mibo.db, mibo.db-wal and mibo.db-shm?
+after a chat is deleted, and after a find goes (a page deleted from the history of the app's browser, with the library
+item its reading made, its reactions and showings; the words of a 不感兴趣 forgotten), are the words absent from every
+raw byte of mibo.db, mibo.db-wal and mibo.db-shm?
 
     python tools/forget_bytes.py [folder]
 
 Writes a few thousand chat-record rows and a long page chat into a fresh runtime folder (a temporary one when none
 is given), forgets the lines holding one word as the app does (the chat record's forget, the page copy's scrub),
-deletes a chat, and prints one JSON object: Python, SQLite, the system, and the files that still hold each word.
-Needs only the standard library and the package's chatlog and db modules. The floor test
-tests/floors/private/test_forget_leaves_no_bytes.py holds the same through the page in CI on all three systems."""
+deletes a chat, writes a few thousand finds, visits, showings and reactions and takes one page and one no's words out
+of them with the statements browsed.py, library.py and panels/feed.py use, and prints one JSON object: Python,
+SQLite, the system, and the files that still hold each word. Needs only the standard library and the package's
+chatlog and db modules. The floor tests tests/floors/private/test_forget_leaves_no_bytes.py and
+test_finds_forget_leaves_no_bytes.py hold the same through the page in CI on all three systems."""
 from __future__ import annotations
 
 import json
@@ -22,6 +26,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 FORGOTTEN = "zebrafinch-forgotten"
 PRIVATE = "harbour-private-line"
+PAGE = "lantern-pickling-page"
+SAID = "durian-layer-cake-words"
 
 
 def holding(folder: Path, words: str) -> list[str]:
@@ -63,13 +69,53 @@ def main(argv: list[str]) -> int:
     with store.write() as conn:
         conn.execute("DELETE FROM page_messages WHERE chat = '0123456789abcdef'")
     store.scrubbed()
+    finds_before = finds(store, now, runtime)
     print(json.dumps({"python": sys.version.split()[0], "sqlite": sqlite3.sqlite_version,
                       "system": f"{platform.system()} {platform.release()} {platform.machine()}",
                       "files": sorted(p.name for p in runtime.glob("mibo.db*")),
                       "forgotten_held_before": before, "forgotten_held_after": holding(runtime, FORGOTTEN),
-                      "deleted_chat_held_after": holding(runtime, PRIVATE)}, indent=1))
+                      "deleted_chat_held_after": holding(runtime, PRIVATE),
+                      "finds_held_before": finds_before, "deleted_page_held_after": holding(runtime, PAGE),
+                      "forgotten_no_held_after": holding(runtime, SAID)}, indent=1))
     db.close(runtime)
     return 0
+
+
+def finds(store, now: float, runtime: Path) -> dict[str, list[str]]:
+    """Finds, visits, showings and reactions, then one page deleted from the history and one no's words forgotten,
+    each the way the app does it (browsed._drop, Library.drop, feed.forget_items, feed.forget_said); the files that
+    held each word before."""
+    gone = "pickled"
+    with store.write() as conn:
+        for n in range(3000):
+            ident, url = f"{n:016x}", f"https://shore.example/{PAGE if n == 1500 else n}"
+            if n == 1500:
+                ident = gone
+            item = {"url": url, "title": f"find {n} " + ("about " * 30), "text": (PAGE + " ") * 3 if n == 1500 else ""}
+            conn.execute("INSERT INTO library VALUES (?,?,?,?,?,?)",
+                         (ident, int(now) - n, "", "browsed" if n == 1500 else "", "", json.dumps(item)))
+            conn.execute("INSERT INTO browsed (at, url, row) VALUES (?,?,?)",
+                         (now - n, url, json.dumps({"url": url, "title": item["title"], "at": now - n})))
+            conn.execute("INSERT INTO shown (at, id, gated, row) VALUES (?,?,0,?)", (now - n, ident, '{"surface": "card"}'))
+            said = {"said": {"about": "topic", "words": SAID}} if n % 211 == 0 else {}
+            conn.execute("INSERT INTO feed_events (at, id, action, site, kind, extra) VALUES (?,?,?,?,?,?)",
+                         (now - n, ident, "skip" if said else "seen", "shore.example", "article", json.dumps(said)))
+    before = {PAGE: holding(runtime, PAGE), SAID: holding(runtime, SAID)}
+    with store.write() as conn:
+        conn.execute("DELETE FROM browsed WHERE url LIKE ?", (f"%{PAGE}%",))
+    store.scrubbed()
+    with store.write() as conn:
+        conn.execute("DELETE FROM library WHERE id = ?", (gone,))
+    store.scrubbed()
+    with store.write() as conn:
+        conn.execute("DELETE FROM feed_events WHERE id = ?", (gone,))
+        conn.execute("DELETE FROM shown WHERE id = ?", (gone,))
+    store.scrubbed()
+    with store.write() as conn:
+        conn.execute("UPDATE feed_events SET extra = ? WHERE extra LIKE ?",
+                     (json.dumps({"said": {"about": "topic", "words": ""}}), f"%{SAID}%"))
+    store.scrubbed()
+    return before
 
 
 if __name__ == "__main__":

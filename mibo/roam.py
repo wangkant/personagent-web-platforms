@@ -684,7 +684,7 @@ class Roam:
         something the character itself loved lately, as search words; "" when none."""
         from .library import ENGAGED
         from .panels import feed
-        events = feed._load(self.library.root.parent / feed.TASTE_FILE)
+        events = feed.events(self.library.root.parent)
         taken = list(dict.fromkeys(e[1] for e in reversed(events) if e[2] in ENGAGED))[:40]
         items = {item.id: item for item in self.library.items() if item.tags}
         loved = [items[i] for i in taken if i in items][:20]
@@ -976,7 +976,7 @@ def interests(runtime: Path) -> list[str]:
     """What the person is interested in, as they put it: the topics they ticked or typed on the first run,
     then those they said they like in the chat and the profile's walk words; none they said they do not want."""
     from .panels import feed
-    ticked = feed.load_topics(Path(runtime) / feed.TASTE_FILE)
+    ticked = feed.load_topics(runtime)
     return [t for t in dict.fromkeys(ticked + profile.walk_topics(runtime)) if not profile.unwanted(runtime, t)]
 
 
@@ -985,7 +985,7 @@ def supply(runtime: Path, topics: list[str], now: float, unread: frozenset = fro
     yet: what the ranking can still bring of it. Things from the sources in `unread` (in a language the
     person does not read) do not count."""
     from .panels import feed
-    shown = feed._marks(feed._load(Path(runtime) / feed.TASTE_FILE))[0]
+    shown = feed._marks(feed.events(runtime))[0]
     matchers = {t: feed.topic_matcher([t]) for t in topics}
     held = dict.fromkeys(topics, 0)
     for item in Library(runtime).items():
@@ -1091,8 +1091,7 @@ def candidates(runtime: Path, now: float, rng: random.Random) -> list[Item]:
     """What to judge: JUDGE_TOP of the ranking's best unseen, unjudged things of the last JUDGE_DAYS,
     JUDGE_RANDOM of the rest at random, in one shuffle; [] when fewer than JUDGE_MIN wait."""
     from .panels import feed
-    path = Path(runtime) / feed.TASTE_FILE
-    waiting = [item for shaped, item in feed.ranked(Library(runtime), feed._load(path), now, feed.load_topics(path))
+    waiting = [item for shaped, item in feed.ranked(Library(runtime), feed.events(runtime), now, feed.load_topics(runtime))
                if not shaped["seen"] and not getattr(item, "judged", False)
                and item.seen_at >= now - JUDGE_DAYS * 86400]
     if len(waiting) < JUDGE_MIN:

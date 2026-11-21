@@ -2,10 +2,10 @@
 what they do with it.
 
 Every reaction from the pet's card, the chat or the 推荐记录 list is kept as an event in
-`<runtime>/feed.json`. Taste is read back from those events: the sites and
+the runtime database's `feed_events` table (db.py). Taste is read back from those events: the sites and
 kinds of the things the person opened and liked count for a thing, the ones
 they skipped count against it. The topics the person named on the first run
-are kept in the same file and count before there is any behaviour to go on.
+are kept beside them (`feed_topics`) and count before there is any behaviour to go on.
 A thing a public source brought also counts what was learned of that source
 (`sources.weights`, fed from `remember`), and no source fills more than
 SOURCE_CAP of any PAGE_WINDOW things in a row.
@@ -14,7 +14,7 @@ The ranking itself is the person's model in `taste` (a Bayesian logistic
 regression with Thompson draws, and the character's pick slot); `score` is the
 old point sum, kept for the FEED_MODEL switch and for the replay to compare
 against. Each event is [at, id, action, site, kind, extra], extra holding the
-model's snapshot of the thing at that moment (older events have five).
+model's snapshot of the thing at that moment.
 Things whose host cannot be reached now (`situation.gate`) are never shown.
 """
 from __future__ import annotations
@@ -23,7 +23,6 @@ import asyncio
 import functools
 import json
 import re
-import threading
 from collections import Counter, deque
 from datetime import datetime
 from pathlib import Path
@@ -32,14 +31,12 @@ from urllib.parse import parse_qsl, urlsplit
 
 from fastapi import Request
 
-from .. import activity, browsed, langs, life, paths, profile, situation, subjects
+from .. import activity, browsed, db, langs, life, profile, situation, subjects
 from .. import taste as model
 from ..library import DISMISSED, KEPT, Item, Library
 from ..sources import weights
-from ..storage import atomic_write_text
 from ..web import signin
 
-TASTE_FILE = "feed.json"
 # "hide_source" is "less like this source": the thing is skipped and its source read and ranked far less.
 # "play" carries the seconds the app's own player ran, sent when it stops or the card closes; "read" the
 # seconds a find stayed in front in the app's own browser. "end" is how the pet's card went (ENDS), with
@@ -73,7 +70,7 @@ ERRAND_SITES = frozenset({"taobao", "tmall", "jd", "pinduoduo", "yangkeduo", "su
                           "skyscanner", "kayak", "hotels"})
 # Query keys that only say where a visitor came from: a front page with them is still the front page.
 TRACKING = ("utm_", "ref", "spm", "from", "source", "share")
-# One event per item and action at most, so this holds a few thousand things.
+# One event per item and action at most, so this holds a few thousand things; the oldest go past it.
 EVENTS_MAX = 8000
 LIMIT = 20
 LIMIT_MAX = 100
@@ -106,34 +103,43 @@ SUGGESTED = {key: (subjects.SUBJECTS[key][1], subjects.words(key)) for key in su
 ERRORS: frozenset[str] = frozenset({"feed_action", "feed_cursor", "feed_topics", "feed_no_source",
                                     "situation_invalid", "feed_format", "feed_snooze"})
 
-# The page answers reactions on worker threads; one writer at a time.
-_lock = threading.Lock()
-
-
 # ------------------------------------------------------------------ events --
 
-def _read(path: Path) -> dict:
-    try:
-        saved = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return saved if isinstance(saved, dict) else {}
+_EVENT = "SELECT at, id, action, site, kind, extra FROM feed_events"
 
 
-def _load(path: Path) -> list:
-    events = _read(path).get("events")
-    return [e for e in events if isinstance(e, list) and (len(e) == 5 or len(e) == 6 and isinstance(e[5], dict))]\
-        if isinstance(events, list) else []
+def _rows(found: list) -> list:
+    # Every extra in one parse: far quicker than one parse a row.
+    extras = json.loads("[" + ",".join(row[5] for row in found) + "]")
+    return [[*row[:5], extra] for row, extra in zip(found, extras)]
 
 
-def load_topics(path: Path) -> list[str]:
-    topics = _read(path).get("topics")
-    return [t for t in topics if isinstance(t, str)] if isinstance(topics, list) else []
+def events(runtime: Path, since: float = 0) -> list:
+    """Every event (or those at `since` or later), oldest first: [at, id, action, site, kind, extra]."""
+    return _rows(db.at(runtime).read(_EVENT + " WHERE at >= ? ORDER BY n", (since,)))
 
 
-def _save(path: Path, events: list, topics: list[str]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_text(path, json.dumps({"events": events[-EVENTS_MAX:], "topics": topics}, ensure_ascii=False))
+def of(runtime: Path, ident: str) -> list:
+    """One thing's events, oldest first."""
+    return _rows(db.at(runtime).read(_EVENT + " WHERE id = ? ORDER BY n", (ident,)))
+
+
+def _numbered(conn, where: str = "", args=()) -> list:
+    """Events oldest first, each with its row number last: [at, id, action, site, kind, extra, n]."""
+    return [[at, ident, action, site, kind, json.loads(extra), n] for at, ident, action, site, kind, extra, n
+            in conn.execute(f"SELECT at, id, action, site, kind, extra, n FROM feed_events {where} ORDER BY n", args)]
+
+
+def _add(conn, event: list) -> None:
+    """One event at the end; past EVENTS_MAX the oldest go."""
+    conn.execute("INSERT INTO feed_events (at, id, action, site, kind, extra) VALUES (?,?,?,?,?,?)",
+                 (*event[:5], json.dumps(event[5], ensure_ascii=False)))
+    conn.execute("DELETE FROM feed_events WHERE n <= (SELECT n FROM feed_events ORDER BY n DESC LIMIT 1 OFFSET ?)",
+                 (EVENTS_MAX,))
+
+
+def load_topics(runtime: Path) -> list[str]:
+    return [topic for topic, in db.at(runtime).read("SELECT topic FROM feed_topics ORDER BY n")]
 
 
 def _marks(events: list, until: Optional[float] = None) -> tuple[dict, float]:
@@ -182,7 +188,7 @@ def _taste(marks: dict) -> dict[str, float]:
 
 def site_taste(runtime: Path) -> dict[str, float]:
     """Points per site from the person's reactions, for the walks to lean on."""
-    taste = _taste(_marks(_load(Path(runtime) / TASTE_FILE))[0])
+    taste = _taste(_marks(events(runtime))[0])
     return {key[5:]: value for key, value in taste.items() if key.startswith("site:")}
 
 
@@ -373,9 +379,9 @@ def presentable(shaped: dict) -> bool:
 
 
 def ranked(library: Library, events: list, at: float, topics: list[str] = (), *, seed: Optional[int] = None,
-           picks: bool = True) -> list[tuple[dict, Item]]:
-    """Everything not dismissed, not skipped, found by `at`, reachable now and a thing to read (not an
-    `errand`), unseen first, then by score:
+           picks: bool = True, since: float = 0) -> list[tuple[dict, Item]]:
+    """Everything not dismissed, not skipped, found by `at` (and at `since` or later), reachable now and a thing
+    to read (not an `errand`), unseen first, then by score:
     the model's draw seeded by `seed` (the cursor's ms unless given), with the character's picks placed
     when `picks`, or the old point sum when the FEED_MODEL switch is off; things on a topic the person said
     they do not want, then those of a source they hid, after all the rest. Reactions after `at` do not move
@@ -383,8 +389,8 @@ def ranked(library: Library, events: list, at: float, topics: list[str] = (), *,
     runtime = library.root.parent
     then, _ = _marks(events, at)
     now, _ = _marks(events)
-    items = library.items()
-    learned = _by_source(then, {item.id: item.source for item in items})
+    items = library.items(since=since)
+    learned = _by_source(then, library.sources())
     # A source the person asked to see less of: as it stood at `at`, like every other mark.
     hidden = {key for key, row in learned.items() if row["hides"]}
     ranker = None
@@ -467,21 +473,20 @@ def shown(library: Library, events: list, kept: bool = False, limit: int = LIMIT
         if action == "like":
             liked[ident] = at
     marks = _marks(events)[0]
-    rows = []
-    for item in library.items():
-        if kept and item.state == KEPT:
-            rows.append((liked.get(item.id, item.seen_at), item))
-        elif not kept and item.id in first and item.state != DISMISSED and not marks[item.id]["skip"]:
-            rows.append((first[item.id], item))
-    order = [((-int(at * 1000), item.id), at, item) for at, item in rows]
-    order.sort(key=lambda row: row[0])
+    states = library.states()
+    if kept:
+        rows = [(liked.get(ident, seen_at), ident) for ident, (state, seen_at) in states.items() if state == KEPT]
+    else:
+        rows = [(at, ident) for ident, at in first.items()
+                if ident in states and states[ident][0] != DISMISSED and not marks[ident]["skip"]]
+    order = sorted(((-int(at * 1000), ident), at, ident) for at, ident in rows)
     start = 0
     if cursor:
         after = (-int(cursor[1]), cursor[2])
         start = next((n for n, row in enumerate(order) if row[0] > after), len(order))
     page = order[start:start + limit]
-    return {"rows": [(at, start + n, item) for n, (_, at, item) in enumerate(page)],
-            "next": f"{-page[-1][0][0]}.{page[-1][2].id}" if start + len(page) < len(order) else ""}
+    return {"rows": [(at, start + n, library.get(ident)) for n, (_, at, ident) in enumerate(page)],
+            "next": f"{-page[-1][0][0]}.{page[-1][2]}" if start + len(page) < len(order) else ""}
 
 
 def first_round(library: Library, events: list, now: float, topics: list[str]) -> list[dict]:
@@ -521,8 +526,8 @@ def remember(runtime: Path, item: Item, action: str, now: Optional[float] = None
     than any before; an "end" (`end`, `shown_s`) once. `said`: what the person said of it in the chat
     ({"about", "words"}), which the model counts as more than a plain skip. A showing keeps what its reason
     rests on ("why", recommend.facts; `line` the character's sentence as it brought the thing) and also goes to
-    shown.jsonl; any reaction but a showing asks the model to refit soon. Whether it was kept."""
-    path = Path(runtime) / TASTE_FILE
+    the shown table; any reaction but a showing asks the model to refit soon. Whether it was kept."""
+    store = db.at(runtime)
     shaped = shape(item, {})
     at = round(life.clock() if now is None else now, 3)
     there = model.served.get(item.id, {})
@@ -530,18 +535,17 @@ def remember(runtime: Path, item: Item, action: str, now: Optional[float] = None
     slot = slot or there.get("p", "")
     if action == "seen":
         model.shown(runtime, item, surface, rank, at, model._host(item.url), slot)
-    extra = {"f": model.Reader(runtime).snapshot(item, shaped, at) if shaped else None, "r": rank, "s": surface,
-             "p": slot}
+    extra = {"f": model.Reader(runtime, now=at).snapshot(item, shaped, at) if shaped else None, "r": rank,
+             "s": surface, "p": slot}
     if action in ("play", "read"):
         extra[action + "_s"] = round(play_s, 1)
     if action == "end":
         extra.update(end=end, shown_s=round(shown_s, 1))
     if said:
         extra["said"] = said
-    with _lock:
-        events = _load(path)
-        mark = _marks(events)[0].get(item.id)
-        mine = [e for e in events if e[1] == item.id]
+    with store.write() as conn:
+        mine = _numbered(conn, "WHERE id = ?", (item.id,))
+        mark = _marks(mine)[0].get(item.id)
         # An open again counts once it is a coming back (model.BACK_S after the last one); a talk counts once.
         opened = max((e[0] for e in mine if e[2] == "open"), default=None)
         done = {"seen": mark and mark["seen"], "open": opened is not None and at - opened < model.BACK_S,
@@ -555,10 +559,9 @@ def remember(runtime: Path, item: Item, action: str, now: Optional[float] = None
         if action == "seen":
             from .. import recommend
             extra["why"] = recommend.facts(item, extra["f"], slot, surface, there.get("t", ""), line,
-                                           model.history(events))
-        events.append([at, item.id, action, shaped["site"] if shaped else item.site,
-                       shaped["kind"] if shaped else "text", extra])
-        _save(path, events, load_topics(path))
+                                           model.history(events(runtime)))
+        _add(conn, [at, item.id, action, shaped["site"] if shaped else item.site, shaped["kind"] if shaped else "text",
+                    extra])
         # Time in the app's player or browser, how a card ended and a talk only tell the model; the source
         # learns nothing from them.
         if item.source and action not in ("play", "read", "end", "talk"):
@@ -572,16 +575,21 @@ def remember(runtime: Path, item: Item, action: str, now: Optional[float] = None
     return True
 
 
+def _drop(conn, gone: list) -> None:
+    conn.executemany("DELETE FROM feed_events WHERE n = ?", [(e[6],) for e in gone])
+
+
 def take_back(runtime: Path, item: Item) -> None:
     """Undo a no: the thing's skip, its "less from this source" and the ending the no gave its card go from
     the events, with what they did to its source's count and to the topic's lean, as if the card were
-    still out. An ending from before the no (it was opened, or went by itself) stays."""
-    path = Path(runtime) / TASTE_FILE
-    with _lock:
-        events = _load(path)
-        gone = [e for e in events if e[1] == item.id and (
+    still out, and no byte of them is left. An ending from before the no (it was opened, or went by itself)
+    stays."""
+    store = db.at(runtime)
+    with store.write() as conn:
+        gone = [e for e in _numbered(conn, "WHERE id = ?", (item.id,)) if (
             e[2] in ("skip", "hide_source") or e[2] == "end" and e[5]["end"] in ("close", "quick", "known"))]
-        _save(path, [e for e in events if e not in gone], load_topics(path))
+        _drop(conn, gone)
+    store.scrubbed()
     nos = [e for e in gone if e[2] != "end"]
     for event in nos:
         said = event[5].get("said") or {}
@@ -603,17 +611,14 @@ def walled(runtime: Path, item: Item) -> bool:
     ending by the open go, with the open's points for its source, so it counts as neither interest nor dislike;
     it is not shown again, and its site's finds of its kind wait while the person is signed out there (`ranked`).
     Whether it was new."""
-    path = Path(runtime) / TASTE_FILE
-    with _lock:
-        events = _load(path)
-        mark = _marks(events)[0].get(item.id)
+    with db.at(runtime).write() as conn:
+        mine = _numbered(conn, "WHERE id = ?", (item.id,))
+        mark = _marks(mine)[0].get(item.id)
         if mark is None or mark["walled"]:
             return False
-        gone = [e for e in events if e[1] == item.id and (
-            e[2] in ("open", "read") or e[2] == "end" and e[5].get("end") == "open")]
-        events = [e for e in events if e not in gone]
-        events.append([round(life.clock(), 3), item.id, "walled", mark["site"], mark["kind"], {}])
-        _save(path, events, load_topics(path))
+        gone = [e for e in mine if e[2] in ("open", "read") or e[2] == "end" and e[5].get("end") == "open"]
+        _drop(conn, gone)
+        _add(conn, [round(life.clock(), 3), item.id, "walled", mark["site"], mark["kind"], {}])
     if item.source and any(e[2] == "open" for e in gone):
         def edit(state: dict) -> None:
             row = state[item.source]
@@ -625,35 +630,38 @@ def walled(runtime: Path, item: Item) -> bool:
 
 
 def forget_items(runtime: Path, ids: set[str]) -> None:
-    """Things taken out of the library (a page deleted from the browser's history): their events go, and the model
-    is fitted again without them."""
-    path = Path(runtime) / TASTE_FILE
-    with _lock:
-        events = _load(path)
-        kept = [e for e in events if e[1] not in ids]
-        if len(kept) == len(events):
-            return
-        _save(path, kept, load_topics(path))
-    model.fit(runtime)
+    """Things taken out of the library (a page deleted from the browser's history): their events and showings go,
+    with no byte of them left, and the model is fitted again without them."""
+    store = db.at(runtime)
+    ids, gone = list(ids), 0
+    with store.write() as conn:
+        for n in range(0, len(ids), 500):
+            part = ids[n:n + 500]
+            marks = ",".join("?" * len(part))
+            gone += conn.execute(f"DELETE FROM feed_events WHERE id IN ({marks})", part).rowcount
+            gone += conn.execute(f"DELETE FROM shown WHERE id IN ({marks})", part).rowcount
+    if gone:
+        store.scrubbed()
+        model.fit(runtime)
 
 
 def keep_topics(runtime: Path, topics: list[str]) -> None:
-    path = Path(runtime) / TASTE_FILE
-    with _lock:
-        _save(path, _load(path), topics)
+    with db.at(runtime).write() as conn:
+        conn.execute("DELETE FROM feed_topics")
+        conn.executemany("INSERT INTO feed_topics (topic) VALUES (?)", [(topic,) for topic in topics])
 
 
 def forget_said(runtime: Path, match: re.Pattern) -> int:
     """Blank what `match` finds (casefolded) in the person's words about finds and in the snapshots' liked
     and avoided topics, and take the subjects it names out of the snapshots, so what the model learned of
-    them goes with the next fit; for a forget (profile.forget). How many events changed."""
-    path = Path(runtime) / TASTE_FILE
-    changed = 0
+    them goes with the next fit and no byte of the words is left; for a forget (profile.forget). How many
+    events changed."""
+    store = db.at(runtime)
+    changed = []
     named = {key for key, row in subjects.SUBJECTS.items() if any(match.search(n.casefold()) for n in (key, *row[1]))}
-    with _lock:
-        events = _load(path)
-        for event in events:
-            extra = event[5] if len(event) > 5 and isinstance(event[5], dict) else {}
+    with store.write() as conn:
+        for event in _numbered(conn):
+            extra = event[5]
             said, snap = extra.get("said"), extra.get("f")
             hit = isinstance(said, dict) and bool(match.search(str(said.get("words") or "").casefold()))
             if hit:
@@ -666,10 +674,12 @@ def forget_said(runtime: Path, match: re.Pattern) -> int:
             if isinstance(snap, dict) and named & set(snap.get("subj") or ()):
                 snap["subj"] = [k for k in snap["subj"] if k not in named]
                 hit = True
-            changed += hit
-        if changed:
-            _save(path, events, load_topics(path))
-    return changed
+            if hit:
+                changed.append((json.dumps(extra, ensure_ascii=False), event[6]))
+        conn.executemany("UPDATE feed_events SET extra = ? WHERE n = ?", changed)
+    if changed:
+        store.scrubbed()
+    return len(changed)
 
 
 # ------------------------------------------------------------------ routes --
@@ -678,18 +688,15 @@ class Feed:
     def __init__(self, workspace):
         self.ws = workspace
 
-    def _path(self) -> Path:
-        return self.ws._runtime() / TASTE_FILE
-
     def _events(self) -> list:
-        return _load(self._path())
+        return events(self.ws._runtime())
 
     def page(self, limit: int, before: str, kept: bool) -> dict:
         """One page of `shown` (`kept`: of the liked) for the app's 推荐记录, each thing as the main chat draws
         it, at the time it was shown or liked: with the chip and the topic it had in the chat or on the pet's
         card, else with those it would have now, its place for the list's reactions, and the sentence of why it
         was shown (`reason`): what its showing kept (recommend.facts), or for one shown before that was kept,
-        the same read from its showing's event, the ranking's terms in shown.jsonl, the character's line in
+        the same read from its showing's event, the ranking's terms in the shown table, the character's line in
         the chat and the person's history until then."""
         from .. import recommend
         runtime, events = self.ws._runtime(), self._events()
@@ -698,15 +705,14 @@ class Feed:
         chat = {m["card"]["id"]: m for m in self.ws._main.shared()}
         leans = profile.load(runtime, False)["leans"]
         name, _, lang = profile.character(self.ws.home, self.ws.config())
-        why = recommend.Why(runtime, load_topics(self._path()), events, life.clock(), lang)
+        why = recommend.Why(runtime, load_topics(runtime), events, life.clock(), lang)
         # Each thing's showing: its first "seen", else its first event (a page opened in the app's browser).
         showing: dict[str, list] = {}
         for event in events:
             if event[1] not in showing or event[2] == "seen" and showing[event[1]][2] != "seen":
                 showing[event[1]] = event
-        tops = {}
-        for row in reversed(paths.read_jsonl([runtime / model.SHOWN_FILE])):
-            tops[row.get("id")] = row.get("top") or []
+        tops = {ident: row.get("top") or [] for ident, row in model.first_shown(
+            runtime, [item.id for _, _, item in got["rows"]]).items()}
 
         def title_of(ident: str) -> str:
             found = library.get(ident)
@@ -771,7 +777,8 @@ class Feed:
         return self.situation()
 
     def first(self) -> dict:
-        return {"items": first_round(self.ws._library(), self._events(), life.clock(), load_topics(self._path()))}
+        return {"items": first_round(self.ws._library(), self._events(), life.clock(),
+                                     load_topics(self.ws._runtime()))}
 
     def _paced(self, ident: str, action: str, surface: str, end: str) -> None:
         """What the pacing hears: the card brought something, or how the last thing brought ended."""
@@ -785,7 +792,7 @@ class Feed:
 
     def interests(self, lang: str) -> dict:
         lang = langs.normalize(lang) or langs.normalize(self.ws.config().get("AGENT_LANG")) or "en"
-        return {"topics": load_topics(self._path()), "suggested": suggested(lang)}
+        return {"topics": load_topics(self.ws._runtime()), "suggested": suggested(lang)}
 
     def choose(self, payload: dict) -> dict:
         keep_topics(self.ws._runtime(), clean_topics(payload.get("topics")))

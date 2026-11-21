@@ -3,7 +3,7 @@
     python tools/paneaddress.py bar <scratch home with the app running> --out <folder>
     python tools/paneaddress.py window <scratch home, app not running> --out <folder> [--site-port 59543] [--model-port 59544]
 
-Both write a few pages read lately into the home first (browsed.jsonl), so the bar has history to suggest from.
+Both write a few pages read lately into the home first (browsed.record), so the bar has history to suggest from.
 
 bar     headless Edge on the running app's own page, the pane told as window.py tells it (there is no WebView
         here): at each window width, how wide the address field is, what a person reads in it, whether anything in
@@ -65,12 +65,11 @@ def seed(home: Path, port: int) -> None:
             ("https://www.bilibili.com/video/BV1Ab411c7XY", "城市候鸟纪录片 第一集 - 哔哩哔哩", 5),
             ("https://www.bilibili.com/", "哔哩哔哩 (゜-゜)つロ 干杯~", 9), ("https://news.ycombinator.com/", "Hacker News", 4),
             ("https://zh.wikipedia.org/wiki/候鸟", "候鸟 - 维基百科", 1)]
-    lines = []
+    from mibo import browsed
     for n, (url, title, times) in enumerate(rows):
         for k in range(times):
-            lines.append(json.dumps({"url": url, "title": title, "host": url.split("/")[2].split(":")[0],
-                                     "at": round(now - 3600 * (n + 1) - 86400 * k, 1), "s": 40.0}, ensure_ascii=False))
-    (desktop / "browsed.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+            browsed.record(desktop, {"url": url, "title": title, "at": round(now - 3600 * (n + 1) - 86400 * k, 1),
+                                     "s": 40.0})
 
 
 def bar(home: Path, out: Path) -> dict:

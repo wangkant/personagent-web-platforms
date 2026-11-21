@@ -30,8 +30,7 @@ def main() -> None:
     parser.add_argument("--per", type=int, default=recommend.CANDIDATES)
     parser.add_argument("--out", type=Path)
     args = parser.parse_args()
-    path = args.runtime / feed.TASTE_FILE
-    events, topics = feed._load(path), feed.load_topics(path)
+    events, topics = feed.events(args.runtime), feed.load_topics(args.runtime)
     library = Library(args.runtime)
     moments = [e[0] for e in events if e[2] == "seen" and len(e) > 5 and e[5].get("s") in ("card", "chat")]
     lines, named, kinds = [], set(), Counter()

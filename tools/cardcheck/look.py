@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -251,7 +252,11 @@ def pet(out: Path, home: Path) -> None:
         step("8-gone")
         report["errors"] = errors
         browser.close()
-    feed = json.loads((home / "runtime" / "feed.json").read_text(encoding="utf-8"))["events"]
+    # The running app's events, read without writing (runtime/mibo.db, table feed_events).
+    conn = sqlite3.connect(f"{(home / 'runtime' / 'mibo.db').as_uri()}?mode=ro", uri=True)
+    feed = [[at, ident, action, site, kind, json.loads(extra)] for at, ident, action, site, kind, extra
+            in conn.execute("SELECT at, id, action, site, kind, extra FROM feed_events ORDER BY n")]
+    conn.close()
     report["feed"] = [[e[1][:6], e[2], {k: e[5][k] for k in ("end", "said", "s") if k in e[5]}] for e in feed[-12:]]
     for row in report["feed"]:
         print("  feed:", row)

@@ -1,6 +1,6 @@
 """How often "because you picked <topic>" is true, topic by topic, on a library.
 
-    python tools/cardcheck/topics.py --runtime <dir with library/items.jsonl> [--labels labels.json]
+    python tools/cardcheck/topics.py --runtime <runtime folder with mibo.db> [--labels labels.json]
                                      [--sample 60] [--seed 1] [--out sheet.txt]
 
 For each topic the first run offers, as if it were the only one ticked: every thing in the library the

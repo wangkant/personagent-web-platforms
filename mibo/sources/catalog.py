@@ -1,8 +1,8 @@
 """Every source, and the rounds that read them into the library.
 
 The catalogue is the area modules' `SOURCES` and one source per feed the
-person added themselves (kept in `<runtime>/sources.json` with how each
-source's last read went). Nobody chooses public sources: each round reads
+person added themselves (kept in the runtime database's `own_feeds` table,
+db.py, with how each source's last read went in `source_reads`). Nobody chooses public sources: each round reads
 every own feed and `weights.ROUND` public sources drawn by what was learned
 (see `weights`), keeps what the library has not seen, each thing marked
 with the source that brought it, and the feed ranks it by the person's taste.
@@ -19,7 +19,6 @@ import importlib
 import json
 import logging
 import random
-import threading
 import time
 from collections import Counter
 from pathlib import Path
@@ -28,11 +27,10 @@ from urllib.parse import quote, urljoin
 
 import httpx
 
-from .. import langs, quiet, roam, situation
+from .. import db, langs, quiet, roam, situation
 from ..library import Library, item_id
 from ..panels import feed as feed_panel
 from ..roam import PICTURE_FETCH_MAX, public_address, small_picture
-from ..storage import atomic_write_text
 from . import base, weights
 from .base import Find, Source
 
@@ -40,7 +38,6 @@ logger = logging.getLogger("agent.sources")
 
 # The modules that list sources.
 AREAS = ("tech", "china", "world", "culture", "regional")
-CHOICE_FILE = "sources.json"
 # Sources fetched at the same time in one round.
 AT_ONCE = 6
 # A round soon after the app starts, then this often.
@@ -55,8 +52,6 @@ SHOWN_COVER_S = 6
 ASKED_COVER_S = 1.5
 ERROR_MAX = 160
 
-# sources.json is written from the page's worker threads and from the rounds.
-_lock = threading.Lock()
 _broken: set[str] = set()
 
 
@@ -104,33 +99,28 @@ def reader(lang: str) -> str:
 
 # ----------------------------------------------------------- what is kept on disk --
 
-def choice_path(runtime: Path) -> Path:
-    return Path(runtime) / CHOICE_FILE
+def _choice(read) -> dict:
+    return {"own": [json.loads(entry) for entry, in read("SELECT entry FROM own_feeds ORDER BY n")],
+            "last": {key: {"at": at, "count": count, "error": error}
+                     for key, at, count, error in read("SELECT key, at, count, error FROM source_reads")}}
 
 
 def load_choice(runtime: Path) -> dict:
     """The person's own feeds, and how each source's last read went."""
-    try:
-        saved = json.loads(choice_path(runtime).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        saved = {}
-    saved = saved if isinstance(saved, dict) else {}
-    own = saved.get("own") if isinstance(saved.get("own"), list) else []
-    last = saved.get("last") if isinstance(saved.get("last"), dict) else {}
-    return {"own": [e for e in own if isinstance(e, dict) and e.get("key") and e.get("url")],
-            "last": {k: v for k, v in last.items() if isinstance(v, dict)}}
-
-
-def save_choice(runtime: Path, choice: dict) -> None:
-    atomic_write_text(choice_path(runtime), json.dumps(choice, ensure_ascii=False, indent=1))
+    return _choice(db.at(runtime).read)
 
 
 def change_choice(runtime: Path, change: Callable[[dict], None]) -> dict:
-    """Read, change and write the file as one step; what was written."""
-    with _lock:
-        choice = load_choice(runtime)
+    """Read, change and write both as one transaction; what was written."""
+    with db.at(runtime).write() as conn:
+        choice = _choice(lambda sql: conn.execute(sql).fetchall())
         change(choice)
-        save_choice(runtime, choice)
+        conn.execute("DELETE FROM own_feeds")
+        conn.executemany("INSERT INTO own_feeds VALUES (?,?,?)",
+                         [(entry["key"], n, json.dumps(entry, ensure_ascii=False)) for n, entry in enumerate(choice["own"])])
+        conn.execute("DELETE FROM source_reads")
+        conn.executemany("INSERT INTO source_reads VALUES (?,?,?,?)",
+                         [(key, row["at"], row["count"], row["error"]) for key, row in choice["last"].items()])
         return choice
 
 
@@ -141,7 +131,7 @@ def weighed(runtime: Path, lang: str, sources: dict[str, Source], rng: Optional[
     the model is on."""
     from .. import taste
     runtime = Path(runtime)
-    matcher = feed_panel.topic_matcher(feed_panel.load_topics(runtime / feed_panel.TASTE_FILE))
+    matcher = feed_panel.topic_matcher(feed_panel.load_topics(runtime))
     public = [s for s in sources.values() if s.group != "own"]
     origin = None
     if taste.enabled(runtime):
@@ -152,7 +142,7 @@ def weighed(runtime: Path, lang: str, sources: dict[str, Source], rng: Optional[
     return weights.weigh(public, weights.load(runtime), situation.readable(runtime) | situation.expand({lang}), matcher,
                          own=situation.expand({lang}), unreadable=situation.unreadable(runtime), defaults=defaults,
                          supply=situation.supplier(runtime), origin=origin,
-                         retry_s=situation.retry_s(runtime), retry_at=situation.retry_at(runtime),
+                         retry_s=situation.retry_s(runtime),
                          topical=pulls(runtime, public, time.time()))
 
 

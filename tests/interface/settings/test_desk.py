@@ -13,16 +13,23 @@ import pytest
 from dotenv import dotenv_values
 
 from harness.app import TOKEN
-from mibo import chatlog, db, i18n, shortcut
+from mibo import browsed, chatlog, db, i18n, shortcut, taste
 from mibo import setup_wizard as sw
 from mibo import welcome
-from mibo.panels import desk
+from mibo.library import Item, Library
+from mibo.panels import desk, feed
 
 HEADERS = {welcome.TOKEN_HEADER: TOKEN}
 KEY = "sk-desk-secret-0123456789"
 SAID = "said only in the chat record"
 CONV = "private:browser:desk"
 MCP_KEY = "ghp-desk-secret-0123456789"
+
+
+@pytest.fixture(autouse=True)
+def no_fit(monkeypatch):
+    """A reaction seeded here refits no taste model in the background, so the home holds only what a test wrote."""
+    monkeypatch.setattr(taste, "fit", lambda runtime, soon=False: None)
 
 
 @pytest.fixture
@@ -68,6 +75,7 @@ def seed(home):
     # The page's copy of a chat and the chat record, where the app keeps them (runtime/mibo.db).
     _page_chat(runtime, "tea at four")
     chatlog.ChatLog(runtime).take(CONV, [{"seq": 1, "t": time.time(), "user_id": "browser:desk", "text": SAID}])
+    _find(runtime, "tide tables")
     (runtime / "desktop" / "app.json").write_text('{"toured": true}', encoding="utf-8")
     (runtime / "memory.json").write_text('{"a": "likes tea"}', encoding="utf-8")
     (runtime / "dashboard.token").write_text("dash-token", encoding="utf-8")
@@ -79,6 +87,25 @@ def _page_chat(runtime, text: str) -> None:
     chat = welcome.PageChat(db.at(runtime))
     chat.append([{"role": "user", "text": text}])
     chat.save()
+
+
+def _find(runtime, title: str) -> None:
+    """A find with a reaction to it, and a page read in the app's browser (runtime/mibo.db)."""
+    item = Library(runtime).add(Item(url=f"https://shore.example/{title.replace(' ', '-')}", title=title,
+                                     seen_at=int(time.time())))
+    feed.remember(runtime, item, "open", time.time())
+    browsed.record(runtime / "desktop", {"url": item.url, "title": title, "s": 5})
+
+
+def _finds(path) -> list[tuple]:
+    """The finds a database file holds: each one's title, its reactions and its visits."""
+    conn = sqlite3.connect(path)
+    try:
+        return [(json.loads(item)["title"], conn.execute("SELECT count(*) FROM feed_events WHERE id = ?", (i,)).fetchone()[0],
+                 conn.execute("SELECT count(*) FROM browsed WHERE url = ?", (json.loads(item)["url"],)).fetchone()[0])
+                for i, item in conn.execute("SELECT id, item FROM library ORDER BY seen_at, id")]
+    finally:
+        conn.close()
 
 
 def _page_texts(path) -> list[str]:
@@ -191,6 +218,7 @@ def test_a_backup_holds_the_home_but_no_keys_logs_sign_ins_or_chat_record(client
     copy = places / "copy.db"
     copy.write_bytes(archive.read("runtime/mibo.db"))
     assert _page_texts(copy) == ["tea at four"] and SAID.encode() not in copy.read_bytes()
+    assert _finds(copy) == [("tide tables", 1, 1)], "the finds, what was said of them and the pages read"
     env = archive.read(".env").decode("utf-8")
     assert KEY not in env and MCP_KEY not in env and "LLM_MODEL=m" in env and "LLM_API_KEY=" in env
     assert json.loads(archive.read(desk.MANIFEST))["secrets"] is False
@@ -205,6 +233,9 @@ def test_keys_go_into_a_backup_only_when_asked(client, workspace, places):
     archive = zipfile.ZipFile(places / "Desktop" / name)
     assert KEY in archive.read(".env").decode("utf-8") and MCP_KEY in archive.read(".env").decode("utf-8")
     assert json.loads(archive.read(desk.MANIFEST))["secrets"] is True
+    copy = places / "copy.db"
+    copy.write_bytes(archive.read("runtime/mibo.db"))
+    assert _finds(copy) == [("tide tables", 1, 1)]
 
 
 def test_backup_reports_a_folder_it_cannot_write(client, workspace, places, monkeypatch):
@@ -225,6 +256,7 @@ def test_a_restore_is_done_by_the_next_start_and_keeps_the_keys_here(client, wor
     name = post(client, "/backup", {"to": "desktop"}).json()["name"]
     (home / "runtime" / "memory.json").write_text('{"b": "later"}', encoding="utf-8")
     _page_chat(home / "runtime", "said after the backup")
+    _find(home / "runtime", "found after the backup")
     (home / "skills" / "later").mkdir()
     (home / "skills" / "later" / "SKILL.md").write_text("later", encoding="utf-8")
     answer = post(client, "/restore", {"place": "desktop", "name": name})
@@ -240,6 +272,7 @@ def test_a_restore_is_done_by_the_next_start_and_keeps_the_keys_here(client, wor
     assert (home / "runtime" / "desktop" / "webview" / "Cookies").exists()
     # The page's chats as the backup has them; the chat record, never in a backup, as it was.
     assert _page_texts(home / "runtime" / "mibo.db") == ["tea at four"]
+    assert _finds(home / "runtime" / "mibo.db") == [("tide tables", 1, 1)]
     assert [r["text"] for r in chatlog.ChatLog(home / "runtime").read(CONV)] == [SAID]
     assert not (home / "runtime" / "desktop" / "pending.json").exists()
     # The home as it was just before is kept in a backup of its own, and it is the present, not the backup.

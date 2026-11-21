@@ -7,7 +7,7 @@ from the source or on a topic of the last one where there is a choice, and asks 
 now, with one sentence in the character's voice on why. The model is given the
 candidates in a shuffled order and what the person did with the last few
 things brought (`lately`), so it reads their taste from the things themselves;
-where its choice stood in the ranking goes to shown.jsonl. What the sentence says
+where its choice stood in the ranking goes to the shown table. What the sentence says
 of the person is a part of its own (`tie`) that must name what it rests on, an
 interest the ranking matched the thing to or an earlier thing they opened or
 liked, and is dropped when it does not (`grounds`, `parse`). One small call per
@@ -33,7 +33,6 @@ import random
 import re
 import time
 from collections import Counter
-from pathlib import Path
 from typing import Optional
 
 from . import drafting, life, profile, quiet, subjects
@@ -101,10 +100,11 @@ def candidates(library, events: list, now: float, topics: list[str], here: set[s
     person has said or shown which they take to."""
     from .panels import feed
     pool = []
-    for shaped, item in feed.ranked(library, events, now, topics, seed=int(now * 1000)):
+    since = now - life.TELL_DAYS * 86400
+    for shaped, item in feed.ranked(library, events, now, topics, seed=int(now * 1000), since=since):
         if shaped["seen"] or len(pool) >= POOL:
             break
-        if item.id not in here and not item.told and item.seen_at >= now - life.TELL_DAYS * 86400:
+        if item.id not in here and not item.told:
             pool.append((shaped, item))
     veins = feed.Veins(topics)
     last = veins.last(library, events)
@@ -127,7 +127,7 @@ def _lately(runtime, now: float) -> list[tuple]:
     """(what they did, title, site, kind, how long ago) of the last LATELY things the card or the chat
     brought, newest first."""
     from .panels import feed
-    events = feed._load(Path(runtime) / feed.TASTE_FILE)
+    events = feed.events(runtime)
     marks = feed._marks(events)[0]
     library = Library(runtime)
     lines, named = [], set()
@@ -462,7 +462,7 @@ def facts(item: Item, snap: Optional[dict], slot: str, surface: str, term: str, 
 
 
 def term_of(top: list, guess: bool) -> str:
-    """The ranking's reason term from the top terms shown.jsonl kept for a showing, for one shown before the
+    """The ranking's reason term from the top terms the shown table kept for a showing, for one shown before the
     reason was kept with its event: the largest the person's reactions or picks could have lifted
     (taste.Ranker.reason, without the draw that is not kept)."""
     from .taste import REASON_MIN
@@ -519,7 +519,7 @@ def chat_finds(runtime, now: float) -> str:
     """The finds the main chat shared in the last CHAT_FINDS_DAYS, newest first, with what the person did
     with each: what "this" or a quoted card means to the reply model. "" when there are none."""
     from .panels import feed
-    events = feed._load(Path(runtime) / feed.TASTE_FILE)
+    events = feed.events(runtime)
     marks = feed._marks(events)[0]
     library = Library(runtime)
     lines, named = [], set()
@@ -551,8 +551,7 @@ def another(runtime, wish: str, avoid: list[dict], now: float) -> Optional[tuple
     has nothing of that form."""
     from . import taste
     from .panels import feed
-    path = Path(runtime) / feed.TASTE_FILE
-    events, topics = feed._load(path), feed.load_topics(path)
+    events, topics = feed.events(runtime), feed.load_topics(runtime)
     library = Library(runtime)
     wish = " ".join(str(wish or "").split())[:80]
     kind = "video" if _VIDEO.search(wish) else "text" if _TEXT.search(wish) else ""
@@ -635,7 +634,7 @@ class Chooser:
         if life.clock() - choice["at"] > STALE_S:
             return False
         item = self.ws._library().get(choice["item"].id)
-        mark = feed._marks(feed._load(self.ws._runtime() / feed.TASTE_FILE))[0].get(choice["item"].id, {})
+        mark = feed._marks(feed.of(self.ws._runtime(), choice["item"].id))[0].get(choice["item"].id, {})
         return (item is not None and item.state != DISMISSED and not item.told and not mark.get("seen")
                 and item.id not in self._here())
 
@@ -644,8 +643,7 @@ class Chooser:
         from .panels import feed
         runtime, values = self.ws._runtime(), self.ws.config()
         now = life.clock()
-        path = runtime / feed.TASTE_FILE
-        topics, events = feed.load_topics(path), feed._load(path)
+        topics, events = feed.load_topics(runtime), feed.events(runtime)
         name, persona, lang = profile.character(self.ws.home, values)
         return {"runtime": runtime, "values": values, "now": now, "topics": topics, "events": events, "name": name,
                 "persona": persona, "lang": lang,
@@ -743,7 +741,7 @@ class Chooser:
             if picked:
                 shaped, item, line = picked
                 from . import taste
-                # Where the model's choice stood in the ranking's order, for shown.jsonl.
+                # Where the model's choice stood in the ranking's order, for the shown table.
                 taste.served.get(item.id, {})["six"] = [row[1].id for row in rows].index(item.id)
         return shaped, item, line
 

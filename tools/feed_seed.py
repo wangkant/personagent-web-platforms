@@ -104,7 +104,7 @@ def main() -> int:
         if colours:
             item.picture = library.save_picture(item.id, cover(*colours))
         library.add(item)
-    print(f"feed_seed: put {len(SAMPLES)} SAMPLE finds into {library.items_path}.")
+    print(f"feed_seed: put {len(SAMPLES)} SAMPLE finds into {library.db.path}.")
     print("These are samples written for testing the Feed page, not anything the character found.")
     return 0
 

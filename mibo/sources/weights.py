@@ -4,29 +4,26 @@ Nobody ticks sources. Each has a weight: a prior from the languages the
 person reads, the sources on by default for them and the topics they named,
 times exp(the situation's supply term + what was learned of the source),
 where what was learned is the taste model's sampled coefficient for it, or
-the reactions to what it brought (`<runtime>/sources_taste.json`) when the
-model is off. A source whose reads failed at the transport two rounds in a
+the reactions to what it brought (the runtime database's `source_state`
+table, db.py) when the model is off. A source whose reads failed at the transport two rounds in a
 row is left out until a retry is due. Most of a round is drawn by weight; a
 fifth goes to sources read least, so the feed does not narrow to what it
 already knows.
 
-This module imports nothing from the rest of the package but storage: the
+This module imports nothing from the rest of the package but db: the
 feed ranks by the same learning and is itself imported by the walks.
 """
 from __future__ import annotations
 
-import json
 import math
 import random
 import re
-import threading
 import time
 from pathlib import Path
 from typing import Callable, Optional
 
-from ..storage import atomic_write_text
+from .. import db
 
-TASTE_FILE = "sources_taste.json"
 # Sources read in one round besides the person's own feeds, and the share of it kept for exploring.
 ROUND = 16
 EXPLORE = ROUND // 5
@@ -59,37 +56,39 @@ RETRY_S = 6 * 3600
 # What one source's read in a round came to.
 OK, BLOCKED, FAILED_READ = "ok", "blocked", "failed"
 
-_lock = threading.Lock()
-
-
 # ------------------------------------------------------------------ what was learned --
 
-def path(runtime: Path) -> Path:
-    return Path(runtime) / TASTE_FILE
+# The columns of a source's row, in the table's order after its key.
+FIELDS = ("reads", "fails", "items", "points", "hides", "blocked", "tried")
 
 
 def _blank() -> dict:
     return {"reads": 0, "fails": 0, "items": 0, "points": 0.0, "hides": 0, "blocked": 0, "tried": 0}
 
 
+def _state(found: list) -> dict[str, dict]:
+    return {key: dict(zip(FIELDS, values)) for key, *values in found}
+
+
 def load(runtime: Path) -> dict[str, dict]:
     """Per source key: rounds it was read in, rounds in a row it failed, things reacted to, points, hides."""
-    try:
-        saved = json.loads(path(runtime).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    rows = saved.get("sources") if isinstance(saved, dict) else None
-    if not isinstance(rows, dict):
-        return {}
-    return {str(k): {**_blank(), **{f: v for f, v in row.items() if f in _blank() and isinstance(v, (int, float))}}
-            for k, row in rows.items() if isinstance(row, dict)}
+    return _state(db.at(runtime).read("SELECT * FROM source_state"))
+
+
+def row(runtime: Path, key: str) -> Optional[dict]:
+    """One source's row, or None for a source never read nor reacted to."""
+    return _state(db.at(runtime).read("SELECT * FROM source_state WHERE key = ?", (key,))).get(key)
 
 
 def change(runtime: Path, edit: Callable[[dict[str, dict]], None]) -> None:
-    with _lock:
-        state = load(runtime)
+    """Read, edit and write the rows as one transaction; only the rows `edit` changed or added are written."""
+    with db.at(runtime).write() as conn:
+        before = _state(conn.execute("SELECT * FROM source_state").fetchall())
+        state = {key: dict(values) for key, values in before.items()}
         edit(state)
-        atomic_write_text(path(runtime), json.dumps({"sources": state}, ensure_ascii=False, indent=1))
+        conn.executemany("INSERT OR REPLACE INTO source_state VALUES (?,?,?,?,?,?,?,?)",
+                         [(key, *(values[f] for f in FIELDS)) for key, values in state.items()
+                          if values != before.get(key)])
 
 
 def reacted(runtime: Path, key: str, action: str, first: bool) -> None:
@@ -130,12 +129,11 @@ def read(runtime: Path, answered: dict[str, str | bool], now: Optional[float] = 
     change(runtime, edit)
 
 
-def open_to(row: Optional[dict], now: float, retry_s: float = RETRY_S, retry_at: float = 0) -> bool:
-    """Whether a source may be read: not blocked, or its retry is due (`retry_s` after its last try,
-    or a "check again" asked after it)."""
+def open_to(row: Optional[dict], now: float, retry_s: float = RETRY_S) -> bool:
+    """Whether a source may be read: not blocked, or its retry is due (`retry_s` after its last try)."""
     if not row or row["blocked"] < BLOCKED_AFTER:
         return True
-    return now - row["tried"] >= retry_s or row["tried"] < retry_at
+    return now - row["tried"] >= retry_s
 
 
 def learned(row: Optional[dict]) -> float:
@@ -153,7 +151,7 @@ def _text(source) -> str:
 
 def weigh(sources: list, state: dict[str, dict], reader: str | set[str], matcher: Optional[re.Pattern], *,
           unreadable: set[str] = frozenset(), defaults: Optional[set[str]] = None, supply: Optional[Callable] = None,
-          origin: Optional[Callable[[str], float]] = None, retry_s: float = RETRY_S, retry_at: float = 0,
+          origin: Optional[Callable[[str], float]] = None, retry_s: float = RETRY_S,
           now: Optional[float] = None, topical: Optional[dict[str, float]] = None,
           own: Optional[set[str]] = None) -> list[dict]:
     """Each source's gate, prior, learned exponent and weight, highest weight first.
@@ -175,7 +173,7 @@ def weigh(sources: list, state: dict[str, dict], reader: str | set[str], matcher
     rows = []
     for source in sources:
         row = state.get(source.key) or _blank()
-        gate = 1.0 if open_to(row, now, retry_s, retry_at) else 0.0
+        gate = 1.0 if open_to(row, now, retry_s) else 0.0
         lang = (1.0 if source.lang in own or not source.lang else READ_TOO if source.lang in readable
                 else 0.0 if source.lang in unreadable else OTHER_LANG)
         topic = (PULL * topical.get(source.key, 0.0) if topical is not None

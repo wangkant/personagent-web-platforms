@@ -1,9 +1,15 @@
 """What the character has seen, kept for the home page and the days."""
 from __future__ import annotations
 
-from mibo.library import KEPT, Item, Library, item_id
+import time
+
+from mibo import library as library_module
+from mibo import taste
+from mibo.library import BROWSED, DISMISSED, KEPT, Item, Library, item_id
+from mibo.panels import feed
 
 NOW = 1_800_000_000
+DAY = 86400
 
 
 def test_an_item_is_kept_once_and_the_owner_s_choice_outlives_a_second_visit(tmp_path):
@@ -36,11 +42,9 @@ def test_a_card_holds_public_facts_and_no_path(tmp_path):
     assert library.save_picture(item.id, b"x" * 300_000) == "", "a cover is kept small"
 
 
-def test_an_unknown_kind_is_a_page_and_damaged_lines_are_passed_over(tmp_path):
+def test_an_unknown_kind_is_a_page(tmp_path):
     library = Library(tmp_path)
     library.add(Item(url="https://example.test/x", kind="hologram", seen_at=NOW))
-    with open(library.items_path, "a", encoding="utf-8") as handle:
-        handle.write("{not json\n")
     assert [item.kind for item in Library(tmp_path).items()] == ["page"]
 
 
@@ -58,12 +62,38 @@ def test_the_walk_is_out_then_home_and_counts_a_day(tmp_path):
     assert library.left(now=NOW + 86400 * 2).today == 1, "a new day starts the count again"
 
 
-def test_compacting_keeps_one_line_per_item(tmp_path):
+def test_a_find_nobody_kept_or_took_up_retires_with_its_cover_and_the_rest_stay(tmp_path, monkeypatch):
+    monkeypatch.setattr(taste, "fit", lambda runtime, soon=False: None)
     library = Library(tmp_path)
-    item = library.add(Item(url="https://example.test/a", seen_at=NOW))
-    for _ in range(5):
-        library.change(item.id, state=KEPT)
-    assert len(library.items_path.read_text(encoding="utf-8").splitlines()) == 6
+    now = int(time.time())
+
+    def find(name: str, days_ago: float, **values) -> Item:
+        item = library.add(Item(url=f"https://example.test/{name}", title=name, seen_at=now - int(days_ago * DAY),
+                                **values))
+        item.picture = library.save_picture(item.id, b"cover")
+        return library.change(item.id, picture=item.picture)
+
+    stale, kept, fresh, opened = find("stale", 40), find("kept", 40), find("fresh", 1), find("opened", 40)
+    # The person's own reading, which has its own keeping (browsed.py).
+    find("read", 40, via=BROWSED)
+    library.change(kept.id, state=KEPT)
+    feed.remember(tmp_path, opened, "open", now - 2 * DAY)
     library.compact()
-    assert len(library.items_path.read_text(encoding="utf-8").splitlines()) == 1
-    assert library.get(item.id).state == KEPT
+    assert sorted(item.title for item in Library(tmp_path).items()) == ["fresh", "kept", "opened", "read"]
+    assert not (library.pictures / stale.picture).exists() and (library.pictures / fresh.picture).exists()
+
+
+def test_past_the_limit_the_dismissed_go_first_then_what_was_shown_and_never_taken_up(tmp_path, monkeypatch):
+    library = Library(tmp_path)
+    now = int(time.time())
+    made = {name: library.add(Item(url=f"https://example.test/{name}", title=name, seen_at=now - n * 60))
+            for n, name in enumerate(["unshown", "shown", "dismissed", "kept"])}
+    library.change(made["dismissed"].id, state=DISMISSED)
+    library.change(made["kept"].id, state=KEPT)
+    feed.remember(tmp_path, made["shown"], "seen", now)
+    monkeypatch.setattr(library_module, "ITEMS_MAX", 3)
+    library.compact()
+    assert sorted(item.title for item in library.items()) == ["kept", "shown", "unshown"]
+    monkeypatch.setattr(library_module, "ITEMS_MAX", 1)
+    library.compact()
+    assert [item.title for item in library.items()] == ["kept"], "a kept one never goes"

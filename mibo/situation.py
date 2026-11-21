@@ -1,7 +1,7 @@
 """Where the person is, what they can reach and what they read, in one table.
 
-Each fact is a row in `<runtime>/situation.json`, kept per origin
-(user > observed > os > default): the highest one present is the value, and
+Each fact is a row in the runtime database's `situation` table (db.py), kept
+per origin (user > observed > os > default): the highest one present is the value, and
 inference never writes over what the person set. When an observation that
 decided a value goes away (a VPN makes YouTube answer, so the mainland
 signature is gone), the value stays and the row asks the person instead.
@@ -14,7 +14,8 @@ Reachability comes from real transport outcomes. `recording_transport`
 records each request's host: any HTTP answer, whatever its status, counts as
 reachable; only DNS, connect, TLS and reset failures and connect timeouts
 count against it. A host is down after two such failures at least five
-minutes apart, and up again on one answer.
+minutes apart, and up again on one answer. Each host is a row in the `hosts`
+table.
 """
 from __future__ import annotations
 
@@ -27,7 +28,6 @@ import locale
 import re
 import subprocess
 import sys
-import threading
 import time
 import urllib.request
 from collections import Counter
@@ -38,9 +38,8 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from .storage import atomic_write_text
+from . import db
 
-FILE = "situation.json"
 ORIGINS = ("default", "os", "observed", "user")
 # feed_model is the person's switch for the taste model (off: the feed's old point sum ranks).
 NAMES = ("region", "home", "readable", "unreadable", "vpn", "accounts", "metered", "feed_model")
@@ -94,58 +93,56 @@ _HAN = re.compile(r"[一-鿿]")
 _CYRILLIC = re.compile(r"[Ѐ-ӿ]")
 _LATIN = re.compile(r"[A-Za-z]")
 
-_lock = threading.Lock()
-_memo: dict[str, tuple[tuple, Any]] = {}
 # What the requests of one source's fetch did, for the round to tell blocked from failed.
 _tally: contextvars.ContextVar[Optional[dict]] = contextvars.ContextVar("situation_tally", default=None)
 
 
 # ------------------------------------------------------------------- the table --
 
-def _path(runtime: Path) -> Path:
-    return Path(runtime) / FILE
+HOST_FIELDS = ("fails", "fail_at", "ok_at", "wall_at", "mode")
 
 
-def _parse(path: Path) -> dict:
-    try:
-        saved = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        saved = {}
-    saved = saved if isinstance(saved, dict) else {}
-    factors = saved.get("factors") if isinstance(saved.get("factors"), dict) else {}
-    hosts = saved.get("hosts") if isinstance(saved.get("hosts"), dict) else {}
-    return {"factors": {k: v for k, v in factors.items() if k in NAMES and isinstance(v, dict)
-                        and isinstance(v.get("by"), dict)},
-            "hosts": {k: {**_blank_host(), **v} for k, v in hosts.items() if isinstance(v, dict)},
-            "probed": float(saved.get("probed") or 0), "retry_at": float(saved.get("retry_at") or 0)}
+def _hosts(found) -> dict[str, dict]:
+    return {site: dict(zip(HOST_FIELDS, values)) for site, *values in found}
 
 
-def _cached(path: Path, load: Callable[[Path], Any]) -> Any:
-    """`load(path)`, read again only when the file changed; callers must not change what it returns."""
-    try:
-        stat = path.stat()
-        stamp = (stat.st_mtime_ns, stat.st_size)
-    except OSError:
-        stamp = ()
-    key = str(path)
-    hit = _memo.get(key)
-    if hit is None or hit[0] != stamp:
-        hit = (stamp, load(path))
-        _memo[key] = hit
-    return hit[1]
+def _host(store: db.Db, site: str) -> Optional[dict]:
+    return _hosts(store.read("SELECT * FROM hosts WHERE site = ?", (site,))).get(site)
 
 
-def _state(runtime: Path) -> dict:
-    return _cached(_path(runtime), _parse)
+def _all_hosts(runtime: Path) -> dict[str, dict]:
+    return _hosts(db.at(runtime).read("SELECT * FROM hosts ORDER BY site"))
 
 
-def _change(runtime: Path, edit: Callable[[dict], Optional[bool]]) -> dict:
-    """Read, edit and write the table as one step; `edit` returning False writes nothing."""
-    with _lock:
-        state = _parse(_path(runtime))
-        if edit(state) is not False:
-            atomic_write_text(_path(runtime), json.dumps(state, ensure_ascii=False, indent=1))
+def _factor(runtime: Path, name: str) -> Any:
+    found = db.at(runtime).read("SELECT value FROM situation WHERE name = ?", (name,))
+    return json.loads(found[0][0]) if found else None
+
+
+def _edit(runtime: Path, edit: Callable[[dict], None]) -> dict:
+    """Read, edit and write the factors as one transaction: {"factors": {name: row, and "probed": when the first
+    start's check ran}, "hosts": read only}; only the rows `edit` changed are written."""
+    with db.at(runtime).write() as conn:
+        before = {name: value for name, value in conn.execute("SELECT name, value FROM situation")}
+        state = {"factors": {name: json.loads(value) for name, value in before.items()},
+                 "hosts": _hosts(conn.execute("SELECT * FROM hosts").fetchall())}
+        edit(state)
+        rows = {name: json.dumps(row, ensure_ascii=False, sort_keys=True) for name, row in state["factors"].items()}
+        conn.executemany("INSERT OR REPLACE INTO situation VALUES (?,?)",
+                         [(name, value) for name, value in rows.items() if before.get(name) != value])
         return state
+
+
+def _edit_host(runtime: Path, site: str, edit: Callable[[dict], Optional[bool]]) -> None:
+    """One host's row edited in one transaction; `edit` returning False writes nothing. It is read first outside
+    one, so a request that changes nothing takes no write lock."""
+    store = db.at(runtime)
+    if edit(_host(store, site) or _blank_host()) is False:
+        return
+    with store.write() as conn:
+        row = _host(store, site) or _blank_host()
+        if edit(row) is not False:
+            conn.execute("INSERT OR REPLACE INTO hosts VALUES (?,?,?,?,?,?)", (site, *(row[f] for f in HOST_FIELDS)))
 
 
 def _blank_host() -> dict:
@@ -163,10 +160,9 @@ def _top(row: Optional[dict]) -> tuple[str, Any]:
 
 def value(runtime: Path, name: str):
     """The current value of one factor, or a host's override ("host:<host>": "always", "never" or "")."""
-    state = _state(runtime)
     if name.startswith("host:"):
-        return state["hosts"].get(site_of(name[5:]), _blank_host())["mode"]
-    origin, found = _top(state["factors"].get(name))
+        return (_host(db.at(runtime), site_of(name[5:])) or _blank_host())["mode"]
+    origin, found = _top(_factor(runtime, name))
     return DEFAULTS[name] if origin == "default" else found
 
 
@@ -193,10 +189,10 @@ def set_value(runtime: Path, name: str, value) -> None:
         if not site or value not in ("always", "never", "", None):
             raise ValueError("situation_invalid")
 
-        def mode(state: dict) -> None:
-            state["hosts"].setdefault(site, _blank_host())["mode"] = value or ""
+        def mode(row: dict) -> None:
+            row["mode"] = value or ""
 
-        _change(runtime, mode)
+        _edit_host(runtime, site, mode)
         return
     if name not in NAMES:
         raise ValueError("situation_invalid")
@@ -211,7 +207,7 @@ def set_value(runtime: Path, name: str, value) -> None:
             row["by"]["user"] = cleaned
         row["at"] = int(time.time())
 
-    _change(runtime, put)
+    _edit(runtime, put)
 
 
 def _observe(state: dict, name: str, origin: str, found, now: float) -> None:
@@ -269,8 +265,7 @@ def record(runtime: Path, host: str, ok: bool, now: Optional[float] = None) -> N
     if not site:
         return
 
-    def edit(state: dict) -> Optional[bool]:
-        row = state["hosts"].setdefault(site, _blank_host())
+    def edit(row: dict) -> Optional[bool]:
         if ok:
             if not row["fails"] and now - row["ok_at"] < OK_WRITE_S:
                 return False
@@ -281,21 +276,20 @@ def record(runtime: Path, host: str, ok: bool, now: Optional[float] = None) -> N
             row["fails"], row["fail_at"] = row["fails"] + 1, now
         return None
 
-    _change(runtime, edit)
+    _edit_host(runtime, site, edit)
 
 
 def record_wall(runtime: Path, host: str, wall: bool, now: Optional[float] = None) -> None:
     """A walk's list showed a login or verification wall to visitors (or did not)."""
     site, now = site_of(host), time.time() if now is None else now
 
-    def edit(state: dict) -> Optional[bool]:
-        row = state["hosts"].setdefault(site, _blank_host())
+    def edit(row: dict) -> Optional[bool]:
         if bool(row["wall_at"]) == wall:
             return False
         row["wall_at"] = now if wall else 0.0
         return None
 
-    _change(runtime, edit)
+    _edit_host(runtime, site, edit)
 
 
 def navigation_failed(error: BaseException) -> bool:
@@ -306,31 +300,29 @@ def navigation_failed(error: BaseException) -> bool:
 def gate(runtime: Path, key: Optional[str] = None, host: Optional[str] = None) -> bool:
     """True when a source key may be read (it is not blocked, or is due a retry) and a host's things may be
     shown (it is not down). A host the record has never seen is allowed."""
-    if host is not None and not _up(_state(runtime)["hosts"].get(site_of(host))):
+    if host is not None and not _up(_host(db.at(runtime), site_of(host))):
         return False
     if key is not None:
         from .sources import weights
-        row = _cached(weights.path(runtime), lambda _: weights.load(runtime)).get(key)
-        return weights.open_to(row, time.time(), retry_s(runtime), _state(runtime)["retry_at"])
+        return weights.open_to(weights.row(runtime, key), time.time(), retry_s(runtime))
     return True
 
 
 def walkable(runtime: Path, host: str, now: Optional[float] = None) -> bool:
     """Whether a walk may go to `host` now: it is up or due a retry, and showed no wall in the last RETRY_S."""
     now = time.time() if now is None else now
-    state = _state(runtime)
-    row = state["hosts"].get(site_of(host))
+    row = _host(db.at(runtime), site_of(host))
     if not row:
         return True
     if row["mode"]:
         return row["mode"] == "always"
     if row["wall_at"] and now - row["wall_at"] < RETRY_S:
         return False
-    return _up(row) or now - row["fail_at"] >= retry_s(runtime) or row["fail_at"] < state["retry_at"]
+    return _up(row) or now - row["fail_at"] >= retry_s(runtime)
 
 
 def down_hosts(runtime: Path) -> list[str]:
-    return sorted(site for site, row in _state(runtime)["hosts"].items() if not _up(row))
+    return [site for site, row in _all_hosts(runtime).items() if not _up(row)]
 
 
 # --------------------------------------------------------------- the transport --
@@ -394,7 +386,7 @@ async def _check(runtime: Path, hosts: list[str]) -> None:
 async def probe(runtime: Path, lang: str = "") -> None:
     """The first start's check of PROBE_HOSTS, run twice PROBE_AGAIN_S apart, so the gate and the
     region signature exist on day one."""
-    if _state(runtime)["probed"]:
+    if _factor(runtime, "probed"):
         return
     await _check(runtime, list(PROBE_HOSTS))
     await asyncio.to_thread(infer, runtime, lang)
@@ -402,9 +394,9 @@ async def probe(runtime: Path, lang: str = "") -> None:
     await _check(runtime, list(PROBE_HOSTS))
 
     def done(state: dict) -> None:
-        state["probed"] = time.time()
+        state["factors"]["probed"] = time.time()
 
-    await asyncio.to_thread(_change, runtime, done)
+    await asyncio.to_thread(_edit, runtime, done)
     await asyncio.to_thread(infer, runtime, lang)
 
 
@@ -413,11 +405,10 @@ async def retry_down(runtime: Path, now: Optional[float] = None) -> None:
     switch on) tried again, so one no source or walk asks for, such as a first-start probe host, comes
     back too. A host the person set to always or never is left alone."""
     now = time.time() if now is None else now
-    state, wait = _state(runtime), retry_s(runtime)
+    wait = retry_s(runtime)
     named = {site_of(host): host for host in PROBE_HOSTS}
-    due = [named.get(site, site) for site, row in state["hosts"].items()
-           if not row["mode"] and row["fails"] >= DOWN_AFTER
-           and (now - row["fail_at"] >= wait or row["fail_at"] < state["retry_at"])]
+    due = [named.get(site, site) for site, row in _all_hosts(runtime).items()
+           if not row["mode"] and row["fails"] >= DOWN_AFTER and now - row["fail_at"] >= wait]
     if due:
         await _check(runtime, due)
 
@@ -520,11 +511,7 @@ def _opened_languages(runtime: Path) -> set[str]:
     from .library import Library
     from .panels import feed
     from .sources import catalog
-    try:
-        events = json.loads((Path(runtime) / feed.TASTE_FILE).read_text(encoding="utf-8")).get("events") or []
-    except (OSError, ValueError, AttributeError):
-        return set()
-    wanted = {e[1] for e in events if isinstance(e, list) and len(e) >= 3 and e[2] in ("open", "like", "play")}
+    wanted = {e[1] for e in feed.events(runtime) if e[2] in ("open", "like", "play")}
     if not wanted:
         return set()
     sources = catalog.all_sources([])
@@ -580,7 +567,7 @@ def infer(runtime: Path, lang: str = "", now: Optional[float] = None) -> dict:
         if metered is not None:
             _observe(state, "metered", "os", metered, now)
 
-    return _change(runtime, edit)
+    return _edit(runtime, edit)
 
 
 # ------------------------------------------------------------- the five effects --
@@ -609,11 +596,6 @@ def default_langs(runtime: Path, lang: str) -> set[str]:
 def unreadable(runtime: Path) -> set[str]:
     """The languages the person said they cannot read: those sources are never drawn."""
     return expand(value(runtime, "unreadable"))
-
-
-def retry_at(runtime: Path) -> float:
-    """When the person last asked to check again: what failed before it is tried in the next round."""
-    return _state(runtime)["retry_at"]
 
 
 def supplier(runtime: Path) -> Callable[[Any], float]:
@@ -700,10 +682,9 @@ def notes(runtime: Path, now: float) -> str:
 def view(runtime: Path, now: Optional[float] = None) -> dict:
     """What the page shows and edits: each factor with its origin and any question, and the hosts."""
     now = time.time() if now is None else now
-    state = _state(runtime)
     factors = {}
     for name in NAMES:
-        row = state["factors"].get(name)
+        row = _factor(runtime, name)
         origin, found = _top(row)
         factors[name] = {"value": DEFAULTS[name] if origin == "default" else found, "origin": origin,
                          "ask": (row or {}).get("ask")}
@@ -711,7 +692,7 @@ def view(runtime: Path, now: Optional[float] = None) -> dict:
     hosts = [{"host": site, "state": "up" if _up(row) else "down", "mode": row["mode"],
               "wall": bool(row["wall_at"] and now - row["wall_at"] < RETRY_S),
               "ok_at": int(row["ok_at"]), "fail_at": int(row["fail_at"])}
-             for site, row in sorted(state["hosts"].items())]
+             for site, row in _all_hosts(runtime).items()]
     known = {h["host"]: h["state"] for h in hosts}
-    return {"factors": factors, "hosts": hosts, "probed": bool(state["probed"]),
+    return {"factors": factors, "hosts": hosts, "probed": bool(_factor(runtime, "probed")),
             "platforms": {site_of(p): known.get(site_of(p), "unknown") for p in PROBE_HOSTS}}

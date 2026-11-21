@@ -13,7 +13,6 @@ from harness.app import App, quiet_start
 from harness.clock import Clock
 from harness.finds import Shelf
 from mibo import profile
-from mibo.panels import feed
 
 NOW = 1_800_000_000
 
@@ -48,12 +47,6 @@ def test_one_thing_is_brought_at_a_time_and_held_until_a_card_shows_it(page):
     assert second["id"] != first["id"] and second["why"]["text"]
     listed = served.get("/api/feed").json()["items"]
     assert [card["id"] for card in listed] == [first["id"]] and listed[0]["why"]["text"]
-
-
-def test_a_reaction_file_that_cannot_be_read_still_leaves_something_to_bring(page):
-    served, shelf = page
-    (shelf.runtime / feed.TASTE_FILE).write_text("{not json", encoding="utf-8")
-    assert brought(served)["id"]
 
 
 def test_a_reaction_is_kept_once_as_the_page_sent_it_and_a_malformed_one_not_at_all(page):
