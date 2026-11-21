@@ -7,7 +7,7 @@ says, and each check reads what the site got, what was saved and how the run end
 The checks:
 
     named     a file the person named goes into the page's file field on the card's yes, and the form sends it
-    chosen    a path the person never named is dropped; the file they choose on the card is given instead
+    chosen    a path the person never named, and that no tool found, is refused before anything is pressed
     alert     a harmless alert is closed and its words put on the line; the run goes on to a download, saved on yes
     confirm   the page's confirm after a press the person confirmed is answered OK with no second card
     coupon    a free button's confirm that would share their contacts goes to a card; on no nothing is sent, and
@@ -103,14 +103,11 @@ async def named(play: Files) -> tuple[bool, dict]:
 
 
 async def chosen(play: Files) -> tuple[bool, dict]:
-    face = play.out / "头像.txt"
-    face.write_text("头像\n", encoding="utf-8")
     await play.open("/t/t26-apply.html")
     out = await play.run("帮我换个头像", [ids(r'\[(\d+)\] button "上传头像"', "上传头像", file=str(HERE / "opfiles.py")),
                                     done("头像已更新。", "头像已更新")])
-    sent = play.got("/api/avatar")
-    return (out["status"] == "done" and len(sent) == 1 and sent[0].get("name") == "头像.txt"
-            and play.cards and play.cards[0]["kind"] == "upload" and not play.cards[0]["text"]), out
+    # A file the person never named and no tool found this turn is refused before anything is pressed.
+    return out["status"] == "refused" and not play.got("/api/avatar") and not play.cards, out
 
 
 async def alert(play: Files) -> tuple[bool, dict]:
@@ -167,7 +164,7 @@ async def leave(play: Files) -> tuple[bool, dict]:
 
 
 # Each check, with its cards' answers in order.
-CHECKS = {"named": (named, ["yes", "yes"]), "chosen": (chosen, [["头像.txt"]]), "alert": (alert, ["yes", "yes"]),
+CHECKS = {"named": (named, ["yes", "yes"]), "chosen": (chosen, []), "alert": (alert, ["yes", "yes"]),
           "confirm": (confirm, ["yes"]), "coupon": (coupon, ["no"]), "rules": (rules, ["no"]),
           "code": (code, ["yes", "no"]), "leave": (leave, ["no", "yes"])}
 

@@ -75,6 +75,8 @@ async def drive(hands, plan: list) -> dict:
     lines, noticed, status = [], [], "done"
     for item in plan:
         seen = await hands.look()
+        # What the page did by itself between two entries (an alert after a save went out) comes with the look.
+        lines += [seen["held"]] if seen.get("held") else []
         try:
             actions = item(seen["state"], "")
         except AttributeError:
