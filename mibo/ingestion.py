@@ -860,8 +860,7 @@ class ContentIngestion:
             "max_tokens": VISION_READ_TOKENS,
             "temperature": 0.3,
         }
-        # Hidden reasoning off, and K2 at the one temperature it takes that way.
-        self._thinking_off(payload, url, k2_temperature=True)
+        self._thinking_off(payload, url)
         body = await self._post_chat(url, self.vision_api_key, payload, timeout=30, retries=VISION_RETRIES)
         return body if isinstance(payload["messages"][0]["content"], list) else None
 

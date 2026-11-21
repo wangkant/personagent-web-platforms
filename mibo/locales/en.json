@@ -1176,6 +1176,7 @@
     "dmHelp": "Used for one-to-one chats; must be on the main model's service. Empty: the main model.",
     "contextWindow": "Context window (tokens)",
     "contextWindowHost": "Empty: {n}, as the service lists it.",
+    "contextWindowCatalog": "Empty: {n}, as the public model catalogue (models.dev) lists it.",
     "contextWindowLearned": "Empty: {n}, as the service's error message stated.",
     "contextWindowAssumed": "The service does not state this model's context window. Empty: {n} is assumed; enter the figure from the model's documentation.",
     "save": "Save",

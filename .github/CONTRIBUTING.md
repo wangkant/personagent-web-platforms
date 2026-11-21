@@ -63,7 +63,7 @@ Paths are under `mibo/` unless noted.
 | Area | Where |
 |---|---|
 | App, window and Settings | `cli.py`, `welcome.py` (local page, token, API), `window.py`, `static/welcome/`, `panels/` (one module per Settings section) |
-| Character and chat | `agent.py`, `character.py`, `dm.py`, `turns.py`, `prompt.py`, `prompts.py`, `llm.py`, `endpoints.py`, `abilities.py` (what the model can do, measured by probes) |
+| Character and chat | `agent.py`, `character.py`, `dm.py`, `turns.py`, `prompt.py`, `prompts.py`, `llm.py`, `endpoints.py`, `abilities.py` (what the model can do, measured by probes), `modelcatalog.py` (what the bundled models.dev snapshot lists for it) |
 | Memory | `person.py`, `consolidate.py`, `memory.py`, `memstore.py`, `chatlog.py`, `pastchats.py`, `retrieval.py`, `ranking.py`, `embeddings.py` |
 | Recommendations and walks | `recommend.py`, `taste.py`, `pacing.py`, `roam.py`, `library.py`, `today.py`, `sources/` |
 | Web and built-in browser | `web/`, `browser.py`, `browsed.py`, `signwatch.py`, `installed_browser.py`, `search.py`, `ingestion.py` |
@@ -101,8 +101,9 @@ The interface ships in ten languages: English, 简体中文, 繁體中文, 日�
 A release is a tag on `main`, built into the Windows installer and published as a GitHub Release. There is no PyPI package. Only the maintainer cuts a release.
 
 1. Set the version in `pyproject.toml` and `mibo/__init__.py`; a test fails if they differ.
-2. In `CHANGELOG.md`, rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD` and add an empty `## [Unreleased]` above it. That section becomes the release notes.
-3. Merge to `main`, wait for CI, then tag:
+2. Refresh the model catalogue with `python tools/modelcatalog.py`: it downloads models.dev's `api.json`, keeps the services the provider list in Settings offers, and writes `mibo/modelcatalog.json` with the day and sha256. Commit it if it changed; the line it prints names the Settings services the catalogue does not hold.
+3. In `CHANGELOG.md`, rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD` and add an empty `## [Unreleased]` above it. That section becomes the release notes.
+4. Merge to `main`, wait for CI, then tag:
 
    ```bash
    git tag vX.Y.Z

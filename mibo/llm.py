@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 
 import openai
 
-from . import abilities, context, schedule_tool, spend, transport
+from . import abilities, context, modelcatalog, schedule_tool, spend, transport
 from .endpoints import (PROBLEMS, adapt_rejected_payload, chat_completions_url, endpoint_for,
                         model_problem, without_pictures)
 from .usage import USAGE_FILE, UsageBook
@@ -38,22 +38,12 @@ def purpose(label: str):
         _call_purpose.reset(token)
 
 
-# Hosts known to take or refuse DeepSeek's `thinking` switch; any other is
-# asked by its first thinking-off call and the answer remembered.
-# Kimi K3 refuses it where K2 took it, and Claude 5 models differ, so
-# Moonshot and Anthropic are asked.
-_THINKING_HOSTS = ("deepseek.com", "bigmodel.cn", "z.ai", "volces.com",
-                   "bytepluses.com")
-# Hosts whose switch is Qwen's `enable_thinking` (DashScope, SiliconFlow,
-# Qianfan, Tencent TokenHub): they are sent that instead.
+# Whether a model reasons and how far it can be lowered is the catalogue's (modelcatalog.py) or learned; the
+# spelling of the switch is not in the catalogue. These hosts spell it as Qwen's `enable_thinking` (DashScope,
+# SiliconFlow, Qianfan, Tencent TokenHub): a host that ignores DeepSeek's `thinking` looks to the check as if it
+# took it, so this spelling cannot be learned from an answer.
 _ENABLE_THINKING_HOSTS = ("aliyuncs.com", "siliconflow.cn", "siliconflow.com",
                           "baidubce.com", "tencentmaas.com", "tencentcloudmaas.com")
-_NO_THINKING_HOSTS = ("openai.com", "groq.com", "googleapis.com",
-                      "openrouter.ai", "mistral.ai", "x.ai") + _ENABLE_THINKING_HOSTS
-# Hosts where reasoning is lowered with `reasoning_effort`, and the lowest
-# value each documents for all its models (OpenAI's older lines refuse "none"
-# and are moved to "low"). Gemini 3 and 4 and Grok cannot switch it off.
-_EFFORT_HOSTS = (("openai.com", "none"), ("googleapis.com", "low"), ("x.ai", "low"))
 
 # Words in an error that put the account, not the request, at fault.
 _BILLING_WORDS = ("payment required", "insufficient", "balance", "quota",
@@ -69,31 +59,22 @@ def _on_host(host: str, domains: tuple) -> bool:
     return any(host == d or host.endswith("." + d) for d in domains)
 
 
-def thinking_off(payload: dict, url: str, takes_thinking, *,
-                 k2_temperature: bool = False) -> dict:
+def thinking_off(payload: dict, url: str, takes_thinking, lowest: str = "") -> dict:
     """Ask the model behind `url` to skip hidden reasoning, in the spellings
     that endpoint accepts. `takes_thinking` is what is known of it and
     DeepSeek's `thinking` switch; None sends the switch to find out, so only
-    a caller that survives its refusal (`_post_chat`) passes None.
-    `k2_temperature` also moves a K2 model to the one temperature it answers
-    at with thinking off; a caller that chose its temperature leaves it out."""
-    host = _host(url)
-    model = str(payload.get("model") or "").lower()
-    if _on_host(host, _ENABLE_THINKING_HOSTS):
+    a caller that survives its refusal (`_post_chat`) passes None. `lowest` is
+    the effort that lowers a model with no switch (modelcatalog.lowest_effort)."""
+    router = "openrouter.ai" in (url or "")
+    if _on_host(_host(url), _ENABLE_THINKING_HOSTS):
         payload["enable_thinking"] = False
-    elif takes_thinking is not False:
+    elif takes_thinking is not False and not router:
         payload["thinking"] = {"type": "disabled"}
-        if k2_temperature and "k2" in model:
-            payload["temperature"] = 0.6
-    effort = next((low for domain, low in _EFFORT_HOSTS if _on_host(host, (domain,))), "")
-    # Kimi K3 always reasons, at "max" unless told; K2 took `thinking` and refuses an effort.
-    if not effort and takes_thinking is False and _on_host(host, ("moonshot.cn", "moonshot.ai")) and "k2" not in model:
-        effort = "low"
-    if effort:
-        payload["reasoning_effort"] = effort
-    if "openrouter.ai" in (url or ""):
-        # The exclude/max_tokens form is 400-rejected by some upstreams.
+    if router:
+        # OpenRouter's own switch for every model; the exclude/max_tokens form is 400-rejected by some upstreams.
         payload["reasoning"] = {"enabled": False}
+    elif lowest:
+        payload["reasoning_effort"] = lowest
     return payload
 
 
@@ -110,16 +91,6 @@ def answer_text(message: dict) -> str:
         content = "".join(str(p.get("text") or "") for p in content
                           if isinstance(p, dict) and p.get("type") == "text")
     return _THINK_RE.sub("", str(content)).strip()
-
-
-def known_to_take_thinking(url: str, model: str) -> bool:
-    """For a caller that cannot learn from a refusal (the doctor's probes): is
-    `thinking` known to be taken here? By a listed host, and by a K2 model
-    wherever it is served."""
-    host = _host(url)
-    if _on_host(host, _NO_THINKING_HOSTS):
-        return False
-    return _on_host(host, _THINKING_HOSTS) or "k2" in (model or "").lower()
 
 
 def _provider_message(e: BaseException) -> str:
@@ -197,26 +168,26 @@ class ModelCalls:
 
     def _thinking_verdict(self, url: str, model: str):
         """Whether `model` at `url` takes DeepSeek's `thinking` switch: True,
-        False, or None when unknown (others 400 it rather than ignore it)."""
+        False, or None when unknown (others 400 it rather than ignore it). What
+        the endpoint answered wins; then the catalogue: a switch for a model with
+        one, none for a model that does not reason or is lowered by effort."""
         verdict = self._api_quirks.get(("thinking", url, model))
         if verdict is not None:
             return verdict
-        host = _host(url)
-        if _on_host(host, _THINKING_HOSTS):
-            return True
+        line = modelcatalog.entry(url, model)
+        if line is not None:
+            return modelcatalog.toggles(line)
         if (self.llm_fallback_thinking
-                and host == _host(self.llm_fallback_base_url or self.base_url)):
+                and _host(url) == _host(self.llm_fallback_base_url or self.base_url)):
             return True
-        if _on_host(host, _NO_THINKING_HOSTS):
-            return False
         return None
 
-    def _thinking_off(self, payload: dict, url: str, *,
-                      k2_temperature: bool = False) -> dict:
+    def _thinking_off(self, payload: dict, url: str) -> dict:
         """`thinking_off` with what this endpoint has shown so far; an unknown
         one is sent `thinking`, and `_post_chat` remembers its answer."""
-        return thinking_off(payload, url, self._thinking_verdict(
-            url, str(payload.get("model") or "")), k2_temperature=k2_temperature)
+        model = str(payload.get("model") or "")
+        return thinking_off(payload, url, self._thinking_verdict(url, model),
+                            modelcatalog.lowest_effort(modelcatalog.entry(url, model)))
 
     def _apply_quirks(self, url: str, payload: dict) -> None:
         """Spell `payload` the way `url` has shown it accepts."""
@@ -228,7 +199,7 @@ class ModelCalls:
             payload.pop("thinking", None)
         if ("max_tokens", url, model) in quirks and "max_tokens" in payload:
             payload["max_completion_tokens"] = payload.pop("max_tokens")
-        if ("temperature", url, model) in quirks:
+        if ("temperature", url, model) in quirks or modelcatalog.fixed_temperature(url, model):
             payload.pop("temperature", None)
         if ("reasoning", url, model) in quirks and payload.get("reasoning") == {"enabled": False}:
             payload["reasoning"] = {"effort": "minimal"}

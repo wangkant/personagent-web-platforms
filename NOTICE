@@ -66,6 +66,9 @@ Code taken from other projects, under the licences they were released with:
   list of services: MIT License, Copyright (c) 2025 Stephen Crowe. The screen,
   D-Bus and AT-SPI start in `.github/workflows/xplat-cua.yml` follows the
   xa11y/setup-a11y action: MIT License, Copyright (c) 2026 xa11y.
+- `mibo/modelcatalog.json` is a trimmed snapshot of the models.dev catalogue
+  (anomalyco/models.dev, `https://models.dev/api.json`; its date and sha256 are in
+  the file): MIT License, Copyright (c) 2025 models.dev.
 
 The MIT License, for the parts above that carry it:
 

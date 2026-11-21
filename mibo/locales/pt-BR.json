@@ -1175,6 +1175,7 @@
     "dmHelp": "Usado em conversas individuais; precisa estar no serviço do modelo principal. Vazio: o modelo principal.",
     "contextWindow": "Janela de contexto (tokens)",
     "contextWindowHost": "Vazio: {n}, conforme informado pelo serviço.",
+    "contextWindowCatalog": "Vazio: {n}, conforme o catálogo público de modelos (models.dev).",
     "contextWindowLearned": "Vazio: {n}, conforme a mensagem de erro do serviço.",
     "contextWindowAssumed": "O serviço não informa a janela de contexto deste modelo. Vazio: supõe-se {n}; informe o valor da documentação do modelo.",
     "save": "Salvar",

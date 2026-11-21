@@ -1,8 +1,8 @@
 """What the model calls spent, the account's balance, and the person's monthly limit.
 
     month_view(runtime, prices, now)   tokens and cost today and this month, split by GROUPS
-    await prices_for(base, key)        {model: (input, output, cached input)} in USD per token,
-                                       from the service's /models listing where it carries pricing
+    prices_of(values, models)          {model: (input, output, cached input)} in USD per token, as the public
+                                       model catalogue lists them for the saved services (modelcatalog.py)
     await balance(values)              the balance or remaining quota from the service's own
                                        documented endpoint (BALANCE), or None where it has none
     limit_state(runtime, view)         the limit, how much of it is used, and whether the
@@ -10,7 +10,7 @@
     paused_for(caller, purpose)        True for that background work while the limit is reached
 
 The cost is the one the service reported per call (OpenRouter's usage.cost) or
-tokens times the service's own listed price; with neither, tokens only.
+tokens times the catalogue's price; with neither, tokens only.
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from pathlib import Path
 
 import openai
 
-from . import transport, usage
+from . import modelcatalog, transport, usage
 from .endpoints import chat_completions_url
 from .storage import FileLock, atomic_write_text
 
@@ -40,12 +40,10 @@ GROUPS = (("chat", ("reply", "gate", "search", "tools", "proactive")),
 UNASKED = ("memory", "learning", "roam", "proactive")
 NEAR = 0.8
 BALANCE_EVERY_S = 180
-PRICES_EVERY_S = 3600
 STATE_EVERY_S = 30
 TIMEOUT_S = 8
 
 _balances: dict[tuple, tuple[float, dict | None]] = {}
-_prices: dict[tuple, tuple[float, dict]] = {}
 _states: dict[Path, tuple[float, bool]] = {}
 
 
@@ -155,31 +153,15 @@ def month_view(runtime, prices: dict | None = None, now: float | None = None) ->
     return {"today": _out(totals["today"]), "month": _out(totals["month"]), "currency": "USD"}
 
 
-async def prices_for(base: str, key: str) -> dict:
-    """{model: (input, output, cached input or None)} per token, from /models where the
-    listing carries prices (OpenRouter's shape); {} where it carries none."""
-    slot = (base.rstrip("/"), key[-8:])
-    kept = _prices.get(slot)
-    if kept and time.monotonic() < kept[0]:
-        return kept[1]
-    found: dict = {}
-    try:
-        rows = [r.to_dict() for r in (await transport.client(chat_completions_url(base), key).models.list(
-            timeout=TIMEOUT_S * 2)).data]
-    except openai.APIError:
-        rows = []
-    for row in rows:
-        pricing = row.get("pricing")
-        if not isinstance(pricing, dict):
-            continue
-        try:
-            entry = (float(pricing["prompt"]), float(pricing["completion"]),
-                     float(pricing["input_cache_read"]) if pricing.get("input_cache_read") not in (None, "") else None)
-        except (KeyError, TypeError, ValueError):
-            continue
-        if min(entry[0], entry[1]) >= 0:
-            found[str(row.get("id"))] = entry
-    _prices[slot] = (time.monotonic() + (PRICES_EVERY_S if rows is not None else 60), found)
+def prices_of(values: dict, models: set) -> dict:
+    """{model: (input, output, cached input or None)} per token for the models used, at the saved service or the
+    fallback's own, as the catalogue lists them."""
+    bases = [values.get(k, "").strip() for k in ("LLM_BASE_URL", "LLM_FALLBACK_BASE_URL")]
+    found = {}
+    for model in models:
+        price = next((p for p in (modelcatalog.price(b, model) for b in bases if b) if p), None)
+        if price:
+            found[model] = price
     return found
 
 
@@ -385,16 +367,13 @@ async def view(home: Path, values: dict, *, fresh: bool = False) -> dict:
     """Everything the usage popover and the Settings section show."""
     from . import drafting
     runtime = drafting.usage_path(Path(home), values).parent
-    base, key = values.get("LLM_BASE_URL", "").strip(), values.get("LLM_API_KEY", "")
+    base = values.get("LLM_BASE_URL", "").strip()
     known = service_of(base)
-    prices: dict = {}
-    if base and key and not (known and not known.needs_key):
-        prices = await prices_for(base, key)
     days = usage.merged(usage.load(runtime / usage.USAGE_FILE), usage.load(runtime / usage.PAGE_USAGE_FILE))
     used_models = {m for models in days.values() for m in models}
+    prices = prices_of(values, used_models)
     if prices:
         await asyncio.to_thread(keep_prices, runtime, prices, used_models)
-        prices = {m: p for m, p in prices.items() if m in used_models}
     else:
         prices = None
     month = month_view(runtime, prices)

@@ -1167,6 +1167,7 @@
     "dmHelp": "일대일 채팅에 사용하며, 기본 모델과 같은 서비스에 있어야 합니다. 비워 두면 기본 모델을 사용합니다.",
     "contextWindow": "컨텍스트 창(토큰)",
     "contextWindowHost": "비워 두면 서비스가 공개한 {n}을(를) 사용합니다.",
+    "contextWindowCatalog": "비워 두면 공개 모델 카탈로그(models.dev)에 기재된 {n}을(를) 사용합니다.",
     "contextWindowLearned": "비워 두면 서비스 오류 메시지에 표시된 {n}을(를) 사용합니다.",
     "contextWindowAssumed": "서비스가 이 모델의 컨텍스트 창을 공개하지 않습니다. 비워 두면 임시값 {n}(으)로 계산합니다. 모델 설명서에 따라 입력하세요.",
     "save": "저장",

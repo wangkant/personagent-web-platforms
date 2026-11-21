@@ -1,5 +1,5 @@
 """What every test shares: a home of its own, no network past this computer, no real credential store
-or window, the markers, and coroutine tests."""
+or window, the small model catalogue in data/, the markers, and coroutine tests."""
 from __future__ import annotations
 
 import asyncio
@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from mibo import home as _home
+from mibo import modelcatalog as _modelcatalog
 from mibo import paths as _paths
 from mibo.shell import run as _shell_run
 
@@ -50,6 +51,12 @@ def _one_home_at_a_time(tmp_path_factory: pytest.TempPathFactory):
     with pytest.MonkeyPatch.context() as real:
         real.setattr(os, "name", SYSTEM)
         _paths.use_home(root)
+
+
+@pytest.fixture(autouse=True)
+def _small_model_catalogue(monkeypatch):
+    """Tests read the small model catalogue in data/, not the snapshot a release refreshes."""
+    monkeypatch.setattr(_modelcatalog, "PATH", SUITE / "data" / "modelcatalog.json")
 
 
 def _is_ip(host: str) -> bool:

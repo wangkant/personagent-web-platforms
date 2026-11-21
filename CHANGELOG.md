@@ -18,3 +18,4 @@ Mibo has not been released yet. On `main`:
 - **Files and commands**: granted folders only, Recycle Bin deletes, per-turn undo.
 - **Extensions**: skills and MCP connectors with markets; tokens in the system credential store.
 - **Also**: scheduled tasks, search over past chats, ten interface languages.
+- **Models**: a model the bundled models.dev catalogue lists answers its first message without waiting for the ability check, which confirms it in the background; its window and its price come from the catalogue, so the usage popover shows money for DeepSeek, Qwen, GLM, Kimi, MiniMax and the other listed services instead of tokens only.

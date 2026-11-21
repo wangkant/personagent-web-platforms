@@ -9,7 +9,7 @@ from pathlib import Path
 
 from fastapi import Request
 
-from .. import abilities, drafting, spend
+from .. import abilities, drafting, modelcatalog, spend
 from .. import setup_wizard as sw
 from ..endpoints import chat_completions_url, model_problem
 from . import models as listing
@@ -56,7 +56,10 @@ def check_at_start(workspace) -> None:
 
 
 async def measured(url: str, model: str, within: float) -> None:
-    """Back when the model's check under way has ended, or after `within` seconds; at once when none runs."""
+    """Back when the model's check under way has ended, or after `within` seconds; at once when none runs or the
+    catalogue lists the model, whose check then goes on beside the reply."""
+    if modelcatalog.entry(url, model):
+        return
     task = _checks.get((url, model))
     for _ in range(int(within / 0.25)):
         if task is None or task.done():
@@ -73,7 +76,7 @@ def state(workspace) -> dict:
     runtime = _runtime(workspace)
     rec = abilities.record(runtime, url, model)
     task = _checks.get((url, model))
-    if rec is None and task is None:
+    if abilities.measured(runtime, url, model) is None and task is None:
         # Saved or switched elsewhere, or a first start with nothing kept for it: measured once.
         task = _start_check(workspace, url, model)
     known = sw.provider_for_base(base)

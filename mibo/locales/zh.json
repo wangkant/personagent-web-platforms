@@ -1186,6 +1186,7 @@
     "dmHelp": "用于一对一私聊，须与主模型在同一服务上。留空则使用主模型。",
     "contextWindow": "上下文窗口（tokens）",
     "contextWindowHost": "留空则采用服务商公布的 {n}。",
+    "contextWindowCatalog": "留空则采用公开模型目录（models.dev）收录的 {n}。",
     "contextWindowLearned": "留空则采用服务商报错信息中给出的 {n}。",
     "contextWindowAssumed": "服务商未公布该模型的上下文窗口，留空则按假定值 {n} 计算。请按模型说明填写。",
     "save": "保存",

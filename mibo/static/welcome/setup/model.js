@@ -30,7 +30,8 @@
     ["CONTEXT_WINDOW", "contextWindow"],
   ];
   // The help under the context window, by where the window in use when it is blank comes from (context.window).
-  const WINDOW_HELP = { host: "contextWindowHost", error: "contextWindowLearned", assumed: "contextWindowAssumed" };
+  const WINDOW_HELP = { host: "contextWindowHost", catalogue: "contextWindowCatalog", error: "contextWindowLearned",
+                        assumed: "contextWindowAssumed" };
   // A failed save or test, as a state of the top card.
   const STATE_OF = {
     key_rejected: "key", model_no_balance: "no_balance", model_not_found: "not_found", model_limited: "limited",

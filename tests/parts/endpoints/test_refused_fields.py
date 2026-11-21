@@ -1,13 +1,12 @@
 """Which field a service's 400 refuses (mibo/endpoints.py adapt_rejected_payload), and how each service is asked to
 skip hidden reasoning (mibo/llm.py thinking_off): a field is dropped or respelled only when the error names the field
-itself, never for its value or a model name that contains it; a caller that cannot learn from a refusal sends a
-switch only where it is known to be taken."""
+itself, never for its value or a model name that contains it; and the off switch in each service's spelling."""
 from __future__ import annotations
 
 import pytest
 
 from mibo.endpoints import adapt_rejected_payload
-from mibo.llm import known_to_take_thinking, thinking_off
+from mibo.llm import thinking_off
 
 
 @pytest.mark.parametrize("said, model", [("Model does not exist: Qwen3-235B-Thinking", "Qwen3-235B-Thinking"),
@@ -41,37 +40,18 @@ def test_a_refused_value_keeps_its_field_and_only_a_switched_off_reasoning_is_re
     assert adapt_rejected_payload(lowest, "Reasoning is mandatory") == "" and lowest["reasoning"] == {"effort": "minimal"}
 
 
-def switched(model: str, url: str) -> dict:
-    """What a caller that keeps no memory (the doctor's probes) sends to skip reasoning."""
-    return thinking_off({"model": model, "temperature": 0.3}, url, known_to_take_thinking(url, model),
-                        k2_temperature=True)
-
-
-def test_a_call_that_cannot_learn_sends_a_switch_only_where_it_is_known_to_be_taken():
+def test_the_switch_off_is_spelled_as_each_service_takes_it():
     off = {"type": "disabled"}
-    assert switched("vision-model", "https://open.bigmodel.cn/api/paas/v4")["thinking"] == off
-    assert switched("vision-model", "https://vision.example/v1") == {"model": "vision-model", "temperature": 0.3}
-    # A K2 model takes it wherever it is served, at the one temperature it answers at that way.
-    for url in ("https://api.moonshot.cn/v1", "https://gateway.example/v1"):
-        assert switched("kimi-k2.6", url) == {"model": "kimi-k2.6", "temperature": 0.6, "thinking": off}
-    # OpenRouter ignores `thinking` rather than refusing it, so it gets its own switch, whatever the model.
-    for model in ("qwen/qwen3.7-flash", "moonshotai/kimi-k2"):
-        assert switched(model, "https://openrouter.ai/api/v1") == {"model": model, "temperature": 0.3,
-                                                                    "reasoning": {"enabled": False}}
-    assert switched("moonshotai/kimi-k2-instruct", "https://api.groq.com/openai/v1") == {
-        "model": "moonshotai/kimi-k2-instruct", "temperature": 0.3}
+    # Unknown or known to take it: DeepSeek's switch; known to refuse it: nothing.
+    assert thinking_off({"model": "m"}, "https://gateway.example/v1", None) == {"model": "m", "thinking": off}
+    assert thinking_off({"model": "m"}, "https://gateway.example/v1", False) == {"model": "m"}
+    # A model with efforts and no switch is lowered by the effort the catalogue gives (modelcatalog.lowest_effort).
+    assert thinking_off({"model": "m"}, "https://api.openai.com/v1", False, "none") == {
+        "model": "m", "reasoning_effort": "none"}
+    # OpenRouter ignores `thinking` rather than refusing it, so it gets its own switch, whatever is known.
+    for known in (None, True, False):
+        assert thinking_off({"model": "m"}, "https://openrouter.ai/api/v1", known, "none") == {
+            "model": "m", "reasoning": {"enabled": False}}
     # DashScope and SiliconFlow take Qwen's own switch.
-    assert switched("qwen3.6-plus", "https://dashscope.aliyuncs.com/compatible-mode/v1")["enable_thinking"] is False
-
-
-def test_k2s_one_temperature_goes_only_to_a_caller_that_asks_and_only_with_the_switch():
-    moonshot = "https://api.moonshot.cn/v1/chat/completions"
-    off = {"type": "disabled"}
-    assert thinking_off({"model": "kimi-k2.6", "temperature": 0.3}, moonshot, True) == {
-        "model": "kimi-k2.6", "temperature": 0.3, "thinking": off}
-    assert thinking_off({"model": "kimi-k2.6"}, moonshot, True, k2_temperature=True) == {
-        "model": "kimi-k2.6", "temperature": 0.6, "thinking": off}
-    assert thinking_off({"model": "kimi-k2.6", "temperature": 0.3}, moonshot, False, k2_temperature=True) == {
-        "model": "kimi-k2.6", "temperature": 0.3}
-    assert thinking_off({"model": "chat-model", "temperature": 0}, moonshot, True,
-                        k2_temperature=True)["temperature"] == 0
+    assert thinking_off({"model": "qwen3.6-plus"}, "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        None)["enable_thinking"] is False

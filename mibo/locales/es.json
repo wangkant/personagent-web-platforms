@@ -1175,6 +1175,7 @@
     "dmHelp": "Se usa en los chats individuales; debe estar en el servicio del modelo principal. Vacío: el modelo principal.",
     "contextWindow": "Ventana de contexto (tokens)",
     "contextWindowHost": "Vacío: {n}, según indica el servicio.",
+    "contextWindowCatalog": "Vacío: {n}, según el catálogo público de modelos (models.dev).",
     "contextWindowLearned": "Vacío: {n}, según el mensaje de error del servicio.",
     "contextWindowAssumed": "El servicio no indica la ventana de contexto de este modelo. Vacío: se supone {n}; introduzca el valor de la documentación del modelo.",
     "save": "Guardar",

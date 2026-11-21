@@ -9,8 +9,11 @@ The answers and the refusals those calls taught (llm's quirks) are kept in
 <runtime>/model-abilities.json, keyed by the chat URL and the model, so the
 service process and the page read the same answers after a restart. Ordinary calls add what they measure to the
 record (note_learned): the ratio of reported to estimated tokens and the window an overflow error stated (context.py).
+A model the public catalogue lists (modelcatalog.py) works from the catalogue's line until its check has run, and
+the check's answers win where they differ.
 
-    record(runtime, url, model)       the measured abilities, or None before a check
+    record(runtime, url, model)       the abilities: measured over the catalogue's, or None for neither
+    measured(runtime, url, model)     the check's own record, or None before a check
     can(runtime, url, model, name)    "yes", "no", "unstable", or "" when not measured;
                                       name is one of NAMES (tools, pictures, json, thinking)
     efforts(rec)                      the thinking levels the composer offers ([] for none)
@@ -35,6 +38,7 @@ import time
 import zlib
 from pathlib import Path
 
+from . import modelcatalog
 from .endpoints import chat_completions_url
 from .storage import FileLock, atomic_write_text
 
@@ -112,11 +116,22 @@ def runtime_of(caller) -> Path | None:
 
 # ------------------------------------------------------------------ reading --
 
-def record(runtime, url: str, model: str) -> dict | None:
+def measured(runtime, url: str, model: str) -> dict | None:
     if runtime is None:
         return None
     rec = (_read(runtime).get("models") or {}).get(key_of(url, model))
     return rec if isinstance(rec, dict) else None
+
+
+def record(runtime, url: str, model: str) -> dict | None:
+    rec = measured(runtime, url, model)
+    seed = modelcatalog.abilities(url, model)
+    if seed is None:
+        return rec
+    if rec is None:
+        return {**seed, "url": url, "model": model}
+    # What the check found wins; an answer it could not get ("") keeps the catalogue's.
+    return {**seed, **{k: v for k, v in rec.items() if v != ""}}
 
 
 def can(runtime, url: str, model: str, name: str) -> str:
@@ -196,7 +211,7 @@ def seed(caller, quirks: dict) -> None:
 def note_quirk(caller, url: str, model: str, field: str, value) -> None:
     """Keep a refusal learned during ordinary calls with the model's record."""
     runtime = runtime_of(caller)
-    if runtime is None or caller.__dict__.get("_abilities_fresh") or not record(runtime, url, model):
+    if runtime is None or caller.__dict__.get("_abilities_fresh") or not measured(runtime, url, model):
         return
 
     def edit(data):
@@ -211,9 +226,9 @@ def note_quirk(caller, url: str, model: str, field: str, value) -> None:
 
 def note_learned(caller, url: str, model: str, **found) -> None:
     """Keep what ordinary calls measured (context.py: `token_ratio`, `context_error`) with the model's record;
-    a check measures afresh and drops it."""
+    a check measures the ratio afresh and keeps the window an overflow stated."""
     runtime = runtime_of(caller)
-    if runtime is None or caller.__dict__.get("_abilities_fresh") or not record(runtime, url, model):
+    if runtime is None or caller.__dict__.get("_abilities_fresh") or not measured(runtime, url, model):
         return
 
     def edit(data):
@@ -333,12 +348,11 @@ async def _post(caller, url: str, key: str, payload: dict) -> dict | None:
 def _params_for(caller, url: str, model: str) -> tuple[str, ...]:
     """The spellings of thinking on to try, the host's own first."""
     from . import llm
-    host = llm._host(url)
-    if llm._on_host(host, llm._ENABLE_THINKING_HOSTS):
+    if llm._on_host(llm._host(url), llm._ENABLE_THINKING_HOSTS):
         return ("enable_thinking",)
     if "openrouter.ai" in url:
         return ("reasoning",)
-    if llm._on_host(host, llm._THINKING_HOSTS) or caller._thinking_verdict(url, model):
+    if caller._thinking_verdict(url, model):
         return ("thinking", "reasoning_effort")
     return ("reasoning_effort", "thinking")
 
@@ -458,8 +472,9 @@ async def _measure(caller, url: str, key: str, model: str) -> dict:
                 break
     out["thinking_detail"] = {"reasons": reasons, "off": quiet is not False, "param": param}
     out["thinking"] = "yes" if reasons else ("no" if quiet is not None else "")
-    # The window as the host lists it, one source of the budget's (context.window).
-    out["context"] = await _context(url, key, model)
+    # The window as the host lists it, one source of the budget's (context.window); the catalogue's stands for it.
+    if not modelcatalog.entry(url, model):
+        out["context"] = await _context(url, key, model)
     return out
 
 
@@ -493,6 +508,10 @@ async def check(home: Path, values: dict) -> dict:
         found = await _measure(caller, url, caller.api_key, model)
     learned = [[f, v] for (f, u, m), v in caller._api_quirks.items() if u == url and m == model]
     rec = {"url": url, "model": model, "at": time.time(), **found, "quirks": learned}
+    # The window a server refused at stays, whatever the catalogue or the host's list says.
+    stated = (measured(runtime, url, model) or {}).get("context_error")
+    if stated:
+        rec["context_error"] = stated
     if not any(found.get(n) for n in NAMES):
         # Nothing answered: kept as unmeasured, with why, so the page can say so and offer the check again.
         from .endpoints import model_problem

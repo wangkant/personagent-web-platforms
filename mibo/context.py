@@ -3,7 +3,8 @@ the answer's reserve and a headroom) and token-meter (the last call's own usage 
 changed since) (MIT, NOTICE).
 
     window(rec, setting)            (W, where it came from): the CONTEXT_WINDOW setting, the host's model list, the
-                                    number an overflow error stated, else ASSUMED
+                                    public catalogue (modelcatalog.py), the number an overflow error stated, else
+                                    ASSUMED
     budget(W, level, fixed)         the answer's room, the safety margin, the input limit and the shares of a request
     estimate(payload)               tokens of a chat request by characters, before any calibration
     measured(caller, url, model, payload, usage)
@@ -15,7 +16,8 @@ changed since) (MIT, NOTICE).
                                     when it comes in (dsh spill-policy), then past the ceiling the older results and
                                     the pictures tools returned cut once each (dsh compaction-tool-result-pruner)
 
-The window is measured, never looked up by a model's name; counts are the endpoint's own usage.prompt_tokens.
+The window is stated by the host, the catalogue or the server's own error, never by a table kept here; counts are the
+endpoint's own usage.prompt_tokens.
 """
 from __future__ import annotations
 
@@ -26,7 +28,7 @@ from dataclasses import dataclass
 # W when nothing states it; Settings says it is assumed.
 ASSUMED = 32768
 # Where W came from, in the order the sources are asked.
-SOURCES = ("setting", "host", "error", "assumed")
+SOURCES = ("setting", "host", "catalogue", "error", "assumed")
 # Tokens a character (DeepSeek's published densities, checked on the bench) and each message's framing.
 CJK_TOKENS, OTHER_TOKENS, MESSAGE_TOKENS = 0.6, 0.245, 4
 # A picture until the endpoint's count of one is known.
@@ -47,14 +49,17 @@ FIT_TO = 0.7
 
 
 def window(rec: dict | None, setting: int = 0) -> tuple[int, str]:
-    """(W, its source): the person's setting, the host's model list, the number an overflow error stated, else
-    ASSUMED. A stated number below the host's wins, since that server refused at it."""
+    """(W, its source): the person's setting, the host's model list, the catalogue's figure, the number an overflow
+    error stated, else ASSUMED. A stated number below the host's or the catalogue's wins, since that server refused
+    at it."""
     rec = rec or {}
-    host, error = int(rec.get("context") or 0), int(rec.get("context_error") or 0)
+    host, listed = int(rec.get("context") or 0), int(rec.get("context_catalogue") or 0)
+    error = int(rec.get("context_error") or 0)
     if setting > 0:
         return setting, "setting"
-    if host and not 0 < error < host:
-        return host, "host"
+    known, source = (host, "host") if host else (listed, "catalogue")
+    if known and not 0 < error < known:
+        return known, source
     if error:
         return error, "error"
     return ASSUMED, "assumed"

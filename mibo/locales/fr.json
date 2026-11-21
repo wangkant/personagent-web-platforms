@@ -1175,6 +1175,7 @@
     "dmHelp": "Utilisé pour les discussions en tête-à-tête ; doit être sur le service du modèle principal. Vide : le modèle principal.",
     "contextWindow": "Fenêtre de contexte (jetons)",
     "contextWindowHost": "Vide : {n}, selon le service.",
+    "contextWindowCatalog": "Vide : {n}, selon le catalogue public de modèles (models.dev).",
     "contextWindowLearned": "Vide : {n}, selon le message d'erreur du service.",
     "contextWindowAssumed": "Le service n'indique pas la fenêtre de contexte de ce modèle. Vide : {n} est supposé ; saisissez la valeur indiquée dans la documentation du modèle.",
     "save": "Enregistrer",

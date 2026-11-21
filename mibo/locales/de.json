@@ -1175,6 +1175,7 @@
     "dmHelp": "Wird für Einzelchats verwendet; muss beim Dienst des Hauptmodells liegen. Leer: das Hauptmodell.",
     "contextWindow": "Kontextfenster (Tokens)",
     "contextWindowHost": "Leer: {n}, wie der Dienst angibt.",
+    "contextWindowCatalog": "Leer: {n}, wie der öffentliche Modellkatalog (models.dev) angibt.",
     "contextWindowLearned": "Leer: {n}, wie die Fehlermeldung des Dienstes angab.",
     "contextWindowAssumed": "Der Dienst gibt das Kontextfenster dieses Modells nicht an. Leer: {n} wird angenommen; tragen Sie den Wert aus der Dokumentation des Modells ein.",
     "save": "Speichern",
