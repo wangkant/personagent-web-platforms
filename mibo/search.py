@@ -16,7 +16,6 @@ from keyring.errors import KeyringError
 
 from . import lookup_need
 from . import paths
-from . import recommend
 from . import schedule_tool
 from . import secretstore
 from . import today
@@ -122,41 +121,6 @@ TOOLS = [
                                                           "the outline a read of it gave"},
             "look_for": {"type": "string", "description": "words to find in a long page, besides their question"}},
             "required": ["url"]}}},
-    {"type": "function", "function": {
-        "name": "note_reaction",
-        "description": (
-            "Keep what they said about a find in <finds_in_this_chat> (\"this\" or a quoted card), so later "
-            "finds suit them: whether they liked it, and what about it."),
-        "parameters": {"type": "object", "properties": {
-            "id": {"type": "string", "description": "the find's id"},
-            "liked": {"type": "boolean"},
-            "about": {"type": "string", "enum": list(recommend.ABOUT),
-                      "description": "what they meant; \"不喜欢\" with no reason is the thing, length only for "
-                                     "\"太长\""},
-            "words": {"type": "string", "description": "their own words about it, short"}},
-            "required": ["id", "liked", "about"]}}},
-    {"type": "function", "function": {
-        "name": "bring_find",
-        "description": (
-            "Bring them one more find now, shown as a card under your reply: when they ask for another "
-            "recommendation (\"还有别的吗\", \"换一个\"), or turned one down and want "
-            "something else. \"这个不喜欢，换个别的\": turned_down that card, about thing, wish empty. "
-            "\"太长，来个短点的讲历史的\": turned_down that card, about length, wish \"短点的 历史\". Call it "
-            "before any search: it looks in your own library. `wish` is only what they asked for, empty when they "
-            "named nothing, never the topic of the one turned down. A find you name comes from this tool only: "
-            "never from memory or a search. When the library has nothing, the result says so: tell them and offer "
-            "to look on a walk; on yes, call this with look true."),
-        "parameters": {"type": "object", "properties": {
-            "wish": {"type": "string", "description": "the topic they want in Chinese and English (烘焙 baking), "
-                                                      "and 视频 or 文章 when they want a video or an article"},
-            "turned_down": {"type": "string", "description": "the id of the find they just turned down"},
-            "about": {"type": "string", "enum": list(recommend.ABOUT),
-                      "description": "what about it they did not like"},
-            "words": {"type": "string", "description": "their own words about it, short"},
-            "url": {"type": "string", "description": "a page you read with read_page this turn, to share "
-                                                    "it instead"},
-            "look": {"type": "boolean", "description": "true when they said yes to looking on a walk"}},
-            "required": []}}},
     {"type": "function", "function": {
         "name": "read_with_their_session",
         "description": (
@@ -317,9 +281,6 @@ class WebSearch:
             query = " ".join(str(args.get("query") or "").split())[:200]
             if not query:
                 return _fence_search_results("(no query given)")
-            if lookups.bring:
-                # The find is picked: what follows is the reply about it, not a hunt for another.
-                return "(you already picked the find for the card; write your reply about it)"
             lookups.doing("search", query)
             rows = await self._search_rows(query, _ROWS_A_SEARCH)
             tried = [query]
@@ -350,10 +311,6 @@ class WebSearch:
             from .web import pagetext
             given, note = pagetext.give(text, lookups.said, self._page_room(), *_part(args))
             return fence_pages(f"{title}\n{final}\n\n{given}\n\n({note})")
-        if name == "note_reaction":
-            return self._note_reaction(args, lookups)
-        if name == "bring_find":
-            return await self._bring_find(args, lookups)
         # The rest reach the app's own browser: their time is not the turn's.
         lookups.away_since = time.monotonic()
         try:
@@ -492,67 +449,6 @@ class WebSearch:
             lookups.errand_held = outcome["status"]
         logger.info("[Agent] use_browser -> %s after %d model calls", outcome["status"], outcome.get("calls", 0))
         return outcome
-
-    def _note_reaction(self, args: dict, lookups) -> str:
-        """What the person said of a find, kept with the turn; the page records it in the feed (welcome.py)."""
-        from .library import Library
-        ident = str(args.get("id") or "").strip()
-        if Library(today.runtime_of(self)).get(ident) is None:
-            return "(no find with that id)"
-        about = args.get("about") if args.get("about") in recommend.ABOUT else "thing"
-        liked = args.get("liked") is True
-        lookups.feedback.append({"id": ident, "liked": liked, "about": about,
-                                 "words": " ".join(str(args.get("words") or "").split())[:120]})
-        logger.info("[Agent] note_reaction %s liked=%s about=%s", ident, liked, about)
-        return "Kept."
-
-    async def _bring_find(self, args: dict, lookups) -> str:
-        """One find for the card under the reply: a page read this turn, else the library's best that is
-        not like what was turned down and fits the wish."""
-        from .library import Library, item_id
-        from .roam import fence_pages
-        runtime = today.runtime_of(self)
-        wish = " ".join(str(args.get("wish") or "").split())[:80]
-        url = str(args.get("url") or "").strip()
-        if lookups.bring:
-            return "(one find a turn: the card is already the one picked; write your reply about it)"
-        if args.get("look") is True and wish:
-            # A walk for it now, as the chat's "+" asks for one (panels/compose.py); they hear when it is back.
-            from .browsed import _ask
-            sent = await asyncio.to_thread(_ask, runtime.parent, "POST", "/api/compose/wonder", 30, json={"words": wish})
-            lookups.doing("pick", wish)
-            if not sent.get("words"):
-                return "(no walk could be sent now; tell them plainly)"
-            return ("A walk goes out for it " + ("tomorrow, as today's walks are used up" if sent.get("later") else "now")
-                    + ". Tell them in a sentence; the finds come as cards when it is back. No find to name now.")
-        if args.get("turned_down"):
-            self._note_reaction({**args, "id": args["turned_down"], "liked": False}, lookups)
-        # Weak models copy the turned-down find's topic into the wish ("恶役千金 其他"): those words go.
-        disliked = [Library(runtime).get(f["id"]) for f in lookups.feedback if not f["liked"]]
-        wish = " ".join(w for w in re.split(r"[\s/,，、;；]+", wish)
-                        if w and not any(d and w in d.title for d in disliked))
-        lookups.doing("pick", wish)
-        if url:
-            # Only a page read this turn: the library's own finds go through the recommender.
-            read = url in {s["url"] for s in lookups._read}
-            item = Library(runtime).get(item_id(url)) if read else None
-            if item is None:
-                return "(only a page you read with read_page this turn; call it without url for your own finds)"
-        else:
-            avoid = [{"id": f["id"], "about": f["about"]} for f in lookups.feedback if not f["liked"]]
-            chosen = await asyncio.to_thread(recommend.another, runtime, wish, avoid, time.time())
-            logger.info("[Agent] bring_find (%d-char wish) -> %s", len(wish), chosen[1].id if chosen else "nothing")
-            if chosen is None or not chosen[0]["on_wish"]:
-                return (f"Nothing in your library is on {wish or 'that'} yet. Tell them so in a sentence, and offer to "
-                        "go and look for it on a walk. Name no find, make none up, and no links.")
-            item = chosen[1]
-        lookups.bring = item.id
-        length = f"{round(item.length / 60)} min" if item.kind == "video" and item.length else ""
-        facts = " | ".join(v for v in (f"title: {item.title}", item.site, item.kind, length) if v)
-        return ("Picked, and final: the card under your reply is the find below. Write your reply about "
-                "this one, by its title: a sentence of your own on why it is for them. Do not search for "
-                "or name anything else, and no link.\n"
-                + fence_pages(f"{facts}\n{' '.join((item.description or item.text).split())[:400]}"))
 
     def _page_room(self) -> int:
         """Tokens of page one tool result may carry: the reader's room in the reply model's budget

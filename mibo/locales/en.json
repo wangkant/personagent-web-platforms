@@ -555,6 +555,41 @@
     "yesterday": "Yesterday",
     "week": null
   },
+  "reasons": {
+    "chip": {
+      "picked": "Because you picked {name}",
+      "said": "Because you mentioned {name}",
+      "subject": "You often open {name}",
+      "often": "You often open {name}",
+      "opened": "You opened {name} before",
+      "about": "Topic: {name}",
+      "new": "New find",
+      "from": "From {name}"
+    },
+    "browsed": "You opened this page yourself in the built-in browser ({site})",
+    "topic": "On {name}, a topic you picked; from {src}",
+    "like": "On {name}, which you said you like; from {src}",
+    "tookSubject": "You {how} “{title}”, also on {topic}",
+    "tookOrigin": "You {how} “{title}” from {src} before",
+    "how": {
+      "like": "liked",
+      "open": "opened",
+      "play": "watched or read"
+    },
+    "said": "{name}: {words}",
+    "what": "{topic} from {src}",
+    "whatAbout": "{src} ({about})",
+    "kinds": {
+      "video": "video",
+      "page": "article",
+      "text": "article"
+    },
+    "try": "A deliberate try outside your usual: {what}",
+    "tryFirst": "A deliberate try outside your usual: {what}, a kind you have not opened before",
+    "firstRun": "A sample for the first run, before any reading history: {what}",
+    "empty": "No reading history to go on yet, so a recent find: {what}",
+    "new": "Nothing in your reading points here yet, so a recent find: {what}"
+  },
   "modelbar": {
     "open": "Model and thinking",
     "thinking": "Thinking",
@@ -813,6 +848,7 @@
     "wonderPlaceholder": "What should it look into? A few words",
     "wonderQueued": "Today's walks are used up. Noted {what}; it looks on tomorrow's first walk.",
     "wonderGone": "Gone to look into {what}. The result comes here.",
+    "wonderOff": "Walks are off. Noted {what}; it looks once walks are turned on.",
     "walkWhy": {
       "walks_off": "Going out is off; turn it on in Settings",
       "no_browser": "Needs Edge or Chrome",

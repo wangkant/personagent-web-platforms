@@ -291,8 +291,9 @@ def mount(app, workspace, body) -> None:
 
     @app.post("/api/compose/wonder")
     async def compose_wonder(request: Request):
-        """Words to look up now: queued for the walk the loop sends out at once, or, with today's walks
-        all taken, the first walk of tomorrow (`later`)."""
+        """Words to look up: queued for the walk the loop sends out at once. `held` is why that walk cannot leave
+        now (roam's reason, "" when it can): right after the one out, with today's walks all taken the first walk
+        of tomorrow (`later`), with walks off once they are turned on."""
         words = (await body(request)).get("words")
         walker = roam()
         if not isinstance(words, str) or not words.strip():
@@ -300,7 +301,8 @@ def mount(app, workspace, body) -> None:
         if walker is None:
             raise ValueError("compose_unavailable")
         words = today.wonder(walker.library.root.parent, words, time.time(), asked=True)
-        return {"words": words, "later": walker.request() == LIMIT}
+        held = walker.request()
+        return {"words": words, "later": held == LIMIT, "held": held}
 
     @app.post("/api/compose/recommend")
     async def compose_recommend(request: Request):

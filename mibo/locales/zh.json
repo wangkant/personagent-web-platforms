@@ -566,6 +566,41 @@
       "周六"
     ]
   },
+  "reasons": {
+    "chip": {
+      "picked": "你选择的主题：{name}",
+      "said": "你提到过：{name}",
+      "subject": "你常看：{name}",
+      "often": "你常打开：{name}",
+      "opened": "你打开过：{name}",
+      "about": "主题：{name}",
+      "new": "新发现",
+      "from": "来源：{name}"
+    },
+    "browsed": "你在内置浏览器中自行打开了此页（{site}）",
+    "topic": "符合你选择的主题「{name}」，来自{src}",
+    "like": "与你表示喜欢的「{name}」相关，来自{src}",
+    "tookSubject": "你{how}过同属「{topic}」主题的《{title}》",
+    "tookOrigin": "你此前{how}过{src}的《{title}》",
+    "how": {
+      "like": "喜欢",
+      "open": "打开",
+      "play": "看完"
+    },
+    "said": "{name}的推荐理由：{words}",
+    "what": "{src}的「{topic}」内容",
+    "whatAbout": "{src}（{about}）",
+    "kinds": {
+      "video": "视频",
+      "page": "文章",
+      "text": "文章"
+    },
+    "try": "有意尝试的新方向：{what}",
+    "tryFirst": "有意尝试的新方向：{what}，此类内容你此前未打开过",
+    "firstRun": "首次使用时的示例推荐，尚无阅读记录：{what}",
+    "empty": "尚无阅读记录可供参考，按新近程度推荐：{what}",
+    "new": "与你的阅读记录暂无关联，按新近程度推荐：{what}"
+  },
   "modelbar": {
     "open": "模型与思考强度",
     "thinking": "思考强度",
@@ -823,6 +858,7 @@
     "wonderPlaceholder": "输入希望浏览的主题",
     "wonderQueued": "今日外出次数已用完，已记录：{what}。明天首次外出时查看。",
     "wonderGone": "已外出查看：{what}。完成后在此告知结果。",
+    "wonderOff": "外出已关闭，已记录：{what}。开启外出后查看。",
     "walkWhy": {
       "walks_off": "外出已关闭，可在设置中开启",
       "no_browser": "未找到 Edge 或 Chrome 浏览器",

@@ -35,7 +35,7 @@ import time
 from collections import Counter
 from typing import Optional
 
-from . import drafting, life, profile, quiet, subjects
+from . import drafting, i18n, life, profile, quiet, subjects
 from .library import DISMISSED, Item, Library
 from .roam import _manner, fence_pages, knowing
 from .textproc import _UNTRUSTED_INPUT_RULES, _fence_user_data, salvage_json_object, strip_json_fences
@@ -246,16 +246,7 @@ def parse(answer: str, rows: list, lang: str, found: Optional[dict] = None) -> O
 
 # ------------------------------------------------------------ why this one
 
-# The chip under a card's site, in the page's language (zh and en; the language pass adds the rest).
-WHY = {
-    "en": {"picked": "Because you picked {name}", "said": "Because you mentioned {name}",
-           "subject": "You often open {name}", "often": "You often open {name}",
-           "opened": "You opened {name} before", "about": "Topic: {name}", "new": "New find",
-           "from": "From {name}"},
-    "zh": {"picked": "你选择的主题：{name}", "said": "你提到过：{name}", "subject": "你常看：{name}",
-           "often": "你常打开：{name}", "opened": "你打开过：{name}", "about": "主题：{name}", "new": "新发现",
-           "from": "来源：{name}"},
-}
+# The chip under a card's site and the sentence under a find in 推荐记录 are the catalogs' "reasons" (locales/).
 # A thing's words carry a subject when they name it OWN times (a word in the title counts twice) and twice
 # as often as any other. The word lists' plain reading (subjects.of) is wrong for about a quarter of the
 # things it puts under a ticked topic, too often to tell a person "a topic you picked"; this one was a
@@ -281,7 +272,7 @@ class Why:
         from . import taste
         self.reader = taste.Reader(runtime, topics, events)
         self.now, self.lang = now, lang
-        self.words = WHY["zh" if lang.startswith("zh") else "en"]
+        self.words = i18n.words("reasons", lang)["chip"]
         # The person's own spelling of each topic they ticked and each like they said.
         self.topics = {t.casefold(): t for t in topics}
         self.likes = {t.casefold(): t for t in profile.liked(runtime)}
@@ -349,7 +340,7 @@ class Why:
 
     def told(self, said: dict, item: Item, shaped: dict, name: str, title_of) -> str:
         """`facts` as the sentence the 推荐记录 list shows under a find; `title_of(id)` names an earlier find."""
-        words = REASONS["zh" if self.lang.startswith("zh") else "en"]
+        words = i18n.words("reasons", self.lang)
         zh = int(self.lang.startswith("zh"))
         known = self.reader.sources.get(item.source)
         source = known.name[zh] if known else shaped["site"].removeprefix("www.")
@@ -361,7 +352,7 @@ class Why:
             return words[kind].format(name=topic, src=source)
         if kind == "took":
             family, _, rest = said["on"].partition(":")
-            text = words["took_" + ("subj" if family == "subj" else "origin")]
+            text = words["tookSubject" if family == "subj" else "tookOrigin"]
             return text.format(how=words["how"][said["how"]], title=title_of(said["from"]),
                                topic=subjects.name(rest, self.lang), src=source)
         if kind == "said":
@@ -373,46 +364,14 @@ class Why:
         if own:
             what = words["what"].format(src=source, topic=subjects.name(own, self.lang))
         elif about:
-            what = words["what_about"].format(src=source, about=about)
+            what = words["whatAbout"].format(src=source, about=about)
         else:
             what = words["what"].format(src=source, topic=str((item.tags or [words["kinds"][shaped["kind"]]])[0]))
         if kind == "try":
-            return words["try_first" if said["first"] else "try"].format(what=what)
-        return words["first_run" if said["first_run"] else "empty" if said["empty"] else "new"].format(what=what)
+            return words["tryFirst" if said["first"] else "try"].format(what=what)
+        return words["firstRun" if said["first_run"] else "empty" if said["empty"] else "new"].format(what=what)
 
 
-# The sentence under each find in the 推荐记录 list, in the page's language (zh and en; the language pass adds the
-# rest). The character's own words (said) are its voice; the rest are the app's.
-REASONS = {
-    "en": {"browsed": "You opened this page yourself in the built-in browser ({site})",
-           "topic": "On {name}, a topic you picked; from {src}",
-           "like": "On {name}, which you said you like; from {src}",
-           "took_subj": "You {how} “{title}”, also on {topic}",
-           "took_origin": "You {how} “{title}” from {src} before",
-           "how": {"like": "liked", "open": "opened", "play": "watched or read"},
-           "said": "{name}: {words}",
-           "what": "{topic} from {src}", "what_about": "{src} ({about})",
-           "kinds": {"video": "video", "page": "article", "text": "article"},
-           "try": "A deliberate try outside your usual: {what}",
-           "try_first": "A deliberate try outside your usual: {what}, a kind you have not opened before",
-           "first_run": "A sample for the first run, before any reading history: {what}",
-           "empty": "No reading history to go on yet, so a recent find: {what}",
-           "new": "Nothing in your reading points here yet, so a recent find: {what}"},
-    "zh": {"browsed": "你在内置浏览器中自行打开了此页（{site}）",
-           "topic": "符合你选择的主题「{name}」，来自{src}",
-           "like": "与你表示喜欢的「{name}」相关，来自{src}",
-           "took_subj": "你{how}过同属「{topic}」主题的《{title}》",
-           "took_origin": "你此前{how}过{src}的《{title}》",
-           "how": {"like": "喜欢", "open": "打开", "play": "看完"},
-           "said": "{name}的推荐理由：{words}",
-           "what": "{src}的「{topic}」内容", "what_about": "{src}（{about}）",
-           "kinds": {"video": "视频", "page": "文章", "text": "文章"},
-           "try": "有意尝试的新方向：{what}",
-           "try_first": "有意尝试的新方向：{what}，此类内容你此前未打开过",
-           "first_run": "首次使用时的示例推荐，尚无阅读记录：{what}",
-           "empty": "尚无阅读记录可供参考，按新近程度推荐：{what}",
-           "new": "与你的阅读记录暂无关联，按新近程度推荐：{what}"},
-}
 # The character's words in a reason, at most this many characters.
 SAID_MAX = 160
 
@@ -476,19 +435,12 @@ def term_of(top: list, guess: bool) -> str:
 
 # ------------------------------------------------------------ from the chat
 
-# The finds the reply model is told the main chat shared lately.
-CHAT_FINDS_DAYS, CHAT_FINDS_MAX = 3, 5
-# What a person's words about a find were about.
-ABOUT = ("thing", "topic", "source", "kind", "length")
-# What a wish says of the form it wants; the rest of its words are what it is about.
-_SHORT = re.compile(r"短|简短|几分钟|short|quick|brief", re.I)
-_LONG = re.compile(r"长一点|长的|深入|long|in-depth", re.I)
-_TEXT = re.compile(r"文字|文章|图文|text|article|read", re.I)
-_VIDEO = re.compile(r"视频|video|watch", re.I)
-_CJK = re.compile(r"[㐀-鿿]")
-_FILLER = re.compile(r"一点|一些|有没有|还有|其他|别的|推荐|来个|来点|好看|有趣|好玩|有意思|教程|入门|新手|纪录片|讲|的|个|点|吗|呢|"
-                     r"\b(?:a|an|the|some|something|more|other|one|please|bit|of|about|how to|making|tutorials?|"
-                     r"guides?|beginners?|documentar(?:y|ies))\b", re.I)
+# The finds of a chat the reply model is told of: the last few it showed lately.
+CHAT_FINDS_DAYS, CHAT_FINDS_MAX = 3, 8
+# What bring_find lists for a wish: the best on the wish's own words, and the best by the person's taste.
+BY_WISH, BY_TASTE = 3, 5
+# What each field counts when the wish's words are matched: the title, the description, the site.
+WISH_FIELDS = (1.0, 0.6, 0.3)
 
 
 def _ago(seconds: float) -> str:
@@ -497,12 +449,13 @@ def _ago(seconds: float) -> str:
             else f"{minutes // 60} h ago" if minutes < 1440 else f"{minutes // 1440} days ago")
 
 
-def _size(item: Item, shaped: dict) -> str:
+def size(item: Item, shaped: dict) -> str:
+    """A find's length as the reply model reads it: a video's minutes, a text's size."""
     from . import taste
-    size = taste._length(item, shaped)
+    length = taste._length(item, shaped)
     if shaped["kind"] == "video" and item.length:
-        return f"{round(item.length / 60)} min" + (f" ({size})" if size else "")
-    return f"{size} text" if size else ""
+        return f"{round(item.length / 60)} min" + (f" ({length})" if length else "")
+    return f"{length} text" if length else ""
 
 
 def _did(mark: Optional[dict]) -> str:
@@ -515,94 +468,116 @@ def _did(mark: Optional[dict]) -> str:
     return "they opened it" if mark["open"] or mark["play"] else "no reaction yet"
 
 
-def chat_finds(runtime, now: float) -> str:
-    """The finds the main chat shared in the last CHAT_FINDS_DAYS, newest first, with what the person did
-    with each: what "this" or a quoted card means to the reply model. "" when there are none."""
+def chat_shown(runtime, conversation: str, now: float) -> list[tuple[str, list]]:
+    """The finds the page chat `conversation` showed in the last CHAT_FINDS_DAYS, newest first, at most
+    CHAT_FINDS_MAX, as (id, the feed's events for it): a card counts once its showing in a chat is on record."""
+    import json
+
+    from . import db
     from .panels import feed
-    events = feed.events(runtime)
-    marks = feed._marks(events)[0]
-    library = Library(runtime)
-    lines, named = [], set()
-    for at, ident, action, *rest in reversed(events):
-        if now - at > CHAT_FINDS_DAYS * 86400 or len(lines) >= CHAT_FINDS_MAX:
-            break
-        extra = rest[2] if len(rest) > 2 else {}
-        if action != "seen" or extra.get("s") != "chat" or ident in named:
+    bodies = db.at(runtime).read(
+        "SELECT m.body FROM page_messages m JOIN page_chats c ON c.id = m.chat "
+        "WHERE c.conversation = ? AND m.kind = 'message' ORDER BY m.seq DESC", (conversation,))
+    shown: list[tuple[str, list]] = []
+    for (body,) in bodies:
+        ident = str((json.loads(body).get("card") or {}).get("id") or "")
+        if not ident or any(ident == got for got, _ in shown):
             continue
-        named.add(ident)
+        events = feed.of(runtime, ident)
+        seen = next((e for e in events if e[2] == "seen" and (e[5] if len(e) > 5 else {}).get("s") == "chat"), None)
+        if seen is None:
+            continue
+        if now - seen[0] > CHAT_FINDS_DAYS * 86400 or len(shown) >= CHAT_FINDS_MAX:
+            break
+        shown.append((ident, events))
+    return shown
+
+
+def chat_finds(runtime, conversation: str, now: float, lang: str, name: str) -> str:
+    """The finds this chat showed lately (`chat_shown`), each with what the person did with it and why it was shown
+    (the reason its showing kept, in `lang`; `name` is the character's): what "this" or a quoted card means to the
+    reply model, and its answer to "why this one". "" when there are none."""
+    from .panels import feed
+    shown = chat_shown(runtime, conversation, now)
+    if not shown:
+        return ""
+    library = Library(runtime)
+    events = feed.events(runtime)
+    why = Why(runtime, feed.load_topics(runtime), events, now, lang)
+    marks = feed._marks(events)[0]
+
+    def title_of(ident: str) -> str:
+        found = library.get(ident)
+        return " ".join(found.title.split())[:60] if found else ""
+
+    lines = []
+    for ident, mine in shown:
         item = library.get(ident)
         shaped = feed.shape(item, {}) if item else None
-        if shaped:
-            facts = ", ".join(v for v in (shaped["kind"], _size(item, shaped)) if v)
-            lines.append(f"- id {ident} | {shaped['title'][:80]} | {shaped['site']} | {facts} | "
-                         f"shared {_ago(now - at)} | {_did(marks.get(ident))}")
+        if shaped is None:
+            continue
+        seen = next(e for e in mine if e[2] == "seen")
+        said = (seen[5] if len(seen) > 5 else {}).get("why")
+        reason = why.told(said, item, shaped, name, title_of) if said else ""
+        facts = ", ".join(v for v in (shaped["kind"], size(item, shaped)) if v)
+        lines.append(f"- id {ident} | {shaped['title'][:80]} | {shaped['site']} | {facts} | shown {_ago(now - seen[0])}"
+                     f" | {_did(marks.get(ident))}" + (f" | why shown: {reason}" if reason else ""))
     if not lines:
         return ""
-    return ("<finds_in_this_chat>\nWhat you shared in this chat lately, newest first. \"This\" or a quoted "
-            "card is one of these; the tools take its id. Asked for another one, call bring_find: never "
-            "recommend from <your_day> or memory yourself.\n" + fence_pages("\n".join(lines))
-            + "\n</finds_in_this_chat>")
+    return ("<finds_in_this_chat>\nThe finds you showed in this chat lately, newest first, with why each was shown: "
+            "asked why you brought one, that is the answer. \"This\" or a quoted card is one of these. Bring one up "
+            "only if they do.\n" + fence_pages("\n".join(lines)) + "\n</finds_in_this_chat>")
 
 
-def another(runtime, wish: str, avoid: list[dict], now: float) -> Optional[tuple[dict, Item]]:
-    """One find to bring into the chat now: unseen and not told, not like what the person turned down in
-    the way they said (`avoid`: {"id", "about"}) and, where there is a choice, not like the last find
-    brought; of the form `wish` names, those on what its other words name first. None when the library
-    has nothing of that form."""
-    from . import taste
+def matching(runtime, wish: str, avoid: list[dict], kind: str, length: str, now: float) -> list[tuple]:
+    """The finds a chat's bring_find lists for `wish`: unseen and not told from the last life.TELL_DAYS, never a page
+    read to answer a question, and none like what the person turned down in the way they said (`avoid`: {"id",
+    "about"}). The BY_WISH best by BM25 of the wish's words over title, description and site, then the BY_TASTE
+    best by the ranking, those of the `kind` ("video", "text") and `length` ("short", "long") asked for first;
+    each once, as (shaped, item, on the wish's words)."""
+    from . import ranking, taste
+    from .library import CHAT
     from .panels import feed
+    from .textproc import _focus_tokens
     events, topics = feed.events(runtime), feed.load_topics(runtime)
     library = Library(runtime)
-    wish = " ".join(str(wish or "").split())[:80]
-    kind = "video" if _VIDEO.search(wish) else "text" if _TEXT.search(wish) else ""
-    size = "short" if _SHORT.search(wish) else "long" if _LONG.search(wish) else ""
-    words = [w for w in _FILLER.sub(" ", _VIDEO.sub(" ", _TEXT.sub(" ", _LONG.sub(" ", _SHORT.sub(" ", wish)))))
-             .casefold().split() if len(w) > 1]
     veins = feed.Veins(topics)
-    hard, soft = [], []
-    last = veins.last(library, events)
-    if last:
-        soft.append(lambda s, i: not veins.same(veins.of(s, i), last))
+    keep = []
     for row in avoid:
         item = library.get(row["id"])
         shaped = feed.shape(item, {}) if item else None
         if shaped is None:
             continue
-        vein, video, length = veins.of(shaped, item), feed.is_video(item, shaped), taste._length(item, shaped)
-        about = row["about"]
+        vein, about = veins.of(shaped, item), row["about"]
         if about == "source":
-            hard.append(lambda s, i, vein=vein: veins.of(s, i)[0] != vein[0])
+            keep.append(lambda s, i, vein=vein: veins.of(s, i)[0] != vein[0])
+        elif about == "topic":
+            keep.append(lambda s, i, vein=vein: not vein[1] & veins.of(s, i)[1])
         elif about == "kind":
-            hard.append(lambda s, i, video=video: feed.is_video(i, s) != video)
+            keep.append(lambda s, i, video=feed.is_video(item, shaped): feed.is_video(i, s) != video)
         elif about == "length":
-            hard.append(lambda s, i, length=length: taste._length(i, s) != length)
+            was = taste._length(item, shaped)
+            keep.append(lambda s, i, was=was: taste._length(i, s) != was)
             # "Too long" wants a shorter one.
-            size = size or ("short" if length == "long" else "")
-        soft.append(lambda s, i, vein=vein: not veins.same(veins.of(s, i), vein))
-    if kind:
-        hard.append(lambda s, i: feed.is_video(i, s) == (kind == "video"))
-    if size:
-        hard.append(lambda s, i: taste._length(i, s) in (size, "mid" if size == "short" else size))
-    rows = [(s, i) for s, i in feed.ranked(library, events, now, topics, seed=int(now * 1000))
-            if not s["seen"] and not i.told and all(test(s, i) for test in hard)]
-    # On what the wish names first; a wish is free words, so a miss still leaves the rest. Chinese has no
-    # spaces, so a Chinese word is found when half its two-character pieces are ("做蛋糕" by "蛋糕", not
-    # "蛋糕制作" by "制作"); an English word from its start, so "cat" is not found in "education".
-    def found(word: str, text: str) -> bool:
-        if not _CJK.search(word):
-            return bool(re.search(r"\b" + re.escape(word), text))
-        pieces = [word[n:n + 2] for n in range(len(word) - 1)]
-        return 2 * sum(p in text for p in pieces) >= len(pieces)
+            length = length or ("short" if was == "long" else "")
+    rows = [(s, i) for s, i in feed.ranked(library, events, now, topics, seed=int(now * 1000),
+                                           since=now - life.TELL_DAYS * 86400)
+            if not s["seen"] and not i.told and i.via != CHAT and all(test(s, i) for test in keep)]
 
-    def on(row) -> bool:
-        text = " ".join((row[0]["title"], row[0]["text"], row[1].description)).casefold()
-        return any(found(w, text) for w in words)
-    rows.sort(key=lambda row: not on(row))
-    chosen = next((row for row in rows if all(test(*row) for test in soft)), rows[0] if rows else None)
-    if chosen is not None:
-        # Whether it is on what the wish names: the chat says a miss rather than pass it off (search.py).
-        chosen[0]["on_wish"] = not words or on(chosen)
-    return chosen
+    def off(row) -> int:
+        s, i = row
+        return ((bool(kind) and feed.is_video(i, s) != (kind == "video"))
+                + (bool(length) and taste._length(i, s) not in (length, "mid" if length == "short" else length)))
+
+    found = []
+    terms = ranking.plain_terms(_focus_tokens(wish, "zh"))
+    if terms and rows:
+        docs = [(s["title"].lower(), f"{i.description} {s['text']}".lower(), s["site"].lower()) for s, i in rows]
+        lexicon = ranking.Lexicon(terms, docs)
+        scored = sorted(((lexicon.score(doc, WISH_FIELDS), n) for n, doc in enumerate(docs)), key=lambda x: -x[0])
+        found = [(*rows[n], True) for score, n in scored[:BY_WISH] if score > 0]
+    taken = {row[1].id for row in found}
+    return found + [(s, i, False) for s, i in sorted(rows, key=off) if i.id not in taken][:BY_TASTE]
 
 
 class Chooser:

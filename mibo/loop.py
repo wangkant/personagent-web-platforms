@@ -135,8 +135,10 @@ class ChatLookups:
         self.trace: list[dict] = []
         # One entry a call: {"place", "mark", "line", "status": ok | error | stopped, "thumb"}.
         self.activity: list[dict] = []
-        # What the person said of finds this turn ({"id", "liked", "about", "words"}), and the find brought.
+        # What the person said of finds this turn ({"id", "liked", "about", "words"}), the finds bring_find listed
+        # ({id: Why chip}) and the find picked for the card.
         self.feedback: list[dict] = []
+        self.offered: dict[str, str] = {}
         self.bring = ""
         # The turn's model work, cancelled when the person stops the reply; the words it had said by then.
         self.work: asyncio.Future | None = None

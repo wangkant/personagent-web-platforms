@@ -554,6 +554,41 @@
     "today": "Aujourd'hui",
     "yesterday": "Hier"
   },
+  "reasons": {
+    "chip": {
+      "picked": "Parce que vous avez choisi {name}",
+      "said": "Parce que vous avez mentionné {name}",
+      "subject": "Vous ouvrez souvent {name}",
+      "often": "Vous ouvrez souvent {name}",
+      "opened": "Vous avez déjà ouvert {name}",
+      "about": "Sujet : {name}",
+      "new": "Nouvelle trouvaille",
+      "from": "Source : {name}"
+    },
+    "browsed": "Vous avez ouvert cette page vous-même dans le navigateur intégré ({site})",
+    "topic": "Sur {name}, un sujet que vous avez choisi ; source : {src}",
+    "like": "Sur {name}, que vous avez dit aimer ; source : {src}",
+    "tookSubject": "Vous avez {how} « {title} », également sur {topic}",
+    "tookOrigin": "Vous avez déjà {how} « {title} » de {src}",
+    "how": {
+      "like": "aimé",
+      "open": "ouvert",
+      "play": "regardé ou lu"
+    },
+    "said": "{name} : {words}",
+    "what": "{topic}, de {src}",
+    "whatAbout": "{src} ({about})",
+    "kinds": {
+      "video": "vidéo",
+      "page": "article",
+      "text": "article"
+    },
+    "try": "Un essai délibéré hors de vos habitudes : {what}",
+    "tryFirst": "Un essai délibéré hors de vos habitudes : {what}, un type de contenu que vous n'avez encore jamais ouvert",
+    "firstRun": "Un exemple pour le premier lancement, sans historique de lecture : {what}",
+    "empty": "Aucun historique de lecture pour l'instant, donc une trouvaille récente : {what}",
+    "new": "Rien dans votre historique de lecture ne mène encore ici, donc une trouvaille récente : {what}"
+  },
   "modelbar": {
     "open": "Modèle et réflexion",
     "thinking": "Réflexion",
@@ -813,6 +848,7 @@
     "wonderPlaceholder": "Que doit-il explorer ? Quelques mots",
     "wonderQueued": "Les balades du jour sont épuisées. {what} est noté ; il l'explorera lors de la première balade de demain.",
     "wonderGone": "Parti explorer {what}. Le résultat s'affichera ici.",
+    "wonderOff": "Les balades sont désactivées. {what} est noté ; il l'explorera dès que les balades seront activées.",
     "walkWhy": {
       "walks_off": "Les sorties sont désactivées ; activez-les dans Réglages",
       "no_browser": "Nécessite Edge ou Chrome",

@@ -554,6 +554,41 @@
     "today": "Hoje",
     "yesterday": "Ontem"
   },
+  "reasons": {
+    "chip": {
+      "picked": "Porque você escolheu {name}",
+      "said": "Porque você mencionou {name}",
+      "subject": "Você abre {name} com frequência",
+      "often": "Você abre {name} com frequência",
+      "opened": "Você já abriu {name}",
+      "about": "Tema: {name}",
+      "new": "Novidade",
+      "from": "De {name}"
+    },
+    "browsed": "Você mesmo abriu esta página no navegador integrado ({site})",
+    "topic": "Sobre {name}, um tema que você escolheu; de {src}",
+    "like": "Sobre {name}, que você disse que curte; de {src}",
+    "tookSubject": "Você {how} “{title}”, também sobre {topic}",
+    "tookOrigin": "Você já {how} “{title}” de {src}",
+    "how": {
+      "like": "curtiu",
+      "open": "abriu",
+      "play": "assistiu ou leu"
+    },
+    "said": "{name}: {words}",
+    "what": "{topic} de {src}",
+    "whatAbout": "{src} ({about})",
+    "kinds": {
+      "video": "vídeo",
+      "page": "artigo",
+      "text": "artigo"
+    },
+    "try": "Uma tentativa deliberada fora do seu habitual: {what}",
+    "tryFirst": "Uma tentativa deliberada fora do seu habitual: {what}, um tipo de conteúdo que você ainda não abriu",
+    "firstRun": "Um exemplo para o primeiro uso, ainda sem histórico de leitura: {what}",
+    "empty": "Ainda não há histórico de leitura, então uma descoberta recente: {what}",
+    "new": "Nada no seu histórico de leitura aponta para cá ainda, então uma descoberta recente: {what}"
+  },
   "modelbar": {
     "open": "Modelo e raciocínio",
     "thinking": "Raciocínio",
@@ -813,6 +848,7 @@
     "wonderPlaceholder": "O que ele deve pesquisar? Algumas palavras",
     "wonderQueued": "Os passeios de hoje se esgotaram. {what} foi anotado; ele vai pesquisar no primeiro passeio de amanhã.",
     "wonderGone": "Saiu para pesquisar {what}. O resultado aparecerá aqui.",
+    "wonderOff": "Os passeios estão desativados. {what} foi anotado; ele vai pesquisar quando os passeios forem ativados.",
     "walkWhy": {
       "walks_off": "Os passeios estão desativados; ative em Configurações",
       "no_browser": "Requer Edge ou Chrome",

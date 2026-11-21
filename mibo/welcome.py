@@ -999,7 +999,9 @@ class Workspace:
             item = self._library().get(ident) if ident else None
             if item is not None:
                 await asyncio.to_thread(self.pace.shown, "chat", item.id)
-                await asyncio.to_thread(feed.remember, runtime, item, "seen", surface="chat", rank=0)
+                # Why it was shown is what the reply said of it.
+                await asyncio.to_thread(feed.remember, runtime, item, "seen", surface="chat", rank=0,
+                                        line=str(entry.get("text") or ""))
                 await self.mark_item(item.id, "told")
         for said in (f for i in items for f in i.get("feedback") or [] if isinstance(f, dict)):
             item = self._library().get(str(said.get("id") or ""))

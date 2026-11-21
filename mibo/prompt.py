@@ -194,7 +194,9 @@ class PromptBuilder:
             elif "[image]" in _strip_web_desc(last_user):
                 blind_note = _UNSEEN_PICTURE_NOTE
         # A 无痕对话 tells the recommender nothing: no find is offered to react to there.
-        finds = "" if private else recommend.chat_finds(today.runtime_of(self), time.time())
+        finds = "" if private else recommend.chat_finds(
+            today.runtime_of(self), channels.dm_user(pkey).split(":", 1)[-1], time.time(),
+            getattr(self, "chat_lang", "") or "zh", self.persona_name)
         finds = f"{finds}\n\n" if finds else ""
         # The day says what they did with each find.
         day = f"{today.block(self, last_user, time.time())}\n\n"

@@ -548,6 +548,41 @@
     "today": "오늘",
     "yesterday": "어제"
   },
+  "reasons": {
+    "chip": {
+      "picked": "선택한 주제: {name}",
+      "said": "언급한 주제: {name}",
+      "subject": "자주 보는 주제: {name}",
+      "often": "자주 여는 사이트: {name}",
+      "opened": "이전에 연 사이트: {name}",
+      "about": "주제: {name}",
+      "new": "새 발견",
+      "from": "출처: {name}"
+    },
+    "browsed": "내장 브라우저에서 직접 연 페이지입니다({site})",
+    "topic": "선택한 주제 '{name}'에 해당합니다. 출처: {src}",
+    "like": "좋아한다고 밝힌 '{name}'와(과) 관련됩니다. 출처: {src}",
+    "tookSubject": "같은 '{topic}' 주제의 '{title}'을(를) {how} 적이 있습니다",
+    "tookOrigin": "이전에 {src}의 '{title}'을(를) {how} 적이 있습니다",
+    "how": {
+      "like": "좋아한",
+      "open": "연",
+      "play": "끝까지 본"
+    },
+    "said": "{name}의 추천 이유: {words}",
+    "what": "{src}의 '{topic}' 콘텐츠",
+    "whatAbout": "{src}({about})",
+    "kinds": {
+      "video": "동영상",
+      "page": "글",
+      "text": "글"
+    },
+    "try": "평소와 다른 분야를 의도적으로 추천: {what}",
+    "tryFirst": "평소와 다른 분야를 의도적으로 추천: {what}, 이전에 열어 본 적 없는 종류",
+    "firstRun": "첫 사용 시의 예시 추천이며 아직 읽은 기록이 없습니다: {what}",
+    "empty": "참고할 읽은 기록이 아직 없어 최신순으로 추천합니다: {what}",
+    "new": "읽은 기록과 아직 관련이 없어 최신순으로 추천합니다: {what}"
+  },
   "modelbar": {
     "open": "모델 및 생각",
     "thinking": "생각",
@@ -805,6 +840,7 @@
     "wonderPlaceholder": "무엇을 알아볼까요? 몇 단어로 입력하세요",
     "wonderQueued": "오늘의 외출 횟수를 모두 사용했습니다. {what}을(를) 기록했으며 내일 첫 외출 때 알아봅니다.",
     "wonderGone": "{what}을(를) 알아보러 나갔습니다. 결과는 여기에 표시됩니다.",
+    "wonderOff": "외출이 꺼져 있습니다. {what}을(를) 기록했으며 외출을 켜면 알아봅니다.",
     "walkWhy": {
       "walks_off": "외출이 꺼져 있습니다. 설정에서 켤 수 있습니다",
       "no_browser": "Edge 또는 Chrome이 필요합니다",

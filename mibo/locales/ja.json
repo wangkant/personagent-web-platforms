@@ -548,6 +548,41 @@
     "today": "今日",
     "yesterday": "昨日"
   },
+  "reasons": {
+    "chip": {
+      "picked": "選択したトピック：{name}",
+      "said": "言及したトピック：{name}",
+      "subject": "よく見るトピック：{name}",
+      "often": "よく開くサイト：{name}",
+      "opened": "以前に開いたサイト：{name}",
+      "about": "トピック：{name}",
+      "new": "新着",
+      "from": "提供元：{name}"
+    },
+    "browsed": "内蔵ブラウザーでご自身が開いたページです（{site}）",
+    "topic": "選択したトピック「{name}」に該当します。提供元：{src}",
+    "like": "好きだと伝えた「{name}」に関連します。提供元：{src}",
+    "tookSubject": "同じ「{topic}」のトピックの「{title}」を{how}ことがあります",
+    "tookOrigin": "以前に{src}の「{title}」を{how}ことがあります",
+    "how": {
+      "like": "気に入った",
+      "open": "開いた",
+      "play": "最後まで見た"
+    },
+    "said": "{name}の推薦理由：{words}",
+    "what": "{src}の「{topic}」に関する内容",
+    "whatAbout": "{src}（{about}）",
+    "kinds": {
+      "video": "動画",
+      "page": "記事",
+      "text": "記事"
+    },
+    "try": "普段とは異なる分野の意図的な提案：{what}",
+    "tryFirst": "普段とは異なる分野の意図的な提案：{what}（これまで開いたことのない種類）",
+    "firstRun": "初回利用時のサンプルです。閲覧履歴はまだありません：{what}",
+    "empty": "参考にできる閲覧履歴がまだないため、新着順の提案です：{what}",
+    "new": "閲覧履歴との関連がまだないため、新着順の提案です：{what}"
+  },
   "modelbar": {
     "open": "モデルと思考",
     "thinking": "思考",
@@ -805,6 +840,7 @@
     "wonderPlaceholder": "何を調べますか？数語で入力してください",
     "wonderQueued": "本日の外出回数の上限に達しました。{what} を記録しました。明日の最初の外出で調べます。",
     "wonderGone": "{what} を調べに行きました。結果はここに表示されます。",
+    "wonderOff": "外出はオフになっています。{what} を記録しました。外出をオンにすると調べます。",
     "walkWhy": {
       "walks_off": "外出はオフです。設定でオンにできます",
       "no_browser": "Edge または Chrome が必要です",

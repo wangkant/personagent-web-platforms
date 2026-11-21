@@ -554,6 +554,41 @@
     "today": "Hoy",
     "yesterday": "Ayer"
   },
+  "reasons": {
+    "chip": {
+      "picked": "Porque eligió {name}",
+      "said": "Porque mencionó {name}",
+      "subject": "Abre a menudo {name}",
+      "often": "Abre a menudo {name}",
+      "opened": "Ya abrió {name}",
+      "about": "Tema: {name}",
+      "new": "Nuevo hallazgo",
+      "from": "De {name}"
+    },
+    "browsed": "Abrió esta página usted mismo en el navegador integrado ({site})",
+    "topic": "Sobre {name}, un tema que eligió; de {src}",
+    "like": "Sobre {name}, que dijo que le gusta; de {src}",
+    "tookSubject": "Usted {how} «{title}», también sobre {topic}",
+    "tookOrigin": "Antes {how} «{title}» de {src}",
+    "how": {
+      "like": "marcó como Me gusta",
+      "open": "abrió",
+      "play": "vio o leyó"
+    },
+    "said": "{name}: {words}",
+    "what": "{topic} de {src}",
+    "whatAbout": "{src} ({about})",
+    "kinds": {
+      "video": "vídeo",
+      "page": "artículo",
+      "text": "artículo"
+    },
+    "try": "Una prueba deliberada fuera de lo habitual: {what}",
+    "tryFirst": "Una prueba deliberada fuera de lo habitual: {what}, un tipo de contenido que aún no ha abierto",
+    "firstRun": "Un ejemplo para el primer inicio, sin historial de lectura: {what}",
+    "empty": "Aún no hay historial de lectura, así que es un hallazgo reciente: {what}",
+    "new": "Nada en su historial de lectura apunta aquí todavía, así que es un hallazgo reciente: {what}"
+  },
   "modelbar": {
     "open": "Modelo y razonamiento",
     "thinking": "Razonamiento",
@@ -813,6 +848,7 @@
     "wonderPlaceholder": "¿Qué debería investigar? Unas pocas palabras",
     "wonderQueued": "Se han agotado los paseos de hoy. Se ha anotado {what}; lo investigará en el primer paseo de mañana.",
     "wonderGone": "Ha salido a investigar {what}. El resultado aparecerá aquí.",
+    "wonderOff": "Los paseos están desactivados. Se ha anotado {what}; lo investigará cuando se activen los paseos.",
     "walkWhy": {
       "walks_off": "Las salidas están desactivadas; actívelas en Ajustes",
       "no_browser": "Requiere Edge o Chrome",

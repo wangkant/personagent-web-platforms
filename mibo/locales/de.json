@@ -554,6 +554,41 @@
     "today": "Heute",
     "yesterday": "Gestern"
   },
+  "reasons": {
+    "chip": {
+      "picked": "Weil Sie {name} gewählt haben",
+      "said": "Weil Sie {name} erwähnt haben",
+      "subject": "Sie öffnen oft {name}",
+      "often": "Sie öffnen oft {name}",
+      "opened": "Sie haben {name} schon geöffnet",
+      "about": "Thema: {name}",
+      "new": "Neuer Fund",
+      "from": "Von {name}"
+    },
+    "browsed": "Sie haben diese Seite selbst im integrierten Browser geöffnet ({site})",
+    "topic": "Zu {name}, einem von Ihnen gewählten Thema; von {src}",
+    "like": "Zu {name}, das Sie nach eigener Angabe mögen; von {src}",
+    "tookSubject": "Sie haben „{title}“ {how}, ebenfalls zu {topic}",
+    "tookOrigin": "Sie haben „{title}“ von {src} bereits {how}",
+    "how": {
+      "like": "mit „Gefällt mir“ markiert",
+      "open": "geöffnet",
+      "play": "angesehen oder gelesen"
+    },
+    "said": "{name}: {words}",
+    "what": "{topic} von {src}",
+    "whatAbout": "{src} ({about})",
+    "kinds": {
+      "video": "Video",
+      "page": "Artikel",
+      "text": "Artikel"
+    },
+    "try": "Ein bewusster Versuch abseits Ihrer Gewohnheiten: {what}",
+    "tryFirst": "Ein bewusster Versuch abseits Ihrer Gewohnheiten: {what}, eine Art, die Sie bisher nicht geöffnet haben",
+    "firstRun": "Ein Beispiel für den ersten Start, noch ohne Leseverlauf: {what}",
+    "empty": "Noch kein Leseverlauf vorhanden, daher ein aktueller Fund: {what}",
+    "new": "Ihr Leseverlauf weist noch nicht hierher, daher ein aktueller Fund: {what}"
+  },
   "modelbar": {
     "open": "Modell und Denken",
     "thinking": "Denken",
@@ -813,6 +848,7 @@
     "wonderPlaceholder": "Was soll erkundet werden? Ein paar Wörter",
     "wonderQueued": "Die heutigen Streifzüge sind aufgebraucht. {what} ist notiert und wird beim ersten Streifzug morgen erkundet.",
     "wonderGone": "Unterwegs, um {what} zu erkunden. Das Ergebnis erscheint hier.",
+    "wonderOff": "Streifzüge sind ausgeschaltet. {what} ist notiert und wird erkundet, sobald Streifzüge eingeschaltet sind.",
     "walkWhy": {
       "walks_off": "Ausflüge sind aus; in den Einstellungen einschalten",
       "no_browser": "Erfordert Edge oder Chrome",

@@ -368,7 +368,10 @@ window.paPlus = (() => {
         paint();
         ctx
           .api("compose/wonder", { words: text })
-          .then((value) => env.flash(paI18n.t(value.later ? "plus.wonderQueued" : "plus.wonderGone", { what: value.words })))
+          .then((value) => {
+            const said = value.held === "walks_off" ? "plus.wonderOff" : value.later ? "plus.wonderQueued" : "plus.wonderGone";
+            env.flash(paI18n.t(said, { what: value.words }));
+          })
           .catch(() => env.flash(say("failed")));
         return true;
       },

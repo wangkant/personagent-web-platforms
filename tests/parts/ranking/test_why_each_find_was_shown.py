@@ -13,7 +13,7 @@ import pytest
 from harness.app import App, quiet_start
 from harness.clock import Clock
 from harness.finds import Shelf
-from mibo import db, recommend, subjects
+from mibo import db, i18n, recommend, subjects
 from mibo.panels import feed
 
 NOW = 1_800_000_000
@@ -67,8 +67,24 @@ def test_rows_shown_before_reasons_were_kept_each_say_what_and_where_when_nothin
             conn.execute("UPDATE feed_events SET extra = ? WHERE n = ?", (json.dumps(extra), n))
     listed = {card["id"]: card["reason"] for card in served.get("/api/feed").json()["items"]}
     assert set(listed) == {item.id for item in items} and len(set(listed.values())) == len(items), listed
-    words = recommend.REASONS["en"]
+    words = i18n.words("reasons", "en")
     for item in items:
         reason = listed[item.id]
         assert reason.startswith(words["empty"].partition("{")[0]) and item.site in reason, reason
     assert subjects.name("food", "en") in listed[clear.id], listed[clear.id]
+
+
+@pytest.mark.parametrize("lang", ["zh", "zh-TW", "ja", "ko", "de", "fr", "es", "pt-BR", "ru"])
+def test_the_reason_and_the_chip_are_written_in_the_persons_language(lang, tmp_path, monkeypatch):
+    shelf = Shelf(tmp_path / "runtime", Clock(monkeypatch, NOW), monkeypatch)
+    item = shelf.add("Harbour notes", site="harbour.example", text="Boats came and went.")
+    shelf.react(item, "seen")
+    said, shaped = shelf.events()[-1][5]["why"], feed.shape(item, {})
+
+    def told(code: str) -> tuple[str, str]:
+        why = recommend.Why(shelf.runtime, [], shelf.events(), NOW, code)
+        return why.told(said, item, shaped, "Mibo", lambda ident: ""), why.of(shaped, item)["why"]["text"]
+    reason, chip = told(lang)
+    words = i18n.words("reasons", lang)
+    assert reason.startswith(words[said["k"] if said["k"] != "new" else "empty"].partition("{")[0])
+    assert (reason, chip) != told("en") and "{" not in reason + chip

@@ -548,6 +548,41 @@
     "today": "今天",
     "yesterday": "昨天"
   },
+  "reasons": {
+    "chip": {
+      "picked": "你選擇的主題：{name}",
+      "said": "你提到過：{name}",
+      "subject": "你常看：{name}",
+      "often": "你常開啟：{name}",
+      "opened": "你開啟過：{name}",
+      "about": "主題：{name}",
+      "new": "新發現",
+      "from": "來源：{name}"
+    },
+    "browsed": "你在內建瀏覽器中自行開啟了此頁（{site}）",
+    "topic": "符合你選擇的主題「{name}」，來自{src}",
+    "like": "與你表示喜歡的「{name}」相關，來自{src}",
+    "tookSubject": "你{how}過同屬「{topic}」主題的《{title}》",
+    "tookOrigin": "你先前{how}過{src}的《{title}》",
+    "how": {
+      "like": "喜歡",
+      "open": "開啟",
+      "play": "看完"
+    },
+    "said": "{name}的推薦理由：{words}",
+    "what": "{src}的「{topic}」內容",
+    "whatAbout": "{src}（{about}）",
+    "kinds": {
+      "video": "影片",
+      "page": "文章",
+      "text": "文章"
+    },
+    "try": "刻意嘗試的新方向：{what}",
+    "tryFirst": "刻意嘗試的新方向：{what}，此類內容你先前未開啟過",
+    "firstRun": "首次使用時的範例推薦，尚無閱讀紀錄：{what}",
+    "empty": "尚無閱讀紀錄可供參考，依新近程度推薦：{what}",
+    "new": "與你的閱讀紀錄暫無關聯，依新近程度推薦：{what}"
+  },
   "modelbar": {
     "open": "模型與思考",
     "thinking": "思考",
@@ -805,6 +840,7 @@
     "wonderPlaceholder": "想讓它探索什麼？用幾個詞描述",
     "wonderQueued": "今日外出次數已用完，已記錄：{what}。明天首次外出時查看。",
     "wonderGone": "已外出查看：{what}。完成後在此告知結果。",
+    "wonderOff": "外出已關閉，已記錄：{what}。開啟外出後查看。",
     "walkWhy": {
       "walks_off": "外出已關閉，可在設定中開啟",
       "no_browser": "未找到 Edge 或 Chrome 瀏覽器",
